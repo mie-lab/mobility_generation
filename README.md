@@ -12,4 +12,12 @@ Preprocessing:
 
 Location generation:
 - DBSCAN algorithm parameter: epsilon=20, num_samples=2, agg_level="dataset". After generation 62673 locations
-- Location spatial binning: Use s2geometry to bin locations. Level 13. After binning 44106 locations covering Switzerland. The original 62673 locations are projected into 8964 binned locations. 
+- Location spatial binning: Use s2geometry to bin locations. Level 13. After binning 44106 locations covering Switzerland. The original 62673 locations are projected into 8964 binned locations. TODO:
+    - hierarchical s2 location generation.  
+
+Next location prediction. Trained model iteratively generate 50 locations for each test sequence. 
+- MHSA: Use previous 7 days, predict the next location. User split 6:2:2 according to time. TODO:
+    - compare mask performances 
+    - implement the input POI features 
+    - hyperparameeter search
+- Markov: Train user model with the (6+2) sequence. 

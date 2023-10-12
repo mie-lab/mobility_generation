@@ -46,7 +46,7 @@ def prepare_nn_dataset(source_file, temp_save_root):
 
 def _generate_temp_datasets(data, temp_save_root, dataset_type):
     """Generate the datasets and save to the disk."""
-    save_path = os.path.join(temp_save_root, "temp", f"{dataset_type}.pk")
+    save_path = os.path.join(temp_save_root, "temp", f"predict_{dataset_type}.pk")
     if not Path(save_path).is_file():
         valid_records = _get_valid_sequence(data)
 
@@ -117,6 +117,7 @@ def _get_valid_sequence(input_df):
             data_dict["start_min_X"] = hist["start_min"].values
             data_dict["weekday_X"] = hist["weekday"].values
             # data_dict["end_min_X"] = curr["end_min"].values
+            data_dict["duration_X"] = hist["duration"].values
 
             # the next location is the target
             data_dict["Y"] = int(row["location_id"])

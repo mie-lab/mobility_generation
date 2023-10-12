@@ -122,6 +122,7 @@ if __name__ == "__main__":
     # get dataloaders
     train_loader, val_loader, test_loader = get_dataloaders(config)
 
+    # neural networks
     # possibility to enable multiple runs
     result_ls = []
     for i in range(1):

@@ -32,6 +32,9 @@ class traj_dataset(torch.utils.data.Dataset):
         return_dict["time"] = torch.tensor(selected["start_min_X"] // 15)
         # [sequence_len]
         return_dict["weekday"] = torch.tensor(selected["weekday_X"], dtype=torch.int64)
+        # [sequence_len]
+        return_dict["duration"] = torch.tensor(selected["duration_X"] // 30, dtype=torch.long)
+
         return x, y, return_dict
 
 
@@ -86,9 +89,9 @@ def get_dataloaders(config):
         "pin_memory": True,
     }
 
-    dataset_train = traj_dataset(os.path.join(config.temp_save_root, "temp", "train.pk"))
-    dataset_val = traj_dataset(os.path.join(config.temp_save_root, "temp", "validation.pk"))
-    dataset_test = traj_dataset(os.path.join(config.temp_save_root, "temp", "test.pk"))
+    dataset_train = traj_dataset(os.path.join(config.temp_save_root, "temp", "predict_train.pk"))
+    dataset_val = traj_dataset(os.path.join(config.temp_save_root, "temp", "predict_validation.pk"))
+    dataset_test = traj_dataset(os.path.join(config.temp_save_root, "temp", "predict_test.pk"))
 
     train_loader = torch.utils.data.DataLoader(dataset_train, collate_fn=collate_fn, **kwds_train)
     val_loader = torch.utils.data.DataLoader(dataset_val, collate_fn=collate_fn, **kwds_val)

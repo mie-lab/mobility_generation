@@ -70,6 +70,12 @@ class AllEmbedding(nn.Module):
         if self.if_include_time:
             self.temporal_embedding = TemporalEmbedding(d_input, emb_info)
 
+        # duration is in minutes, possible duration for two days is 60 * 24 * 2 // 30
+        self.if_include_duration = config.if_embed_duration
+        if self.if_include_duration:
+            self.emb_duration = nn.Embedding(60 * 24 * 2 // 30, d_input)
+
+        # position encoder for transformer
         self.if_pos_encoder = if_pos_encoder
         if self.if_pos_encoder:
             self.pos_encoder = PositionalEncoding(d_input, dropout=0.1)
@@ -81,6 +87,9 @@ class AllEmbedding(nn.Module):
 
         if self.if_include_time:
             emb = emb + self.temporal_embedding(context_dict["time"], context_dict["weekday"])
+
+        if self.if_include_duration:
+            emb = emb + self.emb_duration(context_dict["duration"])
 
         if self.if_pos_encoder:
             return self.pos_encoder(emb * math.sqrt(self.d_input))
