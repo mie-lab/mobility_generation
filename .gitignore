@@ -1,5 +1,6 @@
 # Sensitive
 data/
+runs/
 paths.json
 
 # Byte-compiled / optimized / DLL files

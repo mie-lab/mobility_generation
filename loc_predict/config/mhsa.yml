@@ -1,0 +1,46 @@
+misc:
+  dataset: mobis
+  # 
+  if_embed_time: True
+
+  verbose: True
+  debug: False
+  batch_size: 256
+  print_step: 100
+  num_workers: 0
+  
+
+embedding:
+  base_emb_size: 64
+
+model:
+  networkName: mhsa
+  # only for mhsa
+  num_encoder_layers: 4
+  nhead: 8
+  dim_feedforward: 256
+  dropout: 0.1
+  fc_dropout: 0.1
+
+optimiser:
+  optimizer: Adam
+  max_epoch: 100
+  lr: 0.001
+  weight_decay: 0.000001
+  # lr: 0.01
+  # for Adam
+  beta1: 0.9
+  beta2: 0.999
+  # for SGD
+  momentum: 0.98
+  # for warmup
+  num_warmup_epochs: 2
+  num_training_epochs: 50
+  # for decay
+  patience: 3
+  lr_step_size: 1
+  lr_gamma: 0.1
+
+dataset:
+  temp_save_root: ./data
+  save_root: ./runs
