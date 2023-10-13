@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch.optim.lr_scheduler import StepLR
 from sklearn.metrics import f1_score
+from tqdm import tqdm
 
 import time
 
@@ -356,3 +357,54 @@ def single_test(config, model, data_loader, device):
         "rr": result_arr[4],
         "total": result_arr[5],
     }
+
+
+def generate(config, model, data_loader, device):
+    model.eval()
+    with torch.no_grad():
+        generated_ls = []
+        user_ls = []
+        for inputs in tqdm(data_loader):
+            x, _, x_dict = send_to_device(inputs, device, config)
+
+            len_before = x_dict["len"].detach().clone()
+            for _ in range(config.generate_len):
+                logits = model(x, x_dict, device)
+
+                # TODO: implement greedy, sample and beam search
+                top = torch.topk(logits, k=10, dim=-1)
+
+                p = torch.cumsum(top.values / top.values.sum(dim=-1, keepdim=True), dim=-1)
+
+                idx = torch.searchsorted(p, torch.rand([p.shape[0], 1]).to(device))
+                pred_loc = top.indices.gather(dim=1, index=idx)
+
+                # append to the end of sequence for next prediction
+                x = torch.stack(
+                    [
+                        torch.cat([xi[:x_leni], pred_loci, xi[x_leni:]])
+                        for xi, x_leni, pred_loci in zip(x.transpose(1, 0), x_dict["len"], pred_loc)
+                    ]
+                ).transpose(1, 0)
+                x_dict["len"] = x_dict["len"] + 1
+
+            len_after = x_dict["len"].detach().clone()
+            # collect the simulated sequences, first dim is the batch dim
+            generated_ls.append(
+                torch.stack(
+                    [
+                        xi[len_beforei:len_afteri]
+                        for xi, len_beforei, len_afteri in zip(x.transpose(1, 0), len_before, len_after)
+                    ]
+                )
+            )
+
+            user_ls.append(x_dict["user"])
+
+    generated_ls = torch.cat(generated_ls, dim=0).cpu().numpy().tolist()
+    user_arr = torch.cat(user_ls, dim=0).cpu().numpy()
+
+    if config.verbose:
+        print(len(generated_ls), user_arr.shape)
+
+    return generated_ls, user_arr

@@ -14,7 +14,7 @@ from easydict import EasyDict as edict
 
 from loc_predict.processing import prepare_nn_dataset
 from loc_predict.dataloader import get_dataloaders
-from loc_predict.utils import get_models, get_trained_nets, get_test_result, init_save_path
+from loc_predict.utils import get_models, get_trained_nets, get_test_result, init_save_path, get_generated_sequences
 
 
 def load_config(path):
@@ -122,21 +122,61 @@ if __name__ == "__main__":
     # get dataloaders
     train_loader, val_loader, test_loader = get_dataloaders(config)
 
-    # neural networks
-    # possibility to enable multiple runs
-    result_ls = []
-    for i in range(1):
-        # train, validate and test
-        log_dir = init_save_path(config)
-        # res_single contains the performance of validation and test of the current run
-        res_single = single_run(train_loader, val_loader, test_loader, config, device, log_dir)
-        result_ls.extend(res_single)
+    if "mhsa" in args.config:  # neural networks
+        if not config.use_pretrain:  # for training
+            # possibility to enable multiple runs
+            result_ls = []
+            for i in range(1):
+                # train, validate and test
+                log_dir = init_save_path(config)
+                # res_single contains the performance of validation and test of the current run
+                res_single = single_run(train_loader, val_loader, test_loader, config, device, log_dir)
+                result_ls.extend(res_single)
 
-    # save results
-    result_df = pd.DataFrame(result_ls)
-    train_type = "default"
-    filename = os.path.join(
-        config.save_root,
-        f"{config.dataset}_{config.networkName}_{train_type}_{str(int(datetime.datetime.now().timestamp()))}.csv",
-    )
-    result_df.to_csv(filename, index=False)
+            # save results
+            result_df = pd.DataFrame(result_ls)
+            train_type = "default"
+            filename = os.path.join(
+                config.save_root,
+                f"{config.dataset}_{config.networkName}_{train_type}_{str(int(datetime.datetime.now().timestamp()))}.csv",
+            )
+            result_df.to_csv(filename, index=False)
+        else:  # for generation
+            model = get_models(config, device)
+            model.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "checkpoint.pt")))
+
+            generated_df = get_generated_sequences(config, model, test_loader, device)
+
+            filename = os.path.join(
+                config.save_root,
+                f"{config.dataset}_{config.networkName}_generation_{str(int(datetime.datetime.now().timestamp()))}.csv",
+            )
+            generated_df.to_csv(filename, index=True)
+
+    elif "markov" in args.config:  # markov model
+        pass
+        # true_all_ls = []
+        # pred_all_ls = []
+        # total_parameter = 0
+        # for user in tqdm(train_data["user_id"].unique()):
+        #     # get the train and test sets for each user
+        #     curr_train = train_data.loc[train_data["user_id"] == user]
+        #     curr_test = test_data.loc[test_data["user_id"] == user]
+        #     # get the results
+        #     total_parameter += curr_train["location_id"].unique().shape[0] ** 2
+        #     true_ls, pred_ls = get_markov_res(curr_train, curr_test, n=n)
+        #     true_all_ls.extend(true_ls)
+        #     pred_all_ls.extend(pred_ls)
+
+        # print("Total parameters: {:d}".format(total_parameter))
+        # result = get_performance_measure(true_all_ls, pred_all_ls)
+
+        # print(result["correct@1"].sum() / result["total"].sum() * 100, result["recall"] * 100)
+        # print(result["correct@5"].sum() / result["total"].sum() * 100)
+        # print(result["correct@10"].sum() / result["total"].sum() * 100)
+        # print(result["rr"].sum() / result["total"].sum() * 100)
+        # print(result["f1"] * 100)
+        # print(result["ndcg"] * 100)
+
+    else:
+        raise AttributeError("Prediction method not implemented.")

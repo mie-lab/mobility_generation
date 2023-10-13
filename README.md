@@ -15,9 +15,41 @@ Location generation:
 - Location spatial binning: Use s2geometry to bin locations. Level 13. After binning 44106 locations covering Switzerland. The original 62673 locations are projected into 8964 binned locations. TODO:
     - hierarchical s2 location generation.  
 
-Next location prediction. Trained model iteratively generate 50 locations for each test sequence. 
-- MHSA: Use previous 7 days, predict the next location. User split 6:2:2 according to time. TODO:
-    - compare mask performances 
-    - implement the input POI features 
-    - hyperparameeter search
-- Markov: Train user model with the (6+2) sequence. 
+## Generation
+
+### With next location prediction neural networks. 
+
+Trained model iteratively generate 50 locations for each test sequence. User split 6:2:2 according to time.
+- MHSA: Use previous 7 days, predict the next location. TODO:
+    - hyper-parameter search
+    - implement beam search
+- Markov: Train user model with the (6+2) sequence (TODO:). 
+
+### With mechanistic individual models. 
+
+- DTEPR (TODO:)
+- TimeGeo (TODO:)
+- Container (TODO:)
+
+### With neural generative models.
+
+- (GAN)
+- (TrajGAN)
+- SeqGAN (TODO:)
+    - 
+- moveSim (TODO:)
+    - 
+- DiffSeq (TODO:)
+
+## Metrics (TODO:)
+
+- Travel distance
+- Radius of Gyration
+- Activity duration 
+- Daily visited locations
+- motifs distribution
+
+## TODO:
+- [ ] Generation with predictive models, implement beam search
+- [ ] Markov model
+- [ ] Implement classical generation model 

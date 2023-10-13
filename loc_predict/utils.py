@@ -1,10 +1,11 @@
 import os
 
 import pickle as pickle
+import pandas as pd
 import datetime
 import json
 
-from loc_predict.train import train_net, single_test, get_performance_dict
+from loc_predict.train import train_net, single_test, get_performance_dict, generate
 from loc_predict.models import TransEncoder, RNNs
 
 
@@ -48,3 +49,16 @@ def init_save_path(config):
         json.dump(config, fp, indent=4, sort_keys=True)
 
     return log_dir
+
+
+def get_generated_sequences(config, model, test_loader, device):
+    generated_ls, user_arr = generate(config, model, test_loader, device)
+
+    generated_df = pd.DataFrame([user_arr, generated_ls])
+    generated_df = generated_df.transpose()
+    generated_df.columns = ["user_id", "generated_ls"]
+
+    generated_df = generated_df.explode(column=["generated_ls"])
+    generated_df.index.name = "seq_id"
+
+    return generated_df
