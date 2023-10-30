@@ -364,6 +364,7 @@ def generate(config, model, data_loader, device):
     with torch.no_grad():
         generated_ls = []
         user_ls = []
+        count = 0
         for inputs in tqdm(data_loader):
             x, _, x_dict = send_to_device(inputs, device, config)
 
@@ -400,6 +401,10 @@ def generate(config, model, data_loader, device):
             )
 
             user_ls.append(x_dict["user"])
+
+            count = count + 1
+            if config.debug and count == 20:
+                break
 
     generated_ls = torch.cat(generated_ls, dim=0).cpu().numpy().tolist()
     user_arr = torch.cat(user_ls, dim=0).cpu().numpy()

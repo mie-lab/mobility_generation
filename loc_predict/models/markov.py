@@ -20,37 +20,62 @@ def markov_transition_prob(df, n=1):
     return locSequence.groupby(by=COLUMNS).size().to_frame("size").reset_index()
 
 
-def get_true_pred_pair(locSequence, df, n=1):
-    testSeries = df["location_id"].values
+def get_next_loc(transition_df, curr_loc, n=1):
+    numb_considered_history = n
 
-    true_ls = []
-    pred_ls = []
-    for i in range(testSeries.shape[0] - n):
-        locCurr = testSeries[i : i + n + 1]
-        numbLoc = n
+    # loop until finds a match
+    while True:
+        res_df = transition_df
+        for j in range(n - numb_considered_history, n):
+            res_df = res_df.loc[res_df[f"loc_{j+1}"] == curr_loc]
+        res_df = res_df.sort_values(by="size", ascending=False)
 
-        # loop until finds a match
-        while True:
-            res_df = locSequence
-            for j in range(n - numbLoc, n):
-                res_df = res_df.loc[res_df[f"loc_{j+1}"] == locCurr[j]]
-            res_df = res_df.sort_values(by="size", ascending=False)
+        if len(res_df):  # if the dataframe contains entry, stop finding
+            # choose the location which are visited most often for the matches
+            pred = res_df.head(3).sample(n=1, weights="size")["toLoc"].values[0]
+            break
+        # decrese the number of location history considered
+        numb_considered_history -= 1
+        if numb_considered_history == 0:
+            pred = (
+                transition_df.sort_values(by="size", ascending=False)
+                .head(3)
+                .sample(n=1, weights="size")["toLoc"]
+                .values[0]
+            )
+            break
+    return pred
 
-            if res_df.shape[0]:  # if the dataframe contains entry, stop finding
-                # choose the location which are visited most often for the matches
-                pred = res_df["toLoc"].drop_duplicates().values
-                break
-            # decrese the number of location history considered
-            numbLoc -= 1
-            if numbLoc == 0:
-                pred = np.zeros(10)
-                # pred = locSequence.sort_values(by="size", ascending=False)["toLoc"].drop_duplicates().values
-                break
 
-        true_ls.append(locCurr[-1])
-        pred_ls.append(pred)
+def generate_markov(config, groupby_transition, data_loader):
+    generated_ls = []
+    user_ls = []
+    count = 0
+    for inputs in tqdm(data_loader):
+        x, _, x_dict = inputs
 
-    return true_ls, pred_ls
+        next_loc = x[-1].cpu().numpy()[0]
+        generated_locs_arr = np.zeros(config.generate_len)
+
+        curr_transition = groupby_transition.get_group(x_dict["user"].cpu().numpy()[0])
+
+        for i in range(config.generate_len):
+            next_loc = get_next_loc(transition_df=curr_transition, curr_loc=next_loc, n=config.n_dependence)
+
+            generated_locs_arr[i] = next_loc
+
+        generated_ls.append(generated_locs_arr)
+        user_ls.append(x_dict["user"].cpu().numpy()[0])
+        count = count + 1
+        if config.debug and count == 20:
+            break
+
+    user_arr = np.array(user_ls)
+
+    if config.verbose:
+        print(len(generated_ls), user_arr.shape)
+
+    return generated_ls, user_arr
 
 
 def get_performance_measure(true_ls, pred_ls):
@@ -104,10 +129,12 @@ def get_performance_measure(true_ls, pred_ls):
     return pd.Series(res, index=["total", "correct@1", "correct@5", "correct@10", "f1", "recall", "ndcg", "rr"])
 
 
-def get_markov_res(train, test, n=2):
+def get_markov_res(train, n=2):
     locSeq_df = markov_transition_prob(train, n=n)
+
+    print(locSeq_df.sort_values(by="size", ascending=False).head(10))
 
     # true_ls, pred_ls = get_true_pred_pair(locSeq_df, test, n=n)
 
     # print(locSeq)
-    return get_true_pred_pair(locSeq_df, test, n=n)
+    # return get_true_pred_pair(locSeq_df, test, n=n)

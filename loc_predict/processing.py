@@ -10,6 +10,20 @@ from sklearn.preprocessing import OrdinalEncoder
 
 
 def prepare_nn_dataset(source_file, temp_save_root):
+    train_data, vali_data, test_data = _split_train_test(source_file)
+
+    print(
+        f"Max location id:{train_data.location_id.max()}, unique location id:{train_data.location_id.unique().shape[0]}"
+    )
+
+    _generate_temp_datasets(train_data, temp_save_root, "train")
+    _generate_temp_datasets(vali_data, temp_save_root, "validation")
+    _generate_temp_datasets(test_data, temp_save_root, "test")
+
+    return train_data.location_id.max(), train_data.user_id.max()
+
+
+def _split_train_test(source_file):
     source_file.sort_values(by=["user_id", "start_day", "start_min"], inplace=True)
 
     # encoder user, 0 reserved for padding
@@ -33,15 +47,7 @@ def prepare_nn_dataset(source_file, temp_save_root):
     vali_data["location_id"] = enc.transform(vali_data["location_id"].values.reshape(-1, 1)) + 2
     test_data["location_id"] = enc.transform(test_data["location_id"].values.reshape(-1, 1)) + 2
 
-    print(
-        f"Max location id:{train_data.location_id.max()}, unique location id:{train_data.location_id.unique().shape[0]}"
-    )
-
-    _generate_temp_datasets(train_data, temp_save_root, "train")
-    _generate_temp_datasets(vali_data, temp_save_root, "validation")
-    _generate_temp_datasets(test_data, temp_save_root, "test")
-
-    return train_data.location_id.max(), train_data.user_id.max()
+    return train_data, vali_data, test_data
 
 
 def _generate_temp_datasets(data, temp_save_root, dataset_type):

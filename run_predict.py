@@ -11,10 +11,13 @@ import datetime
 import yaml
 
 from easydict import EasyDict as edict
+from tqdm import tqdm
 
-from loc_predict.processing import prepare_nn_dataset
+from loc_predict.processing import prepare_nn_dataset, _split_train_test
 from loc_predict.dataloader import get_dataloaders
 from loc_predict.utils import get_models, get_trained_nets, get_test_result, init_save_path, get_generated_sequences
+
+from loc_predict.models.markov import markov_transition_prob, get_next_loc
 
 
 def load_config(path):
@@ -99,7 +102,7 @@ if __name__ == "__main__":
         type=str,
         nargs="?",
         help="Path to the config file.",
-        default="./loc_predict/config/mhsa.yml",
+        default="./loc_predict/config/markov.yml",
     )
     args = parser.parse_args()
 
@@ -154,29 +157,23 @@ if __name__ == "__main__":
             generated_df.to_csv(filename, index=True)
 
     elif "markov" in args.config:  # markov model
-        pass
-        # true_all_ls = []
-        # pred_all_ls = []
-        # total_parameter = 0
-        # for user in tqdm(train_data["user_id"].unique()):
-        #     # get the train and test sets for each user
-        #     curr_train = train_data.loc[train_data["user_id"] == user]
-        #     curr_test = test_data.loc[test_data["user_id"] == user]
-        #     # get the results
-        #     total_parameter += curr_train["location_id"].unique().shape[0] ** 2
-        #     true_ls, pred_ls = get_markov_res(curr_train, curr_test, n=n)
-        #     true_all_ls.extend(true_ls)
-        #     pred_all_ls.extend(pred_ls)
+        train_data, vali_data, test_data = _split_train_test(sp)
 
-        # print("Total parameters: {:d}".format(total_parameter))
-        # result = get_performance_measure(true_all_ls, pred_all_ls)
+        # construct markov matrix based on train and validation dataset
+        train_vali_data = pd.concat([train_data, vali_data])
 
-        # print(result["correct@1"].sum() / result["total"].sum() * 100, result["recall"] * 100)
-        # print(result["correct@5"].sum() / result["total"].sum() * 100)
-        # print(result["correct@10"].sum() / result["total"].sum() * 100)
-        # print(result["rr"].sum() / result["total"].sum() * 100)
-        # print(result["f1"] * 100)
-        # print(result["ndcg"] * 100)
+        transition_df = (
+            train_vali_data.groupby(["user_id"]).apply(markov_transition_prob, n=config.n_dependence).reset_index()
+        )
+
+        groupby_transition = transition_df.groupby("user_id")
+
+        generated_df = get_generated_sequences(config, groupby_transition, test_loader)
+        filename = os.path.join(
+            config.save_root,
+            f"{config.dataset}_{config.networkName}_generation_{str(int(datetime.datetime.now().timestamp()))}.csv",
+        )
+        generated_df.to_csv(filename, index=True)
 
     else:
         raise AttributeError("Prediction method not implemented.")

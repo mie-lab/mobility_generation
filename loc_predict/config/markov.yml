@@ -2,12 +2,15 @@ misc:
   dataset: mobis
 
   verbose: True
-  batch_size: 256
+  batch_size: 1
   num_workers: 0
+  generate_len: 50
+  debug: False
+  verbose: True
 
 model:
   networkName: markov
-  n_dependece: 1
+  n_dependence: 1
 
 dataset:
   temp_save_root: ./data

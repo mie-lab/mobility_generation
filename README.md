@@ -23,7 +23,7 @@ Trained model iteratively generate 50 locations for each test sequence. User spl
 - MHSA: Use previous 7 days, predict the next location. TODO:
     - hyper-parameter search
     - implement beam search
-- Markov: Train user model with the (6+2) sequence (TODO:). 
+- Markov: Train user model with train and validation (6+2) sequence. Each next location is sampled from the top3 most likely locations according to the markov transition matrix. If no prior knowledge, next location sampled from the top3 most visited locations.
 
 ### With mechanistic individual models. 
 
@@ -51,5 +51,4 @@ Trained model iteratively generate 50 locations for each test sequence. User spl
 
 ## TODO:
 - [ ] Generation with predictive models, implement beam search
-- [ ] Markov model
 - [ ] Implement classical generation model 

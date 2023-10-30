@@ -10,7 +10,7 @@ misc:
   if_embed_duration: False
 
   verbose: True
-  debug: False
+  debug: True
   batch_size: 256
   print_step: 100
   num_workers: 0
