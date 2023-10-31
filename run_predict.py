@@ -11,13 +11,12 @@ import datetime
 import yaml
 
 from easydict import EasyDict as edict
-from tqdm import tqdm
 
 from loc_predict.processing import prepare_nn_dataset, _split_train_test
 from loc_predict.dataloader import get_dataloaders
 from loc_predict.utils import get_models, get_trained_nets, get_test_result, init_save_path, get_generated_sequences
-
-from loc_predict.models.markov import markov_transition_prob, get_next_loc
+from loc_predict.models.markov import markov_transition_prob
+from utils.utils import load_data
 
 
 def load_config(path):
@@ -68,30 +67,6 @@ def single_run(train_loader, val_loader, test_loader, config, device, log_dir):
     return result_ls
 
 
-def load_data(sp, loc):
-    sp = sp.merge(loc.reset_index().drop(columns={"user_id"}), how="left", left_on="location_id", right_on="id")
-    sp = sp.drop(columns={"location_id", "id", "center", "extent"})
-    sp = sp.rename(columns={"s2_id": "location_id"})
-
-    sp.index.name = "id"
-    sp.reset_index(inplace=True)
-
-    sp["started_at"] = pd.to_datetime(sp["started_at"], format="mixed", yearfirst=True, utc=True).dt.tz_localize(None)
-    sp["finished_at"] = pd.to_datetime(sp["finished_at"], format="mixed", yearfirst=True, utc=True).dt.tz_localize(None)
-
-    def _get_time_info(df):
-        min_day = pd.to_datetime(df["started_at"].min().date())
-
-        df["start_day"] = (df["started_at"] - min_day).dt.days
-        df["start_min"] = df["started_at"].dt.hour * 60 + df["started_at"].dt.minute
-        df["weekday"] = df["started_at"].dt.weekday
-        df["duration"] = (df["duration"] * 60).round()
-        return df
-
-    sp = sp.groupby("user_id", group_keys=False).apply(_get_time_info)
-    return sp
-
-
 if __name__ == "__main__":
     setup_seed(0)
 
@@ -102,7 +77,7 @@ if __name__ == "__main__":
         type=str,
         nargs="?",
         help="Path to the config file.",
-        default="./loc_predict/config/markov.yml",
+        default="./loc_predict/config/mhsa.yml",
     )
     args = parser.parse_args()
 

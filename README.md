@@ -12,7 +12,7 @@ Preprocessing:
 
 Location generation:
 - DBSCAN algorithm parameter: epsilon=20, num_samples=2, agg_level="dataset". After generation 62673 locations
-- Location spatial binning: Use s2geometry to bin locations. Level 13. After binning 44106 locations covering Switzerland. The original 62673 locations are projected into 8964 binned locations. TODO:
+- Location spatial binning: Use s2geometry to bin locations. Level 14. After binning 174434 locations covering Switzerland. The original 62673 locations are projected into 15841 binned locations. TODO:
     - hierarchical s2 location generation.  
 
 ## Generation
@@ -20,10 +20,11 @@ Location generation:
 ### With next location prediction neural networks. 
 
 Trained model iteratively generate 50 locations for each test sequence. User split 6:2:2 according to time.
-- MHSA: Use previous 7 days, predict the next location. TODO:
-    - hyper-parameter search
-    - implement beam search
-- Markov: Train user model with train and validation (6+2) sequence. Each next location is sampled from the top3 most likely locations according to the markov transition matrix. If no prior knowledge, next location sampled from the top3 most visited locations.
+- MHSA: Use previous 7 days, predict the next location. 
+    - num_encoder_layers: 2; nhead: 4; dim_feedforward: 128; fc_dropout: 0.1 (parameter 2065394): validation loss 2.86, accuracy 42.74%
+    - (TODO:) hyper-parameter search
+    - (TODO:) implement beam search
+- Markov: Train user model with train and validation (6+2) sequence. Each next location is sampled from the top3 most likely locations according to the markov transition matrix. If no prior knowledge, next location sampled from the top3 overall most visited locations.
 
 ### With mechanistic individual models. 
 
@@ -41,9 +42,9 @@ Trained model iteratively generate 50 locations for each test sequence. User spl
     - 
 - DiffSeq (TODO:)
 
-## Metrics (TODO:)
+## Metrics
 
-- Travel distance
+- (TODO:) Travel distance 
 - Radius of Gyration
 - Activity duration 
 - Daily visited locations

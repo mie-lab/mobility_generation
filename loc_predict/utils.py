@@ -9,6 +9,7 @@ from loc_predict.train import train_net, single_test, get_performance_dict, gene
 from loc_predict.models import TransEncoder, RNNs
 from loc_predict.models.markov import generate_markov
 
+
 def get_trained_nets(config, model, train_loader, val_loader, device, log_dir):
     best_model, perf = train_net(config, model, train_loader, val_loader, device, log_dir=log_dir)
     perf["type"] = "vali"
@@ -52,7 +53,7 @@ def init_save_path(config):
 
 
 def get_generated_sequences(config, model, test_loader, device=None):
-    if config.networkName == "mhsa" :
+    if config.networkName == "mhsa":
         generated_ls, user_arr = generate(config, model, test_loader, device)
     else:
         generated_ls, user_arr = generate_markov(config, model, test_loader)

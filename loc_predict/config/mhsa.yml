@@ -2,7 +2,7 @@ misc:
   dataset: mobis
 
   use_pretrain: True
-  pretrain_filepath: mobis_mhsa_1697145528
+  pretrain_filepath: mobis_mhsa_1698746890
   generate_len: 50
   # 
   if_embed_time: False
@@ -10,7 +10,7 @@ misc:
   if_embed_duration: False
 
   verbose: True
-  debug: True
+  debug: False
   batch_size: 256
   print_step: 100
   num_workers: 0
