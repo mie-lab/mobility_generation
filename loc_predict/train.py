@@ -9,7 +9,7 @@ import time
 
 from transformers import get_linear_schedule_with_warmup
 
-from loc_predict.earlystopping import EarlyStopping
+from utils.earlystopping import EarlyStopping
 
 
 def get_performance_dict(return_dict):

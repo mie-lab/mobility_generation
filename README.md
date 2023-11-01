@@ -21,7 +21,7 @@ Location generation:
 
 Trained model iteratively generate 50 locations for each test sequence. User split 6:2:2 according to time.
 - MHSA: Use previous 7 days, predict the next location. 
-    - num_encoder_layers: 2; nhead: 4; dim_feedforward: 128; fc_dropout: 0.1 (parameter 2065394): validation loss 2.86, accuracy 42.74%
+    - num_encoder_layers: 2; nhead: 4; dim_feedforward: 128; fc_dropout: 0.1 (parameter 2065394): validation loss 2.86, accuracy 42.74% (TOTEST)
     - (TODO:) hyper-parameter search
     - (TODO:) implement beam search
 - Markov: Train user model with train and validation (6+2) sequence. Each next location is sampled from the top3 most likely locations according to the markov transition matrix. If no prior knowledge, next location sampled from the top3 overall most visited locations.
@@ -33,13 +33,14 @@ Trained model iteratively generate 50 locations for each test sequence. User spl
 - Container (TODO:)
 
 ### With neural generative models.
+Use 4 weeks as input (TODO: Tune weeks)
 
-- (GAN)
-- (TrajGAN)
 - SeqGAN (TODO:)
     - 
 - moveSim (TODO:)
-    - 
+    - implement
+- VOLUNTEER (TODO:)
+    - implement
 - DiffSeq (TODO:)
 
 ## Metrics
@@ -53,3 +54,4 @@ Trained model iteratively generate 50 locations for each test sequence. User spl
 ## TODO:
 - [ ] Generation with predictive models, implement beam search
 - [ ] Implement classical generation model 
+- definition of locations: activity duration or transit duration or their sum?
