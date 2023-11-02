@@ -1,6 +1,4 @@
 import argparse
-import numpy as np
-import random
 
 import torch
 import os
@@ -8,44 +6,12 @@ import os
 import pandas as pd
 import datetime
 
-import yaml
-
 from easydict import EasyDict as edict
 
-from loc_predict.dataloader import get_dataloaders, _get_train_test
+from utils.dataloader import get_dataloaders, _get_train_test
 from loc_predict.utils import get_models, get_trained_nets, get_test_result, init_save_path, get_generated_sequences
 from loc_predict.models.markov import markov_transition_prob
-from utils.utils import load_data
-
-
-def load_config(path):
-    """
-    Loads config file
-    Args:
-        path (str): path to the config file
-    Returns:
-        config (dict): dictionary of the configuration parameters, merge sub_dicts
-    """
-    with open(path, "r") as f:
-        cfg = yaml.safe_load(f)
-
-    config = dict()
-    for _, value in cfg.items():
-        for k, v in value.items():
-            config[k] = v
-
-    return config
-
-
-def setup_seed(seed):
-    """
-    fix random seed for deterministic training
-    """
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.backends.cudnn.deterministic = True
+from utils.utils import load_data, setup_seed, load_config
 
 
 def single_run(train_loader, val_loader, test_loader, config, device, log_dir):
@@ -85,7 +51,7 @@ if __name__ == "__main__":
     config = edict(config)
 
     # read and preprocess
-    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp.csv"), index_col="id")
+    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp_small.csv"), index_col="id")
     loc = pd.read_csv(os.path.join(config.temp_save_root, "locs_s2.csv"), index_col="id")
     sp = load_data(sp, loc)
 

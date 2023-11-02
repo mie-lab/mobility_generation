@@ -1,4 +1,9 @@
+import torch
+import numpy as np
 import pandas as pd
+
+import yaml
+import random
 
 
 def load_data(sp, loc):
@@ -23,3 +28,33 @@ def load_data(sp, loc):
 
     sp = sp.groupby("user_id", group_keys=False).apply(_get_time_info)
     return sp
+
+
+def setup_seed(seed):
+    """
+    fix random seed for deterministic training
+    """
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+
+def load_config(path):
+    """
+    Loads config file
+    Args:
+        path (str): path to the config file
+    Returns:
+        config (dict): dictionary of the configuration parameters, merge sub_dicts
+    """
+    with open(path, "r") as f:
+        cfg = yaml.safe_load(f)
+
+    config = dict()
+    for _, value in cfg.items():
+        for k, v in value.items():
+            config[k] = v
+
+    return config

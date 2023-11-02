@@ -16,12 +16,12 @@ import trackintel as ti
 
 
 class traj_dataset(torch.utils.data.Dataset):
-    def __init__(self, input_data):
+    def __init__(self, input_data, print_progress=True):
         # reindex the df for efficient selection
         input_data["id"] = np.arange(len(input_data))
         self.data = input_data
 
-        self.valid_start_end_idx = _get_valid_sequence(input_data)
+        self.valid_start_end_idx = _get_valid_sequence(input_data, print_progress)
         self.len = len(self.valid_start_end_idx)
 
     def __len__(self):
@@ -90,9 +90,9 @@ def get_dataloaders(sp, config):
         f"Max location id:{train_data.location_id.max()}, unique location id:{train_data.location_id.unique().shape[0]}"
     )
 
-    dataset_train = traj_dataset(train_data)
-    dataset_val = traj_dataset(vali_data)
-    dataset_test = traj_dataset(test_data)
+    dataset_train = traj_dataset(train_data, print_progress=config.verbose)
+    dataset_val = traj_dataset(vali_data, print_progress=config.verbose)
+    dataset_test = traj_dataset(test_data, print_progress=config.verbose)
 
     kwds_train = {
         "shuffle": True,
@@ -132,6 +132,7 @@ def _get_train_test(sp):
     sp["user_id"] = enc.fit_transform(sp["user_id"].values.reshape(-1, 1)) + 1
 
     # truncate too long duration, >2 days to 2 days
+    sp["duration"] = sp["duration"] / 60
     sp.loc[sp["duration"] > 60 * 24 * 2 - 1, "duration"] = 60 * 24 * 2 - 1
 
     # split the datasets, user dependent 0.6, 0.2, 0.2
@@ -183,7 +184,7 @@ def _split_dataset(totalData):
     return train_data, vali_data, test_data
 
 
-def _get_valid_sequence(input_df):
+def _get_valid_sequence(input_df, print_progress=True):
     def getValidSequenceUser(df, previous_day=7):
         id_ls = []
         df.reset_index(drop=True, inplace=True)
@@ -232,5 +233,7 @@ def _get_valid_sequence(input_df):
             delayed(func)(group, **kwargs) for _, group in tqdm(dfGrouped, disable=not print_progress)
         )
 
-    valid_user_ls = applyParallel(input_df.groupby("user_id"), getValidSequenceUser, n_jobs=-1, previous_day=7)
+    valid_user_ls = applyParallel(
+        input_df.groupby("user_id"), getValidSequenceUser, n_jobs=-1, previous_day=7, print_progress=print_progress
+    )
     return [item for sublist in valid_user_ls for item in sublist]

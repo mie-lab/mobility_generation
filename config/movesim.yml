@@ -1,9 +1,11 @@
 misc:
-  dataset: mobis_small
+  dataset: mobis
 
   use_pretrain: False
   pretrain_filepath: mobis_mhsa_1698746890
   generate_len: 50
+
+  num_gen_samples: 25600
   # 
   if_embed_time: False
   if_embed_user: True
@@ -11,26 +13,25 @@ misc:
 
   verbose: True
   debug: False
-  batch_size: 256
-  print_step: 100
+  batch_size: 64
+  print_step: 30
   num_workers: 0
   
 
 embedding:
-  base_emb_size: 64
+  base_emb_size: 128
+  hidden_dim: 64
 
 model:
-  networkName: mhsa
+  networkName: movesim
   # only for mhsa
-  num_encoder_layers: 2
-  nhead: 4
-  dim_feedforward: 128
-  dropout: 0.1
-  fc_dropout: 0.1
+  task: attention
+  ploss: 3.0
+  dloss: 1.5
 
 optimiser:
   optimizer: Adam
-  max_epoch: 100
+  max_epoch: 4
   lr: 0.001
   weight_decay: 0.000001
   # lr: 0.01
