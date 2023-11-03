@@ -196,14 +196,10 @@ class Generator(nn.Module):
         :param x: (batch_size, k), current generated sequence
         :return: (batch_size, seq_len), complete generated sequence
         """
-        flag = False  # whether sample from beginning
-
         # self.attn.flatten_parameters()
 
-        if x is None:
-            flag = True
         s = 0
-        if flag:
+        if x is None:
             if self.starting_sample == "rand":
                 x = torch.LongTensor(torch.randint(high=self.total_loc_num, size=(batch_size, 1))).to(self.device)
             elif self.starting_sample == "real":
@@ -213,7 +209,7 @@ class Generator(nn.Module):
                 s = 1
 
         samples = []
-        if flag:
+        if x is None:
             if s > 0:
                 samples.append(x)
             for i in range(s, seq_len):

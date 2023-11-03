@@ -20,7 +20,6 @@ from easydict import EasyDict as edict
 
 from scipy.spatial.distance import pdist, squareform
 
-from torch.nn.utils.rnn import pad_sequence
 from sklearn.preprocessing import OrdinalEncoder
 
 from trackintel.geogr.distances import calculate_distance_matrix
@@ -28,11 +27,12 @@ from trackintel.geogr.distances import calculate_distance_matrix
 from utils.utils import load_data, setup_seed, load_config
 from utils.dataloader import collate_fn, _split_dataset, traj_dataset
 from loc_predict.models.markov import markov_transition_prob
+
 from generative.movesim import Discriminator, Generator, AllEmbedding
 from generative.rollout import Rollout
-from generative.gan_loss import GANLoss
+from generative.gan_loss import GANLoss, periodLoss, distanceLoss
 from generative.train import generate_samples
-from generative.dataloader import discriminator_dataset
+from generative.dataloader import discriminator_dataset, discriminator_collate_fn
 
 
 def _get_train_test(sp, all_locs):
@@ -102,20 +102,6 @@ def get_dataloaders(train_data, vali_data, test_data, config):
     )
 
 
-def dis_collate_fn(batch):
-    """function to collate data samples into batch tensors."""
-    src_batch, tgt_batch = [], []
-
-    for src_sample, tgt_sample in batch:
-        src_batch.append(src_sample)
-        tgt_batch.append(tgt_sample)
-
-    src_batch = pad_sequence(src_batch)
-    tgt_batch = torch.tensor(tgt_batch, dtype=torch.int64)
-
-    return src_batch, tgt_batch
-
-
 if __name__ == "__main__":
     setup_seed(0)
 
@@ -135,7 +121,7 @@ if __name__ == "__main__":
     config = edict(config)
 
     # read and preprocess
-    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp.csv"), index_col="id")
+    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp_small.csv"), index_col="id")
     loc = pd.read_csv(os.path.join(config.temp_save_root, "locs_s2.csv"), index_col="id")
     sp = load_data(sp, loc)
 
@@ -179,6 +165,10 @@ if __name__ == "__main__":
 
     gen_gan_loss = GANLoss().to(device)
     gen_gan_optm = optim.Adam(generator.parameters(), lr=0.0001)
+    # period loss
+    period_crit = periodLoss(time_interval=24).to(device)
+    # distance loss
+    distance_crit = distanceLoss(locations=all_locs, device=device).to(device)
 
     dis_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
     dis_optimizer = optim.Adam(discriminator.parameters(), lr=0.00001)
@@ -189,7 +179,7 @@ if __name__ == "__main__":
         print("training generator")
         start_time = time.time()
 
-        iterations = range(5) if epoch != 0 else range(1)
+        iterations = range(3) if epoch != 0 else range(1)
         for it in iterations:
             samples = generator.sample(config.batch_size, config.generate_len)
             # construct the input to the generator, add zeros before samples and delete the last column
@@ -209,6 +199,9 @@ if __name__ == "__main__":
 
             gloss = gen_gan_loss(prob, targets, rewards, device)
 
+            # additional losses
+            gloss += config.periodic_loss * period_crit(samples)
+            gloss += config.distance_loss * distance_crit(samples)
             # optimize
             gen_gan_optm.zero_grad()
             gloss.backward()
@@ -227,7 +220,7 @@ if __name__ == "__main__":
                 running_loss = 0.0
                 start_time = time.time()
 
-            rollout.update_params()
+        rollout.update_params()
 
         print("training discriminator")
 
@@ -243,7 +236,9 @@ if __name__ == "__main__":
                 "batch_size": config["batch_size"],
                 "pin_memory": True,
             }
-            d_train_loader = torch.utils.data.DataLoader(d_train_data, collate_fn=dis_collate_fn, **kwds_train)
+            d_train_loader = torch.utils.data.DataLoader(
+                d_train_data, collate_fn=discriminator_collate_fn, **kwds_train
+            )
 
             n_batches = len(d_train_loader)
             for _ in range(2):
@@ -280,5 +275,7 @@ if __name__ == "__main__":
                         start_time = time.time()
 
                 dloss = total_loss / (i + 1)
+            if config.verbose:
+                print("")
 
         print(f"Epoch [{epoch}] Generator Loss: {gloss.item():.2f}, Discriminator Loss: {dloss:.2f}")

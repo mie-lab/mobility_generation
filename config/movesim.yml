@@ -1,5 +1,5 @@
 misc:
-  dataset: mobis
+  dataset: mobis_small
 
   use_pretrain: False
   pretrain_filepath: mobis_mhsa_1698746890
@@ -26,8 +26,8 @@ model:
   networkName: movesim
   # only for mhsa
   task: attention
-  ploss: 3.0
-  dloss: 1.5
+  periodic_loss: 3.0
+  distance_loss: 1.5
 
 optimiser:
   optimizer: Adam

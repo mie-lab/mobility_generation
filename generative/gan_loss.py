@@ -29,22 +29,15 @@ class GANLoss(nn.Module):
         return -torch.mean(loss)
 
 
-class distance_loss(nn.Module):
-    def __init__(self, device):
-        super(distance_loss, self).__init__()
+class distanceLoss(nn.Module):
+    def __init__(self, locations, device):
+        super(distanceLoss, self).__init__()
 
-        with open("./data/geolife/gps") as f:
-            gpss = f.readlines()
-        self.X = []
-        self.Y = []
-        for gps in gpss:
-            x, y = float(gps.split()[0]), float(gps.split()[1])
-            self.X.append(x)
-            self.Y.append(y)
-        self.X = torch.Tensor(np.array(self.X)).float()
-        self.Y = torch.Tensor(np.array(self.Y)).float()
-        self.X = self.X.to(device)
-        self.Y = self.Y.to(device)
+        geo_x = locations.sort_values(by="loc_id")["geometry"].x.values
+        geo_y = locations.sort_values(by="loc_id")["geometry"].y.values
+
+        self.geo_x = torch.Tensor(geo_x).float().to(device)
+        self.geo_y = torch.Tensor(geo_y).float().to(device)
 
     def forward(self, x):
         """
@@ -53,10 +46,11 @@ class distance_loss(nn.Module):
         :return:
         """
         x = x.long()
-        x1 = torch.index_select(self.X, 0, x[:, :-1].contiguous().view(-1))
-        x2 = torch.index_select(self.X, 0, x[:, 1:].contiguous().view(-1))
-        y1 = torch.index_select(self.Y, 0, x[:, :-1].contiguous().view(-1))
-        y2 = torch.index_select(self.Y, 0, x[:, 1:].contiguous().view(-1))
+        x1 = torch.index_select(self.geo_x, 0, x[:, :-1].reshape(-1))
+        x2 = torch.index_select(self.geo_x, 0, x[:, 1:].reshape(-1))
+        y1 = torch.index_select(self.geo_y, 0, x[:, :-1].reshape(-1))
+        y2 = torch.index_select(self.geo_y, 0, x[:, 1:].reshape(-1))
+
         dx = x1 - x2
         dy = y1 - y2
         loss = dx**2 + dy**2
@@ -64,9 +58,9 @@ class distance_loss(nn.Module):
         return loss
 
 
-class period_loss(nn.Module):
+class periodLoss(nn.Module):
     def __init__(self, time_interval):
-        super(period_loss, self).__init__()
+        super(periodLoss, self).__init__()
         self.time_interval = time_interval
         self.mse = nn.MSELoss()
 
@@ -77,8 +71,10 @@ class period_loss(nn.Module):
         :return:
         """
         loss = 0.0
-        for i in range(0, x.size(1) - self.time_interval):
+        for i in range(x.size(1) - self.time_interval):
             loss += torch.sum(torch.ne(x[:, i], x[:, i + self.time_interval]))
+
+        loss = loss / (x.size(0) * (x.size(1) - self.time_interval))
         return loss
 
 

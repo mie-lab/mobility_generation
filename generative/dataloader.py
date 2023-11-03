@@ -2,7 +2,6 @@ import os
 import numpy as np
 import pickle as pickle
 from tqdm import tqdm
-from pandas.testing import assert_frame_equal
 
 from torch.nn.utils.rnn import pad_sequence
 import torch
@@ -99,3 +98,17 @@ def _get_valid_sequence(input_df, print_progress=True):
         input_df.groupby("user_id"), getValidSequenceUser, n_jobs=-1, previous_day=7, print_progress=print_progress
     )
     return [item for sublist in valid_user_ls for item in sublist]
+
+
+def discriminator_collate_fn(batch):
+    """function to collate data samples into batch tensors."""
+    src_batch, tgt_batch = [], []
+
+    for src_sample, tgt_sample in batch:
+        src_batch.append(src_sample)
+        tgt_batch.append(tgt_sample)
+
+    src_batch = pad_sequence(src_batch)
+    tgt_batch = torch.tensor(tgt_batch, dtype=torch.int64)
+
+    return src_batch, tgt_batch
