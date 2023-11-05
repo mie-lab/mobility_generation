@@ -1,5 +1,5 @@
 misc:
-  dataset: mobis_small
+  dataset: mobis
 
   use_pretrain: False
   pretrain_filepath: mobis_mhsa_1698746890
@@ -13,8 +13,9 @@ misc:
 
   verbose: True
   debug: False
-  batch_size: 64
-  print_step: 100
+  d_batch_size: 32
+  g_batch_size: 8
+  print_step: 50
   num_workers: 0
   
 
@@ -24,27 +25,21 @@ embedding:
 
 model:
   networkName: movesim
-  # only for mhsa
+  #
   task: attention
   periodic_loss: 3.0
   distance_loss: 1.5
 
 optimiser:
   optimizer: Adam
-  max_epoch: 4
-  lr: 0.001
+  max_epoch: 100
+  pre_lr: 0.0001
+  d_lr: 0.00001
+  g_lr: 0.0001
   weight_decay: 0.000001
-  # lr: 0.01
-  # for Adam
-  beta1: 0.9
-  beta2: 0.999
-  # for SGD
-  momentum: 0.98
-  # for warmup
-  num_warmup_epochs: 2
-  num_training_epochs: 50
+
   # for decay
-  patience: 3
+  patience: 1
   lr_step_size: 1
   lr_gamma: 0.1
 
