@@ -151,7 +151,7 @@ def training(
                 print("=" * 50)
                 print("Early stopping")
                 print("Current learning rate: {:.6f}".format(optimizer.param_groups[0]["lr"]))
-            if scheduler_count == 0:
+            if scheduler_count == 2:
                 # early_stopping.best_return_dict
                 print("Training finished.\t Time: {:.2f}s.".format((time.time() - training_start_time)))
                 break

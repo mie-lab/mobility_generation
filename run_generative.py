@@ -90,7 +90,7 @@ if __name__ == "__main__":
     total_params_generator = sum(p.numel() for p in generator.parameters() if p.requires_grad)
     total_params_discriminator = sum(p.numel() for p in discriminator.parameters() if p.requires_grad)
     print(
-        f"#Parameters embeddings: {total_params_embed} \t generator: {total_params_generator} \t discriminator: {total_params_discriminator}"
+        f"#Parameters embeddings: {total_params_embed} \t generator: {total_params_generator - total_params_embed} \t discriminator: {total_params_discriminator - total_params_embed}"
     )
 
     # transit_df = train_data.groupby("user_id").apply(markov_transition_prob, n=1).reset_index()
@@ -123,8 +123,8 @@ if __name__ == "__main__":
     #         torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
     #     )
 
-    print("advtrain generator and discriminator ...")
-    rollout = Rollout(generator, 0.8)
+    print("Advtrain generator and discriminator ...")
+    rollout = Rollout(generator, 0.9)
 
     # gan loss and optimizer
     gen_gan_loss = GANLoss().to(device)
