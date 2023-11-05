@@ -1,5 +1,5 @@
 misc:
-  dataset: mobis_small
+  dataset: mobis
 
   use_pretrain: False
   pretrain_filepath: mobis_mhsa_1698746890

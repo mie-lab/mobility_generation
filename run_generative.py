@@ -24,82 +24,15 @@ from sklearn.preprocessing import OrdinalEncoder
 
 from trackintel.geogr.distances import calculate_distance_matrix
 
-from utils.utils import load_data, setup_seed, load_config
-from utils.dataloader import collate_fn, _split_dataset, traj_dataset
+from utils.utils import load_data, setup_seed, load_config, init_save_path
+from utils.dataloader import collate_fn, get_train_test, _get_valid_sequence
 from loc_predict.models.markov import markov_transition_prob
 
 from generative.movesim import Discriminator, Generator, AllEmbedding
 from generative.rollout import Rollout
 from generative.gan_loss import GANLoss, periodLoss, distanceLoss
-from generative.train import generate_samples
+from generative.train import generate_samples, construct_discriminator_pretrain_dataset
 from generative.dataloader import discriminator_dataset, discriminator_collate_fn
-
-
-def _get_train_test(sp, all_locs):
-    sp.sort_values(by=["user_id", "start_day", "start_min"], inplace=True)
-    sp.drop(columns={"started_at", "finished_at"}, inplace=True)
-
-    # encoder user, 0 reserved for padding
-    enc = OrdinalEncoder(dtype=np.int64)
-    sp["user_id"] = enc.fit_transform(sp["user_id"].values.reshape(-1, 1)) + 1
-
-    # truncate too long duration, >2 days to 2 days
-    sp["duration"] = sp["duration"] / 60
-    sp.loc[sp["duration"] > 60 * 24 * 2 - 1, "duration"] = 60 * 24 * 2 - 1
-
-    # split the datasets, user dependent 0.6, 0.2, 0.2
-    train_data, vali_data, test_data = _split_dataset(sp)
-
-    # encode unseen locations in validation and test into 0
-    enc = OrdinalEncoder(dtype=np.int64, handle_unknown="use_encoded_value", unknown_value=-1).fit(
-        all_locs["loc_id"].values.reshape(-1, 1)
-    )
-    # add 1 to account for 0 padding
-    all_locs["loc_id"] = enc.transform(all_locs["loc_id"].values.reshape(-1, 1)) + 1
-
-    train_data["location_id"] = enc.transform(train_data["location_id"].values.reshape(-1, 1)) + 1
-    vali_data["location_id"] = enc.transform(vali_data["location_id"].values.reshape(-1, 1)) + 1
-    test_data["location_id"] = enc.transform(test_data["location_id"].values.reshape(-1, 1)) + 1
-
-    return train_data, vali_data, test_data, all_locs
-
-
-def get_dataloaders(train_data, vali_data, test_data, config):
-    dataset_train = traj_dataset(train_data, print_progress=config.verbose)
-    dataset_val = traj_dataset(vali_data, print_progress=config.verbose)
-    dataset_test = traj_dataset(test_data, print_progress=config.verbose)
-
-    kwds_train = {
-        "shuffle": True,
-        "num_workers": config["num_workers"],
-        "batch_size": config["batch_size"],
-        "pin_memory": True,
-    }
-    kwds_val = {
-        "shuffle": False,
-        "num_workers": config["num_workers"],
-        "batch_size": config["batch_size"],
-        "pin_memory": True,
-    }
-    kwds_test = {
-        "shuffle": False,
-        "num_workers": config["num_workers"],
-        "batch_size": config["batch_size"],
-        "pin_memory": True,
-    }
-
-    train_loader = torch.utils.data.DataLoader(dataset_train, collate_fn=collate_fn, **kwds_train)
-    val_loader = torch.utils.data.DataLoader(dataset_val, collate_fn=collate_fn, **kwds_val)
-    test_loader = torch.utils.data.DataLoader(dataset_test, collate_fn=collate_fn, **kwds_test)
-
-    print(
-        f"length of the train loader: {len(train_loader)}\t validation loader:{len(val_loader)}\t test loader:{len(test_loader)}"
-    )
-    return (
-        train_loader,
-        val_loader,
-        test_loader,
-    )
 
 
 if __name__ == "__main__":
@@ -129,17 +62,18 @@ if __name__ == "__main__":
     all_locs["geometry"] = all_locs["geometry"].apply(wkt.loads)
     all_locs = gpd.GeoDataFrame(all_locs, geometry="geometry", crs="EPSG:4326")
 
-    # print(sp)
-    # print(all_locs)
-    train_data, vali_data, test_data, all_locs = _get_train_test(sp, all_locs)
+    train_data, vali_data, test_data, all_locs = get_train_test(sp, all_locs=all_locs)
     print(f"Max location id:{all_locs.loc_id.max()}, unique location id:{all_locs.loc_id.unique().shape[0]}")
     config["total_loc_num"] = int(all_locs.loc_id.max() + 1)
     config["total_user_num"] = int(train_data.user_id.max() + 1)
 
-    train_loader, val_loader, test_loader = get_dataloaders(train_data, vali_data, test_data, config)
+    # get valid idx for training
+    train_data["id"] = np.arange(len(train_data))
+    train_idx = _get_valid_sequence(train_data, print_progress=config.verbose)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # location embeddings
     embedding = AllEmbedding(config=config).to(device)
 
     generator = Generator(device=device, config=config, embedding=embedding).to(device)
@@ -161,8 +95,91 @@ if __name__ == "__main__":
     # opt = parser.parse_args()
     # main(opt)
 
+    if not config.use_pretrain:
+        log_dir = init_save_path(config)
+
+        # pretrain discriminator
+        fake_samples = construct_discriminator_pretrain_dataset(config, train_data, train_idx, all_locs)
+        print("Pretrain discriminator")
+        d_train_data = discriminator_dataset(
+            true_data=train_data, fake_data=fake_samples, valid_start_end_idx=train_idx
+        )
+        kwds_train = {
+            "shuffle": True,
+            "num_workers": config["num_workers"],
+            "batch_size": config["batch_size"],
+            "pin_memory": True,
+        }
+        d_train_loader = torch.utils.data.DataLoader(d_train_data, collate_fn=discriminator_collate_fn, **kwds_train)
+
+        dis_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
+        dis_optimizer = optim.Adam(discriminator.parameters(), lr=0.000001)
+
+        running_loss = 0.0
+        n_batches = len(d_train_loader)
+        print(f"length of the train loader: {n_batches}\t #samples: {len(d_train_data)}")
+        for epoch in range(10):
+            total_loss = 0.0
+            start_time = time.time()
+            dis_optimizer.zero_grad()
+            for i, (data, target) in enumerate(d_train_loader):
+                data = data.long().to(device).transpose(0, 1)
+                target = target.float().to(device)
+
+                pred = discriminator(data)
+
+                loss = dis_criterion(pred.view((-1,)), target.view((-1,)))
+
+                total_loss += loss.item()
+                dis_optimizer.zero_grad()
+                loss.backward()
+                dis_optimizer.step()
+
+                running_loss += loss.item()
+                if (config.verbose) and ((i + 1) % config["print_step"] == 0):
+                    print(
+                        "Discriminator: Epoch {}, {:.1f}%\t loss: {:.3f}, took: {:.2f}s \r".format(
+                            epoch + 1,
+                            100 * (i + 1) / n_batches,
+                            running_loss / config["print_step"],
+                            time.time() - start_time,
+                        ),
+                        end="",
+                        flush=True,
+                    )
+                    running_loss = 0.0
+                    start_time = time.time()
+
+            dloss = total_loss / n_batches
+            if config.verbose:
+                print("")
+                print(f"Epoch [{epoch}], Discriminator Loss: {dloss:.2f}")
+
+        # pretrain generator
+        print("Pretrain generator")
+        gen_data_iter = NewGenIter(REAL_DATA, BATCH_SIZE)
+
+        gen_criterion = nn.CrossEntropyLoss(reduction="mean").to(device)
+        gen_optimizer = optim.Adam(generator.parameters(), lr=0.0001)
+
+        pretrain_model(
+            "G", g_pre_epoch, generator, gen_data_iter, gen_criterion, gen_optimizer, BATCH_SIZE, device=device
+        )
+
+        # save networks
+        torch.save(generator.state_dict(), os.path.join(log_dir, "generator.pt"))
+        torch.save(discriminator.state_dict(), os.path.join(log_dir, "discriminator.pt"))
+
+    else:
+        generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
+        discriminator.load_state_dict(
+            torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
+        )
+
+    print("advtrain generator and discriminator ...")
     rollout = Rollout(generator, 0.8)
 
+    # gan loss and optimizer
     gen_gan_loss = GANLoss().to(device)
     gen_gan_optm = optim.Adam(generator.parameters(), lr=0.0001)
     # period loss
@@ -187,15 +204,15 @@ if __name__ == "__main__":
 
             inputs = torch.cat([zeros, samples], dim=1)[:, :-1]
 
-            time_tensor = torch.LongTensor([i % 24 for i in range(config.generate_len)]).to(device)
-            time_tensor = time_tensor.repeat(config.batch_size).reshape(config.batch_size, -1)
+            # time_tensor = torch.LongTensor([i % 24 for i in range(config.generate_len)]).to(device)
+            # time_tensor = time_tensor.repeat(config.batch_size).reshape(config.batch_size, -1)
 
             targets = samples.view((-1,))
 
             # calculate the reward
-            rewards = rollout.get_reward(samples, roll_out_num=2, discriminator=discriminator, device=device)
+            rewards = rollout.get_reward(samples, roll_out_num=8, discriminator=discriminator, device=device)
 
-            prob = generator.forward(inputs, time_tensor)
+            prob = generator.forward(inputs)
 
             gloss = gen_gan_loss(prob, targets, rewards, device)
 
@@ -226,9 +243,8 @@ if __name__ == "__main__":
 
         for _ in range(1):
             generated_samples = generate_samples(generator, config)
-
             d_train_data = discriminator_dataset(
-                true_data=train_data, fake_data=generated_samples, print_progress=False
+                true_data=train_data, fake_data=generated_samples, valid_start_end_idx=train_idx
             )
             kwds_train = {
                 "shuffle": True,
@@ -274,7 +290,7 @@ if __name__ == "__main__":
                         running_loss = 0.0
                         start_time = time.time()
 
-                dloss = total_loss / (i + 1)
+                dloss = total_loss / len(d_train_loader)
             if config.verbose:
                 print("")
 

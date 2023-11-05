@@ -16,13 +16,11 @@ import trackintel as ti
 
 
 class traj_dataset(torch.utils.data.Dataset):
-    def __init__(self, input_data, print_progress=True):
-        # reindex the df for efficient selection
-        input_data["id"] = np.arange(len(input_data))
+    def __init__(self, input_data, valid_start_end_idx):
         self.data = input_data
 
-        self.valid_start_end_idx = _get_valid_sequence(input_data, print_progress)
-        self.len = len(self.valid_start_end_idx)
+        self.valid_start_end_idx = valid_start_end_idx
+        self.len = len(valid_start_end_idx)
 
     def __len__(self):
         """Return the length of the current dataloader."""
@@ -83,16 +81,19 @@ def collate_fn(batch):
     return src_batch, tgt_batch, dict_batch
 
 
-def get_dataloaders(sp, config):
-    train_data, vali_data, test_data = _get_train_test(sp)
+def get_dataloaders(train_data, vali_data, test_data, config):
+    # reindex the df for efficient selection
+    train_data["id"] = np.arange(len(train_data))
+    vali_data["id"] = np.arange(len(vali_data))
+    test_data["id"] = np.arange(len(test_data))
 
-    print(
-        f"Max location id:{train_data.location_id.max()}, unique location id:{train_data.location_id.unique().shape[0]}"
+    train_idx, vali_idx, test_idx = _get_valid_start_end_idx(
+        train_data, vali_data, test_data, print_progress=config.verbose
     )
 
-    dataset_train = traj_dataset(train_data, print_progress=config.verbose)
-    dataset_val = traj_dataset(vali_data, print_progress=config.verbose)
-    dataset_test = traj_dataset(test_data, print_progress=config.verbose)
+    dataset_train = traj_dataset(train_data, valid_start_end_idx=train_idx)
+    dataset_val = traj_dataset(vali_data, valid_start_end_idx=vali_idx)
+    dataset_test = traj_dataset(test_data, valid_start_end_idx=test_idx)
 
     kwds_train = {
         "shuffle": True,
@@ -120,10 +121,18 @@ def get_dataloaders(sp, config):
     print(
         f"length of the train loader: {len(train_loader)}\t validation loader:{len(val_loader)}\t test loader:{len(test_loader)}"
     )
-    return train_loader, val_loader, test_loader, train_data.location_id.max(), train_data.user_id.max()
+    return train_loader, val_loader, test_loader
 
 
-def _get_train_test(sp):
+def _get_valid_start_end_idx(train_data, vali_data, test_data, print_progress=True):
+    train_idx = _get_valid_sequence(train_data, print_progress=print_progress)
+    vali_idx = _get_valid_sequence(vali_data, print_progress=print_progress)
+    test_idx = _get_valid_sequence(test_data, print_progress=print_progress)
+
+    return train_idx, vali_idx, test_idx
+
+
+def get_train_test(sp, all_locs=None):
     sp.sort_values(by=["user_id", "start_day", "start_min"], inplace=True)
     sp.drop(columns={"started_at", "finished_at"}, inplace=True)
 
@@ -139,17 +148,29 @@ def _get_train_test(sp):
     train_data, vali_data, test_data = _split_dataset(sp)
 
     # encode unseen locations in validation and test into 0
-    enc = OrdinalEncoder(
-        dtype=np.int64,
-        handle_unknown="use_encoded_value",
-        unknown_value=-1,
-    ).fit(train_data["location_id"].values.reshape(-1, 1))
-    # add 2 to account for unseen locations (1) and to account for 0 padding
-    train_data["location_id"] = enc.transform(train_data["location_id"].values.reshape(-1, 1)) + 2
-    vali_data["location_id"] = enc.transform(vali_data["location_id"].values.reshape(-1, 1)) + 2
-    test_data["location_id"] = enc.transform(test_data["location_id"].values.reshape(-1, 1)) + 2
+    if all_locs is None:
+        enc = OrdinalEncoder(dtype=np.int64, handle_unknown="use_encoded_value", unknown_value=-1).fit(
+            train_data["location_id"].values.reshape(-1, 1)
+        )
+        # add 2 to account for unseen locations (1) and to account for 0 padding
+        train_data["location_id"] = enc.transform(train_data["location_id"].values.reshape(-1, 1)) + 2
+        vali_data["location_id"] = enc.transform(vali_data["location_id"].values.reshape(-1, 1)) + 2
+        test_data["location_id"] = enc.transform(test_data["location_id"].values.reshape(-1, 1)) + 2
 
-    return train_data, vali_data, test_data
+        return train_data, vali_data, test_data
+    else:
+        # encode unseen locations in validation and test into 0
+        enc = OrdinalEncoder(dtype=np.int64, handle_unknown="use_encoded_value", unknown_value=-1).fit(
+            all_locs["loc_id"].values.reshape(-1, 1)
+        )
+        # add 1 to account for 0 padding
+        all_locs["loc_id"] = enc.transform(all_locs["loc_id"].values.reshape(-1, 1)) + 1
+
+        train_data["location_id"] = enc.transform(train_data["location_id"].values.reshape(-1, 1)) + 1
+        vali_data["location_id"] = enc.transform(vali_data["location_id"].values.reshape(-1, 1)) + 1
+        test_data["location_id"] = enc.transform(test_data["location_id"].values.reshape(-1, 1)) + 1
+
+        return train_data, vali_data, test_data, all_locs
 
 
 def _split_dataset(totalData):

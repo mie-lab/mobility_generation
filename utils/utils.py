@@ -1,6 +1,10 @@
+import os
 import torch
 import numpy as np
 import pandas as pd
+
+import datetime
+import json
 
 import yaml
 import random
@@ -58,3 +62,18 @@ def load_config(path):
             config[k] = v
 
     return config
+
+
+def init_save_path(config):
+    """define the path to save, and save the configuration file."""
+    if config.networkName == "rnn" and config.attention:
+        networkName = f"{config.dataset}_{config.networkName}_Attn"
+    else:
+        networkName = f"{config.dataset}_{config.networkName}"
+    log_dir = os.path.join(config.save_root, f"{networkName}_{str(int(datetime.datetime.now().timestamp()))}")
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    with open(os.path.join(log_dir, "conf.json"), "w") as fp:
+        json.dump(config, fp, indent=4, sort_keys=True)
+
+    return log_dir

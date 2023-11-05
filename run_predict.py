@@ -8,10 +8,10 @@ import datetime
 
 from easydict import EasyDict as edict
 
-from utils.dataloader import get_dataloaders, _get_train_test
-from loc_predict.utils import get_models, get_trained_nets, get_test_result, init_save_path, get_generated_sequences
+from utils.dataloader import get_dataloaders, get_train_test
+from loc_predict.utils import get_models, get_trained_nets, get_test_result, get_generated_sequences
 from loc_predict.models.markov import markov_transition_prob
-from utils.utils import load_data, setup_seed, load_config
+from utils.utils import load_data, setup_seed, load_config, init_save_path
 
 
 def single_run(train_loader, val_loader, test_loader, config, device, log_dir):
@@ -51,16 +51,22 @@ if __name__ == "__main__":
     config = edict(config)
 
     # read and preprocess
-    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp_small.csv"), index_col="id")
+    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp.csv"), index_col="id")
     loc = pd.read_csv(os.path.join(config.temp_save_root, "locs_s2.csv"), index_col="id")
     sp = load_data(sp, loc)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda")
 
     # get dataloaders
-    train_loader, val_loader, test_loader, max_locations, max_users = get_dataloaders(sp, config)
-    config["total_loc_num"] = int(max_locations + 1)
-    config["total_user_num"] = int(max_users + 1)
+    train_data, vali_data, test_data = get_train_test(sp)
+    print(
+        f"Max location id:{train_data.location_id.max()}, unique location id:{train_data.location_id.unique().shape[0]}"
+    )
+    config["total_loc_num"] = int(train_data.location_id.max() + 1)
+    config["total_user_num"] = int(train_data.user_id.max() + 1)
+
+    train_loader, val_loader, test_loader = get_dataloaders(train_data, vali_data, test_data, config)
 
     if "mhsa" in args.config:  # neural networks
         if not config.use_pretrain:  # for training
@@ -94,7 +100,7 @@ if __name__ == "__main__":
             generated_df.to_csv(filename, index=True)
 
     elif "markov" in args.config:  # markov model
-        train_data, vali_data, test_data = _get_train_test(sp)
+        train_data, vali_data, test_data = get_train_test(sp)
 
         # construct markov matrix based on train and validation dataset
         train_vali_data = pd.concat([train_data, vali_data])

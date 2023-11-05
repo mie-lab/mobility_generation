@@ -14,7 +14,7 @@ misc:
   verbose: True
   debug: False
   batch_size: 64
-  print_step: 30
+  print_step: 100
   num_workers: 0
   
 

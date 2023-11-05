@@ -72,7 +72,7 @@ class Generator(nn.Module):
             self.starting_dist = torch.tensor(starting_dist).float()
 
         self.loc_embedding = embedding
-        self.tim_embedding = nn.Embedding(num_embeddings=24, embedding_dim=self.base_emb_size)
+        # self.tim_embedding = nn.Embedding(num_embeddings=24, embedding_dim=self.base_emb_size)
 
         self.attn = nn.MultiheadAttention(self.hidden_dim, 4)
         self.Q = nn.Linear(self.base_emb_size, self.hidden_dim)
@@ -99,7 +99,8 @@ class Generator(nn.Module):
             h, c = h.to(self.device), c.to(self.device)
         return h, c
 
-    def forward(self, x_l, x_t):
+    def forward(self, x_l):
+        # x_t
         """
 
         :param x: (batch_size, seq_len), sequence of locations
@@ -107,8 +108,9 @@ class Generator(nn.Module):
             (batch_size * seq_len, total_locations), prediction of next stage of all locations
         """
         lemb = self.loc_embedding(x_l)
-        temb = self.tim_embedding(x_t)
-        x = lemb + temb
+        # temb = self.tim_embedding(x_t)
+        # x = lemb + temb
+        x = lemb
 
         x = x.transpose(0, 1)
         Query = self.Q(x)
@@ -137,11 +139,10 @@ class Generator(nn.Module):
 
         x = x.reshape(-1, self.hidden_dim)
         x = self.linear(x)
-        x = F.relu(x)
 
-        return F.log_softmax(x, dim=-1)
+        return F.relu(x)
 
-    def step(self, input, t):
+    def step(self, input):
         """
 
         :param x: (batch_size, 1), current location
@@ -152,9 +153,9 @@ class Generator(nn.Module):
         """
 
         lemb = self.loc_embedding(input)
-        temb = self.tim_embedding(t)
-
-        x = lemb + temb
+        # temb = self.tim_embedding(t)
+        # x = lemb + temb
+        x = lemb
 
         x = x.transpose(0, 1)
 
@@ -213,24 +214,24 @@ class Generator(nn.Module):
             if s > 0:
                 samples.append(x)
             for i in range(s, seq_len):
-                t = torch.LongTensor([i % 24]).to(self.device)
-                t = t.repeat(batch_size).reshape(batch_size, -1)
-                x = self.step(x, t)
+                # t = torch.LongTensor([i % 24]).to(self.device)
+                # t = t.repeat(batch_size).reshape(batch_size, -1)
+                x = self.step(x)
                 x = x.multinomial(1)
                 samples.append(x)
         else:
             given_len = x.size(1)
             lis = x.chunk(x.size(1), dim=1)
             for i in range(given_len):
-                t = torch.LongTensor([i % 24]).to(self.device)
-                t = t.repeat(batch_size).reshape(batch_size, -1)
-                x = self.step(lis[i], t)
+                # t = torch.LongTensor([i % 24]).to(self.device)
+                # t = t.repeat(batch_size).reshape(batch_size, -1)
+                x = self.step(lis[i])
                 samples.append(lis[i])
             x = x.multinomial(1)
             for i in range(given_len, seq_len):
                 samples.append(x)
-                t = torch.LongTensor([i % 24]).to(self.device)
-                t = t.repeat(batch_size).reshape(batch_size, -1)
-                x = self.step(x, t)
+                # t = torch.LongTensor([i % 24]).to(self.device)
+                # t = t.repeat(batch_size).reshape(batch_size, -1)
+                x = self.step(x)
                 x = x.multinomial(1)
         return torch.cat(samples, dim=1)

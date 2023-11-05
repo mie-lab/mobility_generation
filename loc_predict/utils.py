@@ -37,21 +37,6 @@ def get_models(config, device):
     return model
 
 
-def init_save_path(config):
-    """define the path to save, and save the configuration file."""
-    if config.networkName == "rnn" and config.attention:
-        networkName = f"{config.dataset}_{config.networkName}_Attn"
-    else:
-        networkName = f"{config.dataset}_{config.networkName}"
-    log_dir = os.path.join(config.save_root, f"{networkName}_{str(int(datetime.datetime.now().timestamp()))}")
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    with open(os.path.join(log_dir, "conf.json"), "w") as fp:
-        json.dump(config, fp, indent=4, sort_keys=True)
-
-    return log_dir
-
-
 def get_generated_sequences(config, model, test_loader, device=None):
     if config.networkName == "mhsa":
         generated_ls, user_arr = generate(config, model, test_loader, device)
