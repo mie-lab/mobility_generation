@@ -2,16 +2,11 @@
 import pdb
 import os
 import torch
-import random
 import argparse
 import numpy as np
 import pandas as pd
 import geopandas as gpd
 
-from tqdm import tqdm
-
-from torch import nn, optim
-import time
 
 from shapely import wkt, Point
 
@@ -20,25 +15,14 @@ from easydict import EasyDict as edict
 
 from scipy.spatial.distance import pdist, squareform
 
-from sklearn.preprocessing import OrdinalEncoder
-
 from trackintel.geogr.distances import calculate_distance_matrix
 
 from utils.utils import load_data, setup_seed, load_config, init_save_path
-from utils.dataloader import collate_fn, get_train_test, _get_valid_sequence
+from utils.dataloader import get_train_test, _get_valid_sequence
 from loc_predict.models.markov import markov_transition_prob
 
 from generative.movesim import Discriminator, Generator, AllEmbedding
-from generative.rollout import Rollout
-from generative.gan_loss import GANLoss, periodLoss, distanceLoss
-from generative.train import generate_samples, pre_training, train_epoch, validate_epoch
-from generative.dataloader import (
-    discriminator_dataset,
-    discriminator_collate_fn,
-    generator_dataset,
-    generator_collate_fn,
-    construct_discriminator_pretrain_dataset,
-)
+from generative.train import pre_training, adversarial_training
 
 
 if __name__ == "__main__":
@@ -60,7 +44,7 @@ if __name__ == "__main__":
     config = edict(config)
 
     # read and preprocess
-    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp.csv"), index_col="id")
+    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp_small.csv"), index_col="id")
     loc = pd.read_csv(os.path.join(config.temp_save_root, "locs_s2.csv"), index_col="id")
     sp = load_data(sp, loc)
 
@@ -81,7 +65,7 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # embeddings
+    # init models
     embedding = AllEmbedding(config=config).to(device)
     generator = Generator(device=device, config=config, embedding=embedding).to(device)
     discriminator = Discriminator(config=config, embedding=embedding).to(device)
@@ -105,7 +89,7 @@ if __name__ == "__main__":
     # main(opt)
 
     if not config.use_pretrain:
-        log_dir = init_save_path(config)
+        log_dir = init_save_path(config, postfix="pretrain")
 
         discriminator, generator = pre_training(
             discriminator,
@@ -117,97 +101,14 @@ if __name__ == "__main__":
             input_data=(train_data, train_idx, vali_data, vali_idx),
         )
 
-    # else:
-    #     generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
-    #     discriminator.load_state_dict(
-    #         torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
-    #     )
+    else:
+        generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
+        discriminator.load_state_dict(
+            torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
+        )
 
     print("Advtrain generator and discriminator ...")
-    rollout = Rollout(generator, 0.9)
-
-    # gan loss and optimizer
-    gen_gan_loss = GANLoss().to(device)
-    gen_gan_optm = optim.Adam(generator.parameters(), lr=config.g_lr, weight_decay=config.weight_decay)
-    # period loss
-    period_crit = periodLoss(time_interval=24).to(device)
-    # distance loss
-    distance_crit = distanceLoss(locations=all_locs, device=device).to(device)
-
-    d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
-    d_optimizer = optim.Adam(discriminator.parameters(), lr=config.d_lr, weight_decay=config.weight_decay)
-
-    running_loss = 0.0
-    for epoch in range(config.max_epoch):
-        # Train the generator for one step
-        print("training generator")
-        start_time = time.time()
-
-        iterations = range(3) if epoch != 0 else range(1)
-        for it in iterations:
-            samples = generator.sample(config.d_batch_size, config.generate_len)
-            # construct the input to the generator, add zeros before samples and delete the last column
-            zeros = torch.zeros((config.d_batch_size, 1)).long().to(device)
-
-            inputs = torch.cat([zeros, samples], dim=1)[:, :-1]
-
-            targets = samples.view((-1,))
-
-            # calculate the reward
-            rewards = rollout.get_reward(samples, roll_out_num=8, discriminator=discriminator, device=device)
-
-            prob = generator.forward(inputs)
-
-            gloss = gen_gan_loss(prob, targets, rewards, device)
-
-            # additional losses
-            gloss += config.periodic_loss * period_crit(samples)
-            gloss += config.distance_loss * distance_crit(samples)
-            # optimize
-            gen_gan_optm.zero_grad()
-            gloss.backward()
-            gen_gan_optm.step()
-
-            running_loss += gloss.item()
-            if config.verbose:
-                print(
-                    "Generator: Epoch {}, train iter {}\t loss: {:.3f}, took: {:.2f}s \r".format(
-                        epoch + 1,
-                        it,
-                        running_loss,
-                        time.time() - start_time,
-                    )
-                )
-                running_loss = 0.0
-                start_time = time.time()
-
-        rollout.update_params()
-
-        print("training discriminator")
-
-        for _ in range(1):
-            generated_samples = generate_samples(generator, config)
-            d_train_data = discriminator_dataset(
-                true_data=train_data, fake_data=generated_samples, valid_start_end_idx=train_idx
-            )
-            kwds_train = {
-                "shuffle": True,
-                "num_workers": config.num_workers,
-                "batch_size": config.d_batch_size,
-                "pin_memory": True,
-            }
-            d_train_loader = torch.utils.data.DataLoader(
-                d_train_data, collate_fn=discriminator_collate_fn, **kwds_train
-            )
-
-            for i in range(2):
-                train_epoch(
-                    config,
-                    discriminator,
-                    d_train_loader,
-                    d_optimizer,
-                    d_criterion,
-                    device,
-                    epoch=i,
-                    model_type="discriminator",
-                )
+    log_dir = init_save_path(config)
+    adversarial_training(
+        discriminator, generator, config, device, all_locs, log_dir, input_data=(train_data, train_idx, vali_data, vali_idx)
+    )

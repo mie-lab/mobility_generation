@@ -1,8 +1,8 @@
 misc:
-  dataset: mobis
+  dataset: mobis_small
 
-  use_pretrain: False
-  pretrain_filepath: mobis_mhsa_1698746890
+  use_pretrain: True
+  pretrain_filepath: mobis_small_movesim_pretrain_1699262481
   generate_len: 50
 
   num_gen_samples: 25600
@@ -33,6 +33,7 @@ model:
 optimiser:
   optimizer: Adam
   max_epoch: 100
+  adv_max_epoch: 30
   pre_lr: 0.0001
   d_lr: 0.00001
   g_lr: 0.0001

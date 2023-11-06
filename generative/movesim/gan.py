@@ -84,7 +84,7 @@ class Generator(nn.Module):
         self.V2 = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.K2 = nn.Linear(self.hidden_dim, self.hidden_dim)
 
-        self.linear = nn.Linear(self.hidden_dim, config.total_loc_num)
+        self.linear = nn.Linear(self.hidden_dim, self.total_loc_num)
 
         self.init_params()
 
@@ -113,25 +113,15 @@ class Generator(nn.Module):
         x = lemb
 
         x = x.transpose(0, 1)
-        Query = self.Q(x)
-        Query = F.relu(Query)
-
-        Value = self.V(x)
-        Value = F.relu(Value)
-
-        Key = self.K(x)
-        Key = F.relu(Key)
+        Query = F.relu(self.Q(x))
+        Value = F.relu(self.V(x))
+        Key = F.relu(self.K(x))
 
         x, _ = self.attn(Query, Key, Value)
 
-        Query = self.Q2(x)
-        Query = F.relu(Query)
-
-        Value = self.V2(x)
-        Value = F.relu(Value)
-
-        Key = self.K2(x)
-        Key = F.relu(Key)
+        Query = F.relu(self.Q2(x))
+        Value = F.relu(self.V2(x))
+        Key = F.relu(self.K2(x))
 
         x, _ = self.attn2(Query, Key, Value)
 
@@ -146,8 +136,6 @@ class Generator(nn.Module):
         """
 
         :param x: (batch_size, 1), current location
-        :param h: (1/2, batch_size, hidden_dim), lstm hidden state
-        :param c: (1/2, batch_size, hidden_dim), lstm cell state
         :return:
             (batch_size, total_locations), prediction of next stage
         """
@@ -159,25 +147,15 @@ class Generator(nn.Module):
 
         x = x.transpose(0, 1)
 
-        Query = self.Q(x)
-        Query = F.relu(Query)
-
-        Value = self.V(x)
-        Value = F.relu(Value)
-
-        Key = self.K(x)
-        Key = F.relu(Key)
+        Query = F.relu(self.Q(x))
+        Value = F.relu(self.V(x))
+        Key = F.relu(self.K(x))
 
         x, _ = self.attn(Query, Key, Value)
 
-        Query = self.Q2(x)
-        Query = F.relu(Query)
-
-        Value = self.V2(x)
-        Value = F.relu(Value)
-
-        Key = self.K2(x)
-        Key = F.relu(Key)
+        Query = F.relu(self.Q2(x))
+        Value = F.relu(self.V2(x))
+        Key = F.relu(self.K2(x))
 
         x, _ = self.attn2(Query, Key, Value)
 
