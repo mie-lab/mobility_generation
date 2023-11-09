@@ -11,8 +11,6 @@ import pickle as pickle
 
 import time
 
-from trackintel.geogr.distances import calculate_distance_matrix
-
 from generative.dataloader import (
     discriminator_dataset,
     discriminator_collate_fn,
@@ -27,7 +25,7 @@ from utils.earlystopping import EarlyStopping
 
 def generate_samples(model, config):
     samples = []
-    single_len = 256
+    single_len = 1024
     for _ in tqdm(range(int(config.num_gen_samples / single_len))):
         samples.extend(model.sample(single_len, config.generate_len).cpu().data.numpy().tolist())
     return np.array(samples)
@@ -69,17 +67,17 @@ def pre_training(discriminator, generator, all_locs, config, device, log_dir, in
     print(f"length of the train loader: {len(d_train_loader)}\t #samples: {len(d_train_data)}")
     print(f"length of the validation loader: {len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
 
-    discriminator = training(
-        d_train_loader,
-        d_vali_loader,
-        d_optimizer,
-        d_criterion,
-        discriminator,
-        config,
-        device,
-        log_dir,
-        model_type="discriminator",
-    )
+    # discriminator = training(
+    #     d_train_loader,
+    #     d_vali_loader,
+    #     d_optimizer,
+    #     d_criterion,
+    #     discriminator,
+    #     config,
+    #     device,
+    #     log_dir,
+    #     model_type="discriminator",
+    # )
 
     # pretrain generator
     print("Pretrain generator")

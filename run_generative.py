@@ -1,5 +1,4 @@
 # coding=utf-8
-import pdb
 import os
 import torch
 import argparse
@@ -13,13 +12,9 @@ from shapely import wkt, Point
 
 from easydict import EasyDict as edict
 
-from scipy.spatial.distance import pdist, squareform
-
-from trackintel.geogr.distances import calculate_distance_matrix
 
 from utils.utils import load_data, setup_seed, load_config, init_save_path
 from utils.dataloader import get_train_test, _get_valid_sequence
-from loc_predict.models.markov import markov_transition_prob
 
 from generative.movesim import Discriminator, Generator, AllEmbedding
 from generative.train import pre_training, adversarial_training
@@ -44,7 +39,7 @@ if __name__ == "__main__":
     config = edict(config)
 
     # read and preprocess
-    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp_small.csv"), index_col="id")
+    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp.csv"), index_col="id")
     loc = pd.read_csv(os.path.join(config.temp_save_root, "locs_s2.csv"), index_col="id")
     sp = load_data(sp, loc)
 
@@ -81,24 +76,24 @@ if __name__ == "__main__":
         f"#Parameters embeddings: {total_params_embed} \t generator: {total_params_generator - total_params_embed} \t discriminator: {total_params_discriminator - total_params_embed}"
     )
 
-    # if not config.use_pretrain:
-    #     log_dir = init_save_path(config, postfix="pretrain")
+    if not config.use_pretrain:
+        log_dir = init_save_path(config, postfix="pretrain")
 
-    #     discriminator, generator = pre_training(
-    #         discriminator,
-    #         generator,
-    #         all_locs,
-    #         config,
-    #         device,
-    #         log_dir,
-    #         input_data=(train_data, train_idx, vali_data, vali_idx),
-    #     )
+        discriminator, generator = pre_training(
+            discriminator,
+            generator,
+            all_locs,
+            config,
+            device,
+            log_dir,
+            input_data=(train_data, train_idx, vali_data, vali_idx),
+        )
 
-    # else:
-    #     generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
-    #     discriminator.load_state_dict(
-    #         torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
-    #     )
+    else:
+        generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
+        discriminator.load_state_dict(
+            torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
+        )
 
     print("Advtrain generator and discriminator ...")
     log_dir = init_save_path(config)

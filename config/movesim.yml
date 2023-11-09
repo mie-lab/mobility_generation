@@ -13,8 +13,8 @@ misc:
 
   verbose: True
   debug: False
-  d_batch_size: 64
-  g_batch_size: 64
+  d_batch_size: 128
+  g_batch_size: 8
   print_step: 50
   num_workers: 0
   
@@ -39,7 +39,7 @@ optimiser:
   g_lr: 0.0001
   weight_decay: 0.000001
 
-  rollout_num: 1
+  rollout_num: 8
 
   # for decay
   patience: 2

@@ -2,7 +2,6 @@ import os
 import numpy as np
 import pickle as pickle
 from tqdm import tqdm
-from pandas.testing import assert_frame_equal
 
 from torch.nn.utils.rnn import pad_sequence
 import torch
