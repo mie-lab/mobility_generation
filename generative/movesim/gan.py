@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import pickle as pickle
 
 
 class Discriminator(nn.Module):
@@ -10,17 +11,17 @@ class Discriminator(nn.Module):
 
     def __init__(self, config, embedding, dropout=0.5):
         super(Discriminator, self).__init__()
-        num_filters = [64, 64, 64, 64, 64, 64, 64, 64]
-        filter_sizes = [1, 3, 3, 3, 3, 3, 3, 3]
+        self.num_filters = [64, 64, 64, 64]
+        kernel_sizes = [3, 5, 7, 9]
 
         self.embedding = embedding
 
         self.convs = nn.ModuleList(
-            [nn.Conv2d(1, n, (f, config.base_emb_size)) for (n, f) in zip(num_filters, filter_sizes)]
+            [nn.Conv1d(config.base_emb_size, n, f, padding="same") for (n, f) in zip(self.num_filters, kernel_sizes)]
         )
-        self.highway = nn.Linear(sum(num_filters), sum(num_filters))
+        self.highway = nn.Linear(sum(self.num_filters), sum(self.num_filters))
         self.dropout = nn.Dropout(p=dropout)
-        self.linear = nn.Linear(sum(num_filters), 1)
+        self.linear = nn.Linear(sum(self.num_filters), 1)
 
         self.init_parameters()
 
@@ -29,9 +30,15 @@ class Discriminator(nn.Module):
         Args:
             x: (batch_size * seq_len)
         """
-        emb = self.embedding(x).unsqueeze(1)  # batch_size * 1 * seq_len * emb_dim
-        # [batch_size * num_filter * length]
-        convs = [F.relu(conv(emb)).squeeze(3) for conv in self.convs]
+        padding_mask = x != 0  # batch_size * seq_len
+
+        emb = self.embedding(x).transpose(1, 2)  # batch_size * emb_dim * seq_len
+
+        convs = [
+            F.relu(conv(emb)) * padding_mask.unsqueeze(1).repeat(1, n, 1)
+            for (conv, n) in zip(self.convs, self.num_filters)
+        ]  # [batch_size * num_filter * seq_len]
+
         pools = [F.max_pool1d(conv, conv.size(2)).squeeze(2) for conv in convs]  # [batch_size * num_filter]
         pred = torch.cat(pools, 1)  # batch_size * num_filters_sum
         highway = self.highway(pred)
@@ -71,20 +78,31 @@ class Generator(nn.Module):
         if self.starting_sample == "real":
             self.starting_dist = torch.tensor(starting_dist).float()
 
+        # distance and empirical visits
+        self.dist_matrix = pickle.load(open("./data/temp/dist_matrix.pk", "rb"))
+        self.emp_matrix = pickle.load(open("./data/temp/emp_matrix.pk", "rb"))
+
         self.loc_embedding = embedding
         # self.tim_embedding = nn.Embedding(num_embeddings=24, embedding_dim=self.base_emb_size)
 
-        self.attn = nn.MultiheadAttention(self.hidden_dim, 4)
+        self.attn = nn.MultiheadAttention(self.hidden_dim, 4, batch_first=True)
         self.Q = nn.Linear(self.base_emb_size, self.hidden_dim)
         self.V = nn.Linear(self.base_emb_size, self.hidden_dim)
         self.K = nn.Linear(self.base_emb_size, self.hidden_dim)
 
-        self.attn2 = nn.MultiheadAttention(self.hidden_dim, 1)
+        self.attn2 = nn.MultiheadAttention(self.hidden_dim, 1, batch_first=True)
         self.Q2 = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.V2 = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.K2 = nn.Linear(self.hidden_dim, self.hidden_dim)
 
         self.linear = nn.Linear(self.hidden_dim, self.total_loc_num)
+
+        # for distance and empirical matrics
+        self.linear_mat1 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
+        self.linear_mat1_2 = nn.Linear(self.hidden_dim, self.total_loc_num)
+
+        self.linear_mat2 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
+        self.linear_mat2_2 = nn.Linear(self.hidden_dim, self.total_loc_num)
 
         self.init_params()
 
@@ -107,30 +125,43 @@ class Generator(nn.Module):
         :return:
             (batch_size * seq_len, total_locations), prediction of next stage of all locations
         """
-        lemb = self.loc_embedding(x_l)
-        # temb = self.tim_embedding(x_t)
-        # x = lemb + temb
-        x = lemb
+        src_padding_mask = x_l == 0
 
-        x = x.transpose(0, 1)
+        locs = x_l.reshape(-1).detach().cpu().numpy() - 1  # for padding
+        dist_vec = self.dist_matrix[locs]
+        visit_vec = self.emp_matrix[locs]
+        dist_vec = torch.Tensor(dist_vec).to(self.device)
+        visit_vec = torch.Tensor(visit_vec).to(self.device)
+
+        x = self.loc_embedding(x_l)
+
         Query = F.relu(self.Q(x))
         Value = F.relu(self.V(x))
         Key = F.relu(self.K(x))
 
-        x, _ = self.attn(Query, Key, Value)
+        x, _ = self.attn(Query, Key, Value, key_padding_mask=src_padding_mask)
 
         Query = F.relu(self.Q2(x))
         Value = F.relu(self.V2(x))
         Key = F.relu(self.K2(x))
 
-        x, _ = self.attn2(Query, Key, Value)
+        x, _ = self.attn2(Query, Key, Value, key_padding_mask=src_padding_mask)
 
-        x = x.transpose(0, 1)
+        x = self.linear(x.reshape(-1, self.hidden_dim))
 
-        x = x.reshape(-1, self.hidden_dim)
-        x = self.linear(x)
+        x = F.relu(x)
 
-        return F.relu(x)
+        # matrix calculation
+        dist_vec = F.relu(self.linear_mat1(dist_vec))
+        dist_vec = torch.sigmoid(self.linear_mat1_2(dist_vec))
+        dist_vec = F.normalize(dist_vec)
+
+        visit_vec = F.relu(self.linear_mat2(visit_vec))
+        visit_vec = torch.sigmoid(self.linear_mat2_2(visit_vec))
+        visit_vec = F.normalize(visit_vec)
+
+        pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
+        return pred
 
     def step(self, input):
         """
@@ -139,33 +170,43 @@ class Generator(nn.Module):
         :return:
             (batch_size, total_locations), prediction of next stage
         """
+        src_padding_mask = input == 0
 
-        lemb = self.loc_embedding(input)
-        # temb = self.tim_embedding(t)
-        # x = lemb + temb
-        x = lemb
+        locs = input.reshape(-1).detach().cpu().numpy() - 1  # for padding
+        dist_vec = self.dist_matrix[locs]
+        visit_vec = self.emp_matrix[locs]
+        dist_vec = torch.Tensor(dist_vec).to(self.device)
+        visit_vec = torch.Tensor(visit_vec).to(self.device)
 
-        x = x.transpose(0, 1)
+        x = self.loc_embedding(input)
 
         Query = F.relu(self.Q(x))
         Value = F.relu(self.V(x))
         Key = F.relu(self.K(x))
 
-        x, _ = self.attn(Query, Key, Value)
+        attn, _ = self.attn(Query, Key, Value, key_padding_mask=src_padding_mask)
 
-        Query = F.relu(self.Q2(x))
-        Value = F.relu(self.V2(x))
-        Key = F.relu(self.K2(x))
+        Query = F.relu(self.Q2(attn))
+        Value = F.relu(self.V2(attn))
+        Key = F.relu(self.K2(attn))
 
-        x, _ = self.attn2(Query, Key, Value)
+        attn, _ = self.attn2(Query, Key, Value, key_padding_mask=src_padding_mask)
 
-        x = x.transpose(0, 1)
+        attn = self.linear(attn.reshape(-1, self.hidden_dim))
+        x = F.relu(attn)
 
-        x = x.reshape(-1, self.hidden_dim)
-        x = self.linear(x)
-        x = F.relu(x)
+        # matrix calculation
+        dist_vec = F.relu(self.linear_mat1(dist_vec))
+        dist_vec = torch.sigmoid(self.linear_mat1_2(dist_vec))
+        dist_vec = F.normalize(dist_vec)
 
-        return F.softmax(x, dim=-1)
+        visit_vec = F.relu(self.linear_mat2(visit_vec))
+        visit_vec = torch.sigmoid(self.linear_mat2_2(visit_vec))
+        visit_vec = F.normalize(visit_vec)
+
+        pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
+
+        return F.softmax(pred, dim=-1)
 
     def sample(self, batch_size, seq_len, x=None):
         """
@@ -180,7 +221,7 @@ class Generator(nn.Module):
         s = 0
         if x is None:
             if self.starting_sample == "rand":
-                x = torch.LongTensor(torch.randint(high=self.total_loc_num, size=(batch_size, 1))).to(self.device)
+                x = torch.randint(low=1, high=self.total_loc_num, size=(batch_size, 1)).long().to(self.device)
             elif self.starting_sample == "real":
                 x = torch.LongTensor(
                     torch.stack([torch.multinomial(self.starting_dist, 1) for _ in range(batch_size)], dim=0)
@@ -192,24 +233,24 @@ class Generator(nn.Module):
             if s > 0:
                 samples.append(x)
             for i in range(s, seq_len):
-                # t = torch.LongTensor([i % 24]).to(self.device)
-                # t = t.repeat(batch_size).reshape(batch_size, -1)
                 x = self.step(x)
                 x = x.multinomial(1)
+                x[x == 0] += 1
                 samples.append(x)
         else:
             given_len = x.size(1)
-            lis = x.chunk(x.size(1), dim=1)
+
+            lis = x.chunk(given_len, dim=1)
             for i in range(given_len):
-                # t = torch.LongTensor([i % 24]).to(self.device)
-                # t = t.repeat(batch_size).reshape(batch_size, -1)
-                x = self.step(lis[i])
                 samples.append(lis[i])
+
+            x = self.step(lis[-1])
             x = x.multinomial(1)
+            x[x == 0] += 1
+
             for i in range(given_len, seq_len):
                 samples.append(x)
-                # t = torch.LongTensor([i % 24]).to(self.device)
-                # t = t.repeat(batch_size).reshape(batch_size, -1)
                 x = self.step(x)
                 x = x.multinomial(1)
+                x[x == 0] += 1
         return torch.cat(samples, dim=1)

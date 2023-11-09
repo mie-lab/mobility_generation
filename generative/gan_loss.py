@@ -45,7 +45,8 @@ class distanceLoss(nn.Module):
         :param x: generated sequence, batch_size * seq_len
         :return:
         """
-        x = x.long()
+
+        x = x.long() - 1  # for padding
         x1 = torch.index_select(self.geo_x, 0, x[:, :-1].reshape(-1))
         x2 = torch.index_select(self.geo_x, 0, x[:, 1:].reshape(-1))
         y1 = torch.index_select(self.geo_y, 0, x[:, :-1].reshape(-1))
@@ -54,7 +55,7 @@ class distanceLoss(nn.Module):
         dx = x1 - x2
         dy = y1 - y2
         loss = dx**2 + dy**2
-        loss = torch.sum(loss) / loss.size(0)
+        loss = torch.mean(loss) / 1000000 / loss.size(0)
         return loss
 
 

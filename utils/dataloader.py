@@ -68,7 +68,7 @@ def collate_fn(batch):
         for key in return_dict:
             dict_batch[key].append(return_dict[key])
 
-    src_batch = pad_sequence(src_batch)
+    src_batch = pad_sequence(src_batch, padding_value=0)
     tgt_batch = torch.tensor(tgt_batch, dtype=torch.int64)
     dict_batch["user"] = torch.tensor(dict_batch["user"], dtype=torch.int64)
     dict_batch["len"] = torch.tensor(dict_batch["len"], dtype=torch.int64)
@@ -76,7 +76,7 @@ def collate_fn(batch):
     for key in dict_batch:
         if key in ["user", "len", "history_count"]:
             continue
-        dict_batch[key] = pad_sequence(dict_batch[key])
+        dict_batch[key] = pad_sequence(dict_batch[key], padding_value=0)
 
     return src_batch, tgt_batch, dict_batch
 

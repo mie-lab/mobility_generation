@@ -12,7 +12,7 @@ Preprocessing:
 
 Location generation:
 - DBSCAN algorithm parameter: epsilon=20, num_samples=2, agg_level="dataset". After generation 62673 locations
-- Location spatial binning: Use s2geometry to bin locations. Level 14. After binning 174434 locations covering Switzerland. The original 62673 locations are projected into 15841 binned locations. TODO:
+- Location spatial binning: Use s2geometry to bin locations. Level 14 (13). After binning 174434 (44106) locations covering Switzerland. The original 62673 locations are projected into 15841 (8964) binned locations. TODO:
     - hierarchical s2 location generation.  
 
 ## Generation

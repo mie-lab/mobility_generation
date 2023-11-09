@@ -51,8 +51,11 @@ if __name__ == "__main__":
     all_locs = pd.read_csv(os.path.join(config.temp_save_root, "all_locations.csv"), index_col="id")
     all_locs["geometry"] = all_locs["geometry"].apply(wkt.loads)
     all_locs = gpd.GeoDataFrame(all_locs, geometry="geometry", crs="EPSG:4326")
+    # transform to projected coordinate systems
+    all_locs = all_locs.to_crs("EPSG:2056")
 
     train_data, vali_data, test_data, all_locs = get_train_test(sp, all_locs=all_locs)
+
     print(f"Max location id:{all_locs.loc_id.max()}, unique location id:{all_locs.loc_id.unique().shape[0]}")
     config["total_loc_num"] = int(all_locs.loc_id.max() + 1)
     config["total_user_num"] = int(train_data.user_id.max() + 1)
@@ -64,6 +67,7 @@ if __name__ == "__main__":
     vali_idx = _get_valid_sequence(vali_data, print_progress=config.verbose)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cpu")
 
     # init models
     embedding = AllEmbedding(config=config).to(device)
@@ -77,38 +81,33 @@ if __name__ == "__main__":
         f"#Parameters embeddings: {total_params_embed} \t generator: {total_params_generator - total_params_embed} \t discriminator: {total_params_discriminator - total_params_embed}"
     )
 
-    # transit_df = train_data.groupby("user_id").apply(markov_transition_prob, n=1).reset_index()
-    # transit_df = transit_df.groupby(["loc_1", "toLoc"])["size"].sum().reset_index()
-    # # transition_df[["", "", ""]]
+    # if not config.use_pretrain:
+    #     log_dir = init_save_path(config, postfix="pretrain")
 
-    # print(transit_df)
+    #     discriminator, generator = pre_training(
+    #         discriminator,
+    #         generator,
+    #         all_locs,
+    #         config,
+    #         device,
+    #         log_dir,
+    #         input_data=(train_data, train_idx, vali_data, vali_idx),
+    #     )
 
-    # pdistance = calculate_distance_matrix(all_locs, all_locs.iloc[0:1], dist_metric="haversine")
-    # print(pdistance)
-    # opt = parser.parse_args()
-    # main(opt)
-
-    if not config.use_pretrain:
-        log_dir = init_save_path(config, postfix="pretrain")
-
-        discriminator, generator = pre_training(
-            discriminator,
-            generator,
-            all_locs,
-            config,
-            device,
-            log_dir,
-            input_data=(train_data, train_idx, vali_data, vali_idx),
-        )
-
-    else:
-        generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
-        discriminator.load_state_dict(
-            torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
-        )
+    # else:
+    #     generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
+    #     discriminator.load_state_dict(
+    #         torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
+    #     )
 
     print("Advtrain generator and discriminator ...")
     log_dir = init_save_path(config)
     adversarial_training(
-        discriminator, generator, config, device, all_locs, log_dir, input_data=(train_data, train_idx, vali_data, vali_idx)
+        discriminator,
+        generator,
+        config,
+        device,
+        all_locs,
+        log_dir,
+        input_data=(train_data, train_idx, vali_data, vali_idx),
     )

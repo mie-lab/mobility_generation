@@ -80,7 +80,7 @@ def discriminator_collate_fn(batch):
         src_batch.append(src_sample)
         tgt_batch.append(tgt_sample)
 
-    src_batch = pad_sequence(src_batch)
+    src_batch = pad_sequence(src_batch, padding_value=0)
     tgt_batch = torch.tensor(tgt_batch, dtype=torch.int64)
 
     return src_batch, tgt_batch
@@ -94,8 +94,8 @@ def generator_collate_fn(batch):
         src_batch.append(src_sample)
         tgt_batch.append(tgt_sample)
 
-    src_batch = pad_sequence(src_batch)
-    tgt_batch = pad_sequence(tgt_batch)
+    src_batch = pad_sequence(src_batch, padding_value=0)
+    tgt_batch = pad_sequence(tgt_batch, padding_value=0)
 
     return src_batch, tgt_batch
 

@@ -1,8 +1,8 @@
 misc:
-  dataset: mobis_small
+  dataset: mobis
 
-  use_pretrain: True
-  pretrain_filepath: mobis_small_movesim_pretrain_1699262481
+  use_pretrain: False
+  pretrain_filepath: mobis_movesim_pretrain_1699365477
   generate_len: 50
 
   num_gen_samples: 25600
@@ -13,8 +13,8 @@ misc:
 
   verbose: True
   debug: False
-  d_batch_size: 32
-  g_batch_size: 8
+  d_batch_size: 64
+  g_batch_size: 64
   print_step: 50
   num_workers: 0
   
@@ -28,7 +28,7 @@ model:
   #
   task: attention
   periodic_loss: 3.0
-  distance_loss: 1.5
+  distance_loss: 0.5
 
 optimiser:
   optimizer: Adam
@@ -38,6 +38,8 @@ optimiser:
   d_lr: 0.00001
   g_lr: 0.0001
   weight_decay: 0.000001
+
+  rollout_num: 1
 
   # for decay
   patience: 2

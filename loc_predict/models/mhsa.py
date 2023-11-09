@@ -31,7 +31,7 @@ class TransEncoder(nn.Module):
         emb = self.Embedding(src, context_dict)
         seq_len = context_dict["len"]
 
-        # positional encoding, dropout performed inside
+        # padding is -1
         src_mask = self._generate_square_subsequent_mask(src.shape[0]).to(device)
         src_padding_mask = (src == 0).transpose(0, 1).to(device)
         out = self.encoder(emb, mask=src_mask, src_key_padding_mask=src_padding_mask)

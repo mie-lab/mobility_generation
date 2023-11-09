@@ -27,8 +27,9 @@ from utils.earlystopping import EarlyStopping
 
 def generate_samples(model, config):
     samples = []
-    for _ in range(int(config.num_gen_samples / config.d_batch_size)):
-        samples.extend(model.sample(config.d_batch_size, config.generate_len).cpu().data.numpy().tolist())
+    single_len = 256
+    for _ in tqdm(range(int(config.num_gen_samples / single_len))):
+        samples.extend(model.sample(single_len, config.generate_len).cpu().data.numpy().tolist())
     return np.array(samples)
 
 
@@ -325,9 +326,10 @@ def adversarial_training(discriminator, generator, config, device, all_locs, log
         torch.save(discriminator.state_dict(), log_dir + "/discriminator.pt")
 
         if epoch > 0:
-            samples = generator.sample(config.d_batch_size, config.generate_len)
+            samples = generate_samples(generator, config)
             save_path = os.path.join(config.temp_save_root, "temp", f"generated_samples_{epoch}.pk")
             save_pk_file(save_path, samples)
+
 
 def train_generator(generator, discriminator, rollout, gen_gan_loss, gen_gan_optm, config, device, crit):
     period_crit, distance_crit = crit
@@ -341,7 +343,7 @@ def train_generator(generator, discriminator, rollout, gen_gan_loss, gen_gan_opt
     targets = samples.view((-1,))
 
     # calculate the reward
-    rewards = rollout.get_reward(samples, roll_out_num=8, discriminator=discriminator, device=device)
+    rewards = rollout.get_reward(samples, roll_out_num=config.rollout_num, discriminator=discriminator, device=device)
 
     prob = generator.forward(inputs)
 
@@ -358,6 +360,7 @@ def train_generator(generator, discriminator, rollout, gen_gan_loss, gen_gan_opt
     gen_gan_optm.step()
 
     return running_loss
+
 
 def save_pk_file(save_path, data):
     """Function to save data to pickle format given data and path."""

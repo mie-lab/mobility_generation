@@ -12,7 +12,9 @@ class AllEmbedding(nn.Module):
         # emberdding layers
 
         # location embedding
-        self.emb_loc = nn.Embedding(num_embeddings=config.total_loc_num, embedding_dim=config.base_emb_size)
+        self.emb_loc = nn.Embedding(
+            num_embeddings=config.total_loc_num, embedding_dim=config.base_emb_size, padding_idx=0
+        )
         self.dropout = nn.Dropout(0.1)
 
     def forward(self, src) -> Tensor:
