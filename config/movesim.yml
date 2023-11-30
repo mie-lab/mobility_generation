@@ -3,7 +3,10 @@ misc:
 
   use_pretrain: False
   pretrain_filepath: mobis_movesim_pretrain_1699365477
+
+
   generate_len: 50
+  previous_day: 28
 
   num_gen_samples: 25600
   # 

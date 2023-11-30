@@ -58,8 +58,8 @@ if __name__ == "__main__":
     # get valid idx for training and validation
     train_data["id"] = np.arange(len(train_data))
     vali_data["id"] = np.arange(len(vali_data))
-    train_idx = _get_valid_sequence(train_data, print_progress=config.verbose)
-    vali_idx = _get_valid_sequence(vali_data, print_progress=config.verbose)
+    train_idx = _get_valid_sequence(train_data, print_progress=config.verbose, previous_day=config.previous_day)
+    vali_idx = _get_valid_sequence(vali_data, print_progress=config.verbose, previous_day=config.previous_day)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # device = torch.device("cpu")

@@ -11,13 +11,14 @@ class Discriminator(nn.Module):
 
     def __init__(self, config, embedding, dropout=0.5):
         super(Discriminator, self).__init__()
-        self.num_filters = [64, 64, 64, 64]
-        kernel_sizes = [3, 5, 7, 9]
+        self.num_filters = [128, 128, 64, 64, 64]
+        self.kernel_sizes = [3, 5, 7, 9, 11]
 
         self.embedding = embedding
 
+        # changed it to account for the paddings of variable length
         self.convs = nn.ModuleList(
-            [nn.Conv1d(config.base_emb_size, n, f, padding="same") for (n, f) in zip(self.num_filters, kernel_sizes)]
+            [nn.Conv2d(1, n, (f, config.base_emb_size)) for (n, f) in zip(self.num_filters, self.kernel_sizes)]
         )
         self.highway = nn.Linear(sum(self.num_filters), sum(self.num_filters))
         self.dropout = nn.Dropout(p=dropout)
@@ -32,17 +33,18 @@ class Discriminator(nn.Module):
         """
         padding_mask = x != 0  # batch_size * seq_len
 
-        emb = self.embedding(x).transpose(1, 2)  # batch_size * emb_dim * seq_len
+        emb = self.embedding(x).unsqueeze(1)  # batch_size * 1 * seq_len * emb_dim
 
         convs = [
-            F.relu(conv(emb)) * padding_mask.unsqueeze(1).repeat(1, n, 1)
-            for (conv, n) in zip(self.convs, self.num_filters)
-        ]  # [batch_size * num_filter * seq_len]
+            F.relu(conv(emb)).squeeze(3)  # batch_size * num_filter * seq_len
+            * padding_mask.unsqueeze(1).repeat(1, n, 1)[..., (k // 2) : -(k // 2)]  # for padding
+            for (conv, n, k) in zip(self.convs, self.num_filters, self.kernel_sizes)
+        ]
 
         pools = [F.max_pool1d(conv, conv.size(2)).squeeze(2) for conv in convs]  # [batch_size * num_filter]
         pred = torch.cat(pools, 1)  # batch_size * num_filters_sum
         highway = self.highway(pred)
-        pred = torch.sigmoid(highway) * F.relu(highway) + (1.0 - torch.sigmoid(highway)) * pred
+        pred = F.sigmoid(highway) * F.relu(highway) + (1.0 - F.sigmoid(highway)) * pred
 
         return self.linear(self.dropout(pred))
 
@@ -153,11 +155,11 @@ class Generator(nn.Module):
 
         # matrix calculation
         dist_vec = F.relu(self.linear_mat1(dist_vec))
-        dist_vec = torch.sigmoid(self.linear_mat1_2(dist_vec))
+        dist_vec = F.sigmoid(self.linear_mat1_2(dist_vec))
         dist_vec = F.normalize(dist_vec)
 
         visit_vec = F.relu(self.linear_mat2(visit_vec))
-        visit_vec = torch.sigmoid(self.linear_mat2_2(visit_vec))
+        visit_vec = F.sigmoid(self.linear_mat2_2(visit_vec))
         visit_vec = F.normalize(visit_vec)
 
         pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
@@ -197,11 +199,11 @@ class Generator(nn.Module):
 
         # matrix calculation
         dist_vec = F.relu(self.linear_mat1(dist_vec))
-        dist_vec = torch.sigmoid(self.linear_mat1_2(dist_vec))
+        dist_vec = F.sigmoid(self.linear_mat1_2(dist_vec))
         dist_vec = F.normalize(dist_vec)
 
         visit_vec = F.relu(self.linear_mat2(visit_vec))
-        visit_vec = torch.sigmoid(self.linear_mat2_2(visit_vec))
+        visit_vec = F.sigmoid(self.linear_mat2_2(visit_vec))
         visit_vec = F.normalize(visit_vec)
 
         pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)

@@ -204,7 +204,7 @@ def _split_dataset(totalData):
     return train_data, vali_data, test_data
 
 
-def _get_valid_sequence(input_df, print_progress=True):
+def _get_valid_sequence(input_df, print_progress=True, previous_day=7):
     def getValidSequenceUser(df, previous_day=7):
         id_ls = []
         df.reset_index(drop=True, inplace=True)
@@ -254,6 +254,10 @@ def _get_valid_sequence(input_df, print_progress=True):
         )
 
     valid_user_ls = applyParallel(
-        input_df.groupby("user_id"), getValidSequenceUser, n_jobs=-1, previous_day=7, print_progress=print_progress
+        input_df.groupby("user_id"),
+        getValidSequenceUser,
+        n_jobs=-1,
+        previous_day=previous_day,
+        print_progress=print_progress,
     )
     return [item for sublist in valid_user_ls for item in sublist]

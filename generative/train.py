@@ -11,7 +11,7 @@ import pickle as pickle
 
 import time
 
-from generative.dataloader import (
+from generative.gan_dataloader import (
     discriminator_dataset,
     discriminator_collate_fn,
     generator_dataset,
@@ -35,8 +35,8 @@ def pre_training(discriminator, generator, all_locs, config, device, log_dir, in
     train_data, train_idx, vali_data, vali_idx = input_data
 
     # pretrain discriminator
-    fake_train_samples = construct_discriminator_pretrain_dataset(config, train_data, train_idx, all_locs)
-    fake_vali_samples = construct_discriminator_pretrain_dataset(config, vali_data, vali_idx, all_locs)
+    fake_train_samples = construct_discriminator_pretrain_dataset(train_data, train_idx, all_locs)
+    fake_vali_samples = construct_discriminator_pretrain_dataset(vali_data, vali_idx, all_locs)
     print("Pretrain discriminator")
 
     # train dataset
@@ -67,17 +67,17 @@ def pre_training(discriminator, generator, all_locs, config, device, log_dir, in
     print(f"length of the train loader: {len(d_train_loader)}\t #samples: {len(d_train_data)}")
     print(f"length of the validation loader: {len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
 
-    # discriminator = training(
-    #     d_train_loader,
-    #     d_vali_loader,
-    #     d_optimizer,
-    #     d_criterion,
-    #     discriminator,
-    #     config,
-    #     device,
-    #     log_dir,
-    #     model_type="discriminator",
-    # )
+    discriminator = training(
+        d_train_loader,
+        d_vali_loader,
+        d_optimizer,
+        d_criterion,
+        discriminator,
+        config,
+        device,
+        log_dir,
+        model_type="discriminator",
+    )
 
     # pretrain generator
     print("Pretrain generator")
