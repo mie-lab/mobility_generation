@@ -54,13 +54,18 @@ Use 4 weeks as input (TODO: Tune weeks)
 
 ## Metrics
 
-- (TODO:) Travel distance 
+- Travel distance 
 - Radius of Gyration
-- Activity duration
-- Daily visited locations
-- motifs distribution
+- Number of repetitive locations
+- Overall visitation frequency
+- Individual visitation frequency
+- TODO: Activity duration
+- TODO: Daily visited locations
+- TODO: motifs distribution
 
 ## TODO:
 - [ ] Generation with predictive models, implement beam search
 - [ ] Implement classical generation model 
 - ensure evaluation is on the same test dataset/sequence
+- how to deal with self transitions?
+- check when the generator gets updated -> do we need multiple runs for generator training?

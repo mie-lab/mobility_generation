@@ -20,13 +20,13 @@ from generative.gan_dataloader import (
 )
 from generative.rollout import Rollout
 from generative.gan_loss import GANLoss, periodLoss, distanceLoss
+from metrics.evaluations import Metric
 from utils.earlystopping import EarlyStopping
 
 
-def generate_samples(model, config):
+def generate_samples(model, config, num, single_len=256, print_progress=False):
     samples = []
-    single_len = 1024
-    for _ in tqdm(range(int(config.num_gen_samples / single_len))):
+    for _ in tqdm(range(int(num / single_len)), disable=not print_progress):
         samples.extend(model.sample(single_len, config.generate_len).cpu().data.numpy().tolist())
     return np.array(samples)
 
@@ -244,7 +244,7 @@ def validate_epoch(config, model, data_loader, criterion, device, model_type):
     return {"val_loss": val_loss}
 
 
-def adversarial_training(discriminator, generator, config, device, all_locs, log_dir, input_data):
+def adv_training(discriminator, generator, config, device, all_locs, log_dir, input_data):
     train_data, train_idx, vali_data, vali_idx = input_data
 
     rollout = Rollout(generator, 0.9)
@@ -257,6 +257,9 @@ def adversarial_training(discriminator, generator, config, device, all_locs, log
     # distance loss
     distance_crit = distanceLoss(locations=all_locs, device=device).to(device)
 
+    # evaluation
+    metrics = Metric(config, locations=all_locs, input_data=vali_data, valid_start_end_idx=vali_idx)
+
     d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
     d_optimizer = optim.Adam(discriminator.parameters(), lr=config.d_lr, weight_decay=config.weight_decay)
 
@@ -266,38 +269,46 @@ def adversarial_training(discriminator, generator, config, device, all_locs, log
         start_time = time.time()
 
         # train
-        iterations = range(3) if epoch != 0 else range(1)
-        for it in iterations:
-            start_time = time.time()
-            train_loss = train_generator(
-                generator,
-                discriminator,
-                rollout,
-                gen_gan_loss,
-                gen_gan_optm,
-                config,
-                device,
-                crit=(period_crit, distance_crit),
+        start_time = time.time()
+
+        # evaluate current generator performance
+        samples = generate_samples(generator, config, single_len=config.d_batch_size, num=config.d_batch_size)
+        jsds = metrics.get_individual_jsds(gene_data=samples)
+        print(
+            "Metric: distance {:.3f}, rg {:.3f}, period {:.3f}, topk all {:.3f}, topk {:.3f}".format(
+                jsds[0], jsds[1], jsds[2], jsds[3], jsds[4]
             )
-            if config.verbose:
-                print(
-                    "Generator: Epoch {}, train iter {}\t loss: {:.3f}, took: {:.2f}s \r".format(
-                        epoch + 1,
-                        it,
-                        train_loss,
-                        time.time() - start_time,
-                    )
+        )
+
+        train_loss = train_generator(
+            generator,
+            discriminator,
+            samples,
+            rollout,
+            gen_gan_loss,
+            gen_gan_optm,
+            config,
+            device,
+            crit=(period_crit, distance_crit),
+        )
+        if config.verbose:
+            print(
+                "Generator: Epoch {}\t loss: {:.3f}, took: {:.2f}s \r".format(
+                    epoch + 1,
+                    train_loss,
+                    time.time() - start_time,
                 )
+            )
 
         rollout.update_params()
 
+        # train discriminator
         print("training discriminator")
-
         for _ in range(1):
-            generated_samples = generate_samples(generator, config)
-            d_train_data = discriminator_dataset(
-                true_data=train_data, fake_data=generated_samples, valid_start_end_idx=train_idx
+            samples = generate_samples(
+                generator, config, num=config.num_gen_samples, single_len=1024, print_progress=True
             )
+            d_train_data = discriminator_dataset(true_data=train_data, fake_data=samples, valid_start_end_idx=train_idx)
             kwds_train = {
                 "shuffle": True,
                 "num_workers": config.num_workers,
@@ -323,21 +334,22 @@ def adversarial_training(discriminator, generator, config, device, all_locs, log
         torch.save(generator.state_dict(), log_dir + "/generator.pt")
         torch.save(discriminator.state_dict(), log_dir + "/discriminator.pt")
 
-        if epoch > 0:
-            samples = generate_samples(generator, config)
+        if epoch > 10:
+            samples = generate_samples(
+                generator, config, num=config.num_gen_samples, single_len=1024, print_progress=True
+            )
             save_path = os.path.join(config.temp_save_root, "temp", f"generated_samples_{epoch}.pk")
             save_pk_file(save_path, samples)
 
 
-def train_generator(generator, discriminator, rollout, gen_gan_loss, gen_gan_optm, config, device, crit):
+def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, gen_gan_optm, config, device, crit):
     period_crit, distance_crit = crit
 
-    samples = generator.sample(config.d_batch_size, config.generate_len)
     # construct the input to the generator, add zeros before samples and delete the last column
     zeros = torch.zeros((config.d_batch_size, 1)).long().to(device)
+    samples = torch.Tensor(samples).long().to(device)
 
     inputs = torch.cat([zeros, samples], dim=1)[:, :-1]
-
     targets = samples.view((-1,))
 
     # calculate the reward

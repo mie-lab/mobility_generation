@@ -8,7 +8,7 @@ misc:
   generate_len: 50
   previous_day: 28
 
-  num_gen_samples: 25600
+  num_gen_samples: 12800
   # 
   if_embed_time: False
   if_embed_user: True
@@ -30,8 +30,8 @@ model:
   networkName: movesim
   #
   task: attention
-  periodic_loss: 3.0
-  distance_loss: 0.5
+  periodic_loss: 1.0
+  distance_loss: 1.0
 
 optimiser:
   optimizer: Adam
@@ -42,7 +42,7 @@ optimiser:
   g_lr: 0.0001
   weight_decay: 0.000001
 
-  rollout_num: 8
+  rollout_num: 4
 
   # for decay
   patience: 2

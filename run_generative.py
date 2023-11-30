@@ -17,7 +17,7 @@ from utils.utils import load_data, setup_seed, load_config, init_save_path
 from utils.dataloader import get_train_test, _get_valid_sequence
 
 from generative.movesim import Discriminator, Generator, AllEmbedding
-from generative.train import pre_training, adversarial_training
+from generative.train import pre_training, adv_training
 
 
 if __name__ == "__main__":
@@ -76,28 +76,28 @@ if __name__ == "__main__":
         f"#Parameters embeddings: {total_params_embed} \t generator: {total_params_generator - total_params_embed} \t discriminator: {total_params_discriminator - total_params_embed}"
     )
 
-    if not config.use_pretrain:
-        log_dir = init_save_path(config, postfix="pretrain")
+    # if not config.use_pretrain:
+    #     log_dir = init_save_path(config, postfix="pretrain")
 
-        discriminator, generator = pre_training(
-            discriminator,
-            generator,
-            all_locs,
-            config,
-            device,
-            log_dir,
-            input_data=(train_data, train_idx, vali_data, vali_idx),
-        )
+    #     discriminator, generator = pre_training(
+    #         discriminator,
+    #         generator,
+    #         all_locs,
+    #         config,
+    #         device,
+    #         log_dir,
+    #         input_data=(train_data, train_idx, vali_data, vali_idx),
+    #     )
 
-    else:
-        generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
-        discriminator.load_state_dict(
-            torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
-        )
+    # else:
+    #     generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
+    #     discriminator.load_state_dict(
+    #         torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
+    #     )
 
     print("Advtrain generator and discriminator ...")
     log_dir = init_save_path(config)
-    adversarial_training(
+    adv_training(
         discriminator,
         generator,
         config,

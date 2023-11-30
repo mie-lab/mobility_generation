@@ -31,6 +31,7 @@ class Rollout(object):
         for _ in range(roll_out_num):
             for step in range(1, seq_len):
                 data = x[:, :step]
+                # use own model
                 samples = self.own_model.sample(batch_size, seq_len, data)
                 pred = discriminator(samples)
 
@@ -51,4 +52,5 @@ class Rollout(object):
             if name.startswith("emb") or name.startswith("Emb"):
                 param.data = dic[name]
             else:
+                # update own model
                 param.data = self.update_rate * param.data + (1 - self.update_rate) * dic[name]
