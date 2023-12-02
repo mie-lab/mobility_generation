@@ -7,7 +7,7 @@ import pandas as pd
 import geopandas as gpd
 
 
-from shapely import wkt, Point
+from shapely import wkt
 
 
 from easydict import EasyDict as edict
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     embedding = AllEmbedding(config=config).to(device)
     generator = Generator(device=device, config=config, embedding=embedding).to(device)
     discriminator = Discriminator(config=config, embedding=embedding).to(device)
-    #
+    # calculate parameters
     total_params_embed = sum(p.numel() for p in embedding.parameters() if p.requires_grad)
     total_params_generator = sum(p.numel() for p in generator.parameters() if p.requires_grad)
     total_params_discriminator = sum(p.numel() for p in discriminator.parameters() if p.requires_grad)

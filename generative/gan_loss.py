@@ -4,6 +4,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 from torch.autograd import Variable
+import torch.nn.functional as F
 
 
 class GANLoss(nn.Module):
@@ -71,7 +72,7 @@ class periodLoss(nn.Module):
         :param x: generated sequence, batch_size * seq_len
         :return:
         """
-        # TODO: change to true periodic loss for 24h 
+        # TODO: change to true periodic loss for 24h
         loss = 0.0
         for i in range(x.size(1) - self.time_interval):
             loss += torch.sum(torch.ne(x[:, i], x[:, i + self.time_interval]))

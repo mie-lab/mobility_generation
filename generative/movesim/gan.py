@@ -81,18 +81,18 @@ class Generator(nn.Module):
             self.starting_dist = torch.tensor(starting_dist).float()
 
         # distance and empirical visits
-        self.dist_matrix = pickle.load(open("./data/temp/dist_matrix.pk", "rb"))
-        self.emp_matrix = pickle.load(open("./data/temp/emp_matrix.pk", "rb"))
+        # self.dist_matrix = pickle.load(open("./data/temp/dist_matrix.pk", "rb"))
+        # self.emp_matrix = pickle.load(open("./data/temp/emp_matrix.pk", "rb"))
 
         self.loc_embedding = embedding
         # self.tim_embedding = nn.Embedding(num_embeddings=24, embedding_dim=self.base_emb_size)
 
-        self.attn = nn.MultiheadAttention(self.hidden_dim, 4, batch_first=True)
+        self.attn = nn.MultiheadAttention(self.hidden_dim, 8, batch_first=True)
         self.Q = nn.Linear(self.base_emb_size, self.hidden_dim)
         self.V = nn.Linear(self.base_emb_size, self.hidden_dim)
         self.K = nn.Linear(self.base_emb_size, self.hidden_dim)
 
-        self.attn2 = nn.MultiheadAttention(self.hidden_dim, 1, batch_first=True)
+        self.attn2 = nn.MultiheadAttention(self.hidden_dim, 4, batch_first=True)
         self.Q2 = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.V2 = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.K2 = nn.Linear(self.hidden_dim, self.hidden_dim)
@@ -100,11 +100,11 @@ class Generator(nn.Module):
         self.linear = nn.Linear(self.hidden_dim, self.total_loc_num)
 
         # for distance and empirical matrics
-        self.linear_mat1 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
-        self.linear_mat1_2 = nn.Linear(self.hidden_dim, self.total_loc_num)
+        # self.linear_mat1 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
+        # self.linear_mat1_2 = nn.Linear(self.hidden_dim, self.total_loc_num)
 
-        self.linear_mat2 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
-        self.linear_mat2_2 = nn.Linear(self.hidden_dim, self.total_loc_num)
+        # self.linear_mat2 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
+        # self.linear_mat2_2 = nn.Linear(self.hidden_dim, self.total_loc_num)
 
         self.init_params()
 
@@ -129,11 +129,11 @@ class Generator(nn.Module):
         """
         src_padding_mask = x_l == 0
 
-        locs = x_l.reshape(-1).detach().cpu().numpy() - 1  # for padding
-        dist_vec = self.dist_matrix[locs]
-        visit_vec = self.emp_matrix[locs]
-        dist_vec = torch.Tensor(dist_vec).to(self.device)
-        visit_vec = torch.Tensor(visit_vec).to(self.device)
+        # locs = x_l.reshape(-1).detach().cpu().numpy() - 1  # for padding
+        # dist_vec = self.dist_matrix[locs]
+        # visit_vec = self.emp_matrix[locs]
+        # dist_vec = torch.Tensor(dist_vec).to(self.device)
+        # visit_vec = torch.Tensor(visit_vec).to(self.device)
 
         x = self.loc_embedding(x_l)
 
@@ -149,20 +149,20 @@ class Generator(nn.Module):
 
         x, _ = self.attn2(Query, Key, Value, key_padding_mask=src_padding_mask)
 
-        x = self.linear(x.reshape(-1, self.hidden_dim))
-
-        x = F.relu(x)
+        x = F.relu(self.linear(x.reshape(-1, self.hidden_dim)))
 
         # matrix calculation
-        dist_vec = F.relu(self.linear_mat1(dist_vec))
-        dist_vec = F.sigmoid(self.linear_mat1_2(dist_vec))
-        dist_vec = F.normalize(dist_vec)
+        # dist_vec = F.relu(self.linear_mat1(dist_vec))
+        # dist_vec = F.sigmoid(self.linear_mat1_2(dist_vec))
+        # dist_vec = F.normalize(dist_vec)
 
-        visit_vec = F.relu(self.linear_mat2(visit_vec))
-        visit_vec = F.sigmoid(self.linear_mat2_2(visit_vec))
-        visit_vec = F.normalize(visit_vec)
+        # visit_vec = F.relu(self.linear_mat2(visit_vec))
+        # visit_vec = F.sigmoid(self.linear_mat2_2(visit_vec))
+        # visit_vec = F.normalize(visit_vec)
 
-        pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
+        # pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
+
+        pred = x
         return pred
 
     def step(self, input):
@@ -174,11 +174,11 @@ class Generator(nn.Module):
         """
         src_padding_mask = input == 0
 
-        locs = input.reshape(-1).detach().cpu().numpy() - 1  # for padding
-        dist_vec = self.dist_matrix[locs]
-        visit_vec = self.emp_matrix[locs]
-        dist_vec = torch.Tensor(dist_vec).to(self.device)
-        visit_vec = torch.Tensor(visit_vec).to(self.device)
+        # locs = input.reshape(-1).detach().cpu().numpy() - 1  # for padding
+        # dist_vec = self.dist_matrix[locs]
+        # visit_vec = self.emp_matrix[locs]
+        # dist_vec = torch.Tensor(dist_vec).to(self.device)
+        # visit_vec = torch.Tensor(visit_vec).to(self.device)
 
         x = self.loc_embedding(input)
 
@@ -194,19 +194,20 @@ class Generator(nn.Module):
 
         attn, _ = self.attn2(Query, Key, Value, key_padding_mask=src_padding_mask)
 
-        attn = self.linear(attn.reshape(-1, self.hidden_dim))
-        x = F.relu(attn)
+        x = F.relu(self.linear(attn.reshape(-1, self.hidden_dim)))
 
         # matrix calculation
-        dist_vec = F.relu(self.linear_mat1(dist_vec))
-        dist_vec = F.sigmoid(self.linear_mat1_2(dist_vec))
-        dist_vec = F.normalize(dist_vec)
+        # dist_vec = F.relu(self.linear_mat1(dist_vec))
+        # dist_vec = F.sigmoid(self.linear_mat1_2(dist_vec))
+        # dist_vec = F.normalize(dist_vec)
 
-        visit_vec = F.relu(self.linear_mat2(visit_vec))
-        visit_vec = F.sigmoid(self.linear_mat2_2(visit_vec))
-        visit_vec = F.normalize(visit_vec)
+        # visit_vec = F.relu(self.linear_mat2(visit_vec))
+        # visit_vec = F.sigmoid(self.linear_mat2_2(visit_vec))
+        # visit_vec = F.normalize(visit_vec)
 
-        pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
+        # pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
+
+        pred = x
 
         return F.softmax(pred, dim=-1)
 

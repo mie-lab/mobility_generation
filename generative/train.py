@@ -1,6 +1,7 @@
 import torch
 from torch import nn, optim
 from torch.optim.lr_scheduler import StepLR
+import torch.nn.functional as F
 
 import numpy as np
 from tqdm import tqdm
@@ -67,17 +68,17 @@ def pre_training(discriminator, generator, all_locs, config, device, log_dir, in
     print(f"length of the train loader: {len(d_train_loader)}\t #samples: {len(d_train_data)}")
     print(f"length of the validation loader: {len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
 
-    discriminator = training(
-        d_train_loader,
-        d_vali_loader,
-        d_optimizer,
-        d_criterion,
-        discriminator,
-        config,
-        device,
-        log_dir,
-        model_type="discriminator",
-    )
+    # discriminator = training(
+    #     d_train_loader,
+    #     d_vali_loader,
+    #     d_optimizer,
+    #     d_criterion,
+    #     discriminator,
+    #     config,
+    #     device,
+    #     log_dir,
+    #     model_type="discriminator",
+    # )
 
     # pretrain generator
     print("Pretrain generator")
@@ -253,9 +254,9 @@ def adv_training(discriminator, generator, config, device, all_locs, log_dir, in
     gen_gan_loss = GANLoss().to(device)
     gen_gan_optm = optim.Adam(generator.parameters(), lr=config.g_lr, weight_decay=config.weight_decay)
     # period loss
-    period_crit = periodLoss(time_interval=24).to(device)
+    # period_crit = periodLoss(time_interval=24).to(device)
     # distance loss
-    distance_crit = distanceLoss(locations=all_locs, device=device).to(device)
+    # distance_crit = distanceLoss(locations=all_locs, device=device).to(device)
 
     # evaluation
     metrics = Metric(config, locations=all_locs, input_data=vali_data, valid_start_end_idx=vali_idx)
@@ -280,6 +281,7 @@ def adv_training(discriminator, generator, config, device, all_locs, log_dir, in
             )
         )
 
+        # only once and update rollout parameter
         train_loss = train_generator(
             generator,
             discriminator,
@@ -289,8 +291,10 @@ def adv_training(discriminator, generator, config, device, all_locs, log_dir, in
             gen_gan_optm,
             config,
             device,
-            crit=(period_crit, distance_crit),
+            # crit=(period_crit, distance_crit),
         )
+        rollout.update_params()
+
         if config.verbose:
             print(
                 "Generator: Epoch {}\t loss: {:.3f}, took: {:.2f}s \r".format(
@@ -300,13 +304,11 @@ def adv_training(discriminator, generator, config, device, all_locs, log_dir, in
                 )
             )
 
-        rollout.update_params()
-
         # train discriminator
         print("training discriminator")
         for _ in range(1):
             samples = generate_samples(
-                generator, config, num=config.num_gen_samples, single_len=1024, print_progress=True
+                generator, config, num=config.num_gen_samples, single_len=2048, print_progress=False
             )
             d_train_data = discriminator_dataset(true_data=train_data, fake_data=samples, valid_start_end_idx=train_idx)
             kwds_train = {
@@ -336,14 +338,14 @@ def adv_training(discriminator, generator, config, device, all_locs, log_dir, in
 
         if epoch > 10:
             samples = generate_samples(
-                generator, config, num=config.num_gen_samples, single_len=1024, print_progress=True
+                generator, config, num=config.num_gen_samples, single_len=1024, print_progress=False
             )
             save_path = os.path.join(config.temp_save_root, "temp", f"generated_samples_{epoch}.pk")
             save_pk_file(save_path, samples)
 
 
-def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, gen_gan_optm, config, device, crit):
-    period_crit, distance_crit = crit
+def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, gen_gan_optm, config, device, crit=None):
+    # period_crit, distance_crit = crit
 
     # construct the input to the generator, add zeros before samples and delete the last column
     zeros = torch.zeros((config.d_batch_size, 1)).long().to(device)
@@ -356,12 +358,13 @@ def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, ge
     rewards = rollout.get_reward(samples, roll_out_num=config.rollout_num, discriminator=discriminator, device=device)
 
     prob = generator.forward(inputs)
+    prob = F.softmax(prob, dim=-1)
 
     gloss = gen_gan_loss(prob, targets, rewards, device)
 
     # additional losses
-    gloss += config.periodic_loss * period_crit(samples)
-    gloss += config.distance_loss * distance_crit(samples)
+    # gloss += config.periodic_loss * period_crit(samples)
+    # gloss += config.distance_loss * distance_crit(samples)
 
     running_loss = gloss.item()
     # optimize

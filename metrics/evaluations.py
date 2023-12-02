@@ -50,7 +50,7 @@ class Metric(object):
         ref_overall_topk_freq = self.get_overall_topk_freq(self.reference_data, K=100)
         self.ref_overall_topk_freq_p, _ = np.histogram(ref_overall_topk_freq, bins=np.arange(0, 1, 1 / 100))
 
-        ref_topk_freq = self.get_topk_freq(self.reference_data, K=20)
+        ref_topk_freq = self.get_topk_freq(self.reference_data, K=10)
         self.ref_topk_freq_p, _ = np.histogram(ref_topk_freq, bins=np.arange(0, 1, 1 / 100))
 
     def get_distances(self, trajs):
@@ -147,7 +147,7 @@ class Metric(object):
         gene_rg = self.get_rg(gene_data)
         gene_period = self.get_periodicity(gene_data)
         gene_overall_topk_freq = self.get_overall_topk_freq(gene_data, K=100)
-        gene_topk_freq = self.get_topk_freq(gene_data, K=20)
+        gene_topk_freq = self.get_topk_freq(gene_data, K=10)
 
         gene_dist_p, _ = np.histogram(gene_dist, bins=np.arange(0, self.max_distance, self.max_distance / 10000))
         dist_jsd = distance.jensenshannon(gene_dist_p, self.ref_dist_p)

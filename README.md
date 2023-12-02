@@ -68,4 +68,3 @@ Use 4 weeks as input (TODO: Tune weeks)
 - [ ] Implement classical generation model 
 - ensure evaluation is on the same test dataset/sequence
 - how to deal with self transitions?
-- check when the generator gets updated -> do we need multiple runs for generator training?
