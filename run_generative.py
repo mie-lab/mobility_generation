@@ -100,9 +100,9 @@ if __name__ == "__main__":
 
     else:
         generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
-        discriminator.load_state_dict(
-            torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
-        )
+        # discriminator.load_state_dict(
+        #     torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
+        # )
 
     print("Advtrain generator and discriminator ...")
     log_dir = init_save_path(config)

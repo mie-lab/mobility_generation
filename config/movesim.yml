@@ -1,8 +1,8 @@
 misc:
   dataset: mobis
 
-  use_pretrain: False
-  pretrain_filepath: mobis_movesim_pretrain_1699365477
+  use_pretrain: True
+  pretrain_filepath: mobis_movesim_pretrain_1701698266
 
 
   generate_len: 50
@@ -17,14 +17,14 @@ misc:
   verbose: True
   debug: False
   d_batch_size: 64
-  g_batch_size: 32
+  g_batch_size: 16
   print_step: 100
   num_workers: 0
   
 
 embedding:
-  base_emb_size: 128
-  hidden_dim: 256
+  base_emb_size: 64
+  hidden_dim: 128
 
 model:
   networkName: movesim

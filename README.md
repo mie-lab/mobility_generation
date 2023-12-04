@@ -64,7 +64,8 @@ Use 4 weeks as input (TODO: Tune weeks)
 - TODO: motifs distribution
 
 ## TODO:
-- [ ] Generation with predictive models, implement beam search
-- [ ] Implement classical generation model 
+- Generation with predictive models, implement beam search
+- Implement classical generation model 
 - ensure evaluation is on the same test dataset/sequence
 - how to deal with self transitions?
+- multi GPU training

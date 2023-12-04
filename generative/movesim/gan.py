@@ -87,7 +87,7 @@ class Generator(nn.Module):
         self.loc_embedding = embedding
         # self.tim_embedding = nn.Embedding(num_embeddings=24, embedding_dim=self.base_emb_size)
 
-        self.attn = nn.MultiheadAttention(self.hidden_dim, 8, batch_first=True)
+        self.attn = nn.MultiheadAttention(self.hidden_dim, 16, batch_first=True)
         self.Q = nn.Linear(self.base_emb_size, self.hidden_dim)
         self.V = nn.Linear(self.base_emb_size, self.hidden_dim)
         self.K = nn.Linear(self.base_emb_size, self.hidden_dim)

@@ -99,7 +99,7 @@ def generator_collate_fn(batch):
 def construct_discriminator_pretrain_dataset(input_data, input_idx, all_locs):
 
     fake_sequences = []
-    for start_idx, end_idx in tqdm(input_idx):
+    for start_idx, end_idx in input_idx:
         curr_seq = input_data.iloc[start_idx:end_idx]["location_id"].values
 
         random_seq = curr_seq.copy()
