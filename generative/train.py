@@ -62,7 +62,7 @@ def pre_training(discriminator, generator, all_locs, config, device, log_dir, in
     }
     d_vali_loader = torch.utils.data.DataLoader(d_vali_data, collate_fn=discriminator_collate_fn, **kwds_vali)
 
-    d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
+    d_criterion = nn.NLLLoss(reduction="mean").to(device)
     d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
     print(f"length of the train loader: {len(d_train_loader)}\t #samples: {len(d_train_data)}")
@@ -92,7 +92,7 @@ def pre_training(discriminator, generator, all_locs, config, device, log_dir, in
     kwds_vali["batch_size"] = config.g_batch_size
     g_vali_loader = torch.utils.data.DataLoader(g_vali_data, collate_fn=generator_collate_fn, **kwds_vali)
 
-    g_criterion = nn.CrossEntropyLoss(reduction="mean").to(device)
+    g_criterion = nn.NLLLoss(reduction="mean").to(device)
     g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
     print(f"length of the train loader: {len(g_train_loader)}\t #samples: {len(g_train_data)}")
@@ -187,7 +187,7 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
         pred = model(data)
 
         if model_type == "discriminator":
-            loss = criterion(pred.view((-1,)), target.float().view((-1,)))
+            loss = criterion(pred, target.long().view((-1,)))
         else:
             loss = criterion(pred, target.long().view((-1,)))
 
@@ -261,7 +261,7 @@ def adv_training(discriminator, generator, config, device, all_locs, log_dir, in
     # evaluation
     metrics = Metric(config, locations=all_locs, input_data=vali_data, valid_start_end_idx=vali_idx)
 
-    d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
+    d_criterion = nn.NLLLoss(reduction="mean").to(device)
     d_optimizer = optim.Adam(discriminator.parameters(), lr=config.d_lr, weight_decay=config.weight_decay)
 
     for epoch in range(config.adv_max_epoch):
@@ -321,7 +321,7 @@ def adv_training(discriminator, generator, config, device, all_locs, log_dir, in
                 d_train_data, collate_fn=discriminator_collate_fn, **kwds_train
             )
 
-            for i in range(2):
+            for i in range(1):
                 train_epoch(
                     config,
                     discriminator,
@@ -356,9 +356,9 @@ def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, ge
 
     # calculate the reward
     rewards = rollout.get_reward(samples, roll_out_num=config.rollout_num, discriminator=discriminator, device=device)
+    rewards = torch.exp(rewards)
 
     prob = generator.forward(inputs)
-    prob = F.softmax(prob, dim=-1)
 
     gloss = gen_gan_loss(prob, targets, rewards, device)
 

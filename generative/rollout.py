@@ -35,11 +35,11 @@ class Rollout(object):
                 samples = self.own_model.sample(batch_size, seq_len, data)
                 pred = discriminator(samples)
 
-                rewards[:, step - 1] += F.sigmoid(pred).detach().view((-1,))
+                rewards[:, step - 1] += pred.data[:, 1].detach().view((-1,))
 
             # for the last token
             pred = discriminator(x)
-            rewards[:, seq_len - 1] += F.sigmoid(pred).detach().view((-1,))
+            rewards[:, seq_len - 1] += pred.data[:, 1].detach().view((-1,))
 
         rewards = rewards / roll_out_num
         return rewards.view((-1,))  # batch_size * seq_len

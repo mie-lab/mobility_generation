@@ -22,7 +22,7 @@ class Discriminator(nn.Module):
         )
         self.highway = nn.Linear(sum(self.num_filters), sum(self.num_filters))
         self.dropout = nn.Dropout(p=dropout)
-        self.linear = nn.Linear(sum(self.num_filters), 1)
+        self.linear = nn.Linear(sum(self.num_filters), 2)
 
         self.init_parameters()
 
@@ -46,7 +46,7 @@ class Discriminator(nn.Module):
         highway = self.highway(pred)
         pred = F.sigmoid(highway) * F.relu(highway) + (1.0 - F.sigmoid(highway)) * pred
 
-        return self.linear(self.dropout(pred))
+        return F.log_softmax(self.linear(self.dropout(pred)), dim=-1)
 
     def init_parameters(self):
         for param in self.parameters():
@@ -163,7 +163,7 @@ class Generator(nn.Module):
         # pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
 
         pred = x
-        return pred
+        return F.log_softmax(pred, dim=-1)
 
     def step(self, input):
         """
