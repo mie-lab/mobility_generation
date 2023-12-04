@@ -62,7 +62,7 @@ def pre_training(discriminator, generator, all_locs, config, device, log_dir, in
     }
     d_vali_loader = torch.utils.data.DataLoader(d_vali_data, collate_fn=discriminator_collate_fn, **kwds_vali)
 
-    d_criterion = nn.NLLLoss(reduction="mean").to(device)
+    d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
     d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
     print(f"length of the train loader: {len(d_train_loader)}\t #samples: {len(d_train_data)}")
@@ -92,7 +92,7 @@ def pre_training(discriminator, generator, all_locs, config, device, log_dir, in
     kwds_vali["batch_size"] = config.g_batch_size
     g_vali_loader = torch.utils.data.DataLoader(g_vali_data, collate_fn=generator_collate_fn, **kwds_vali)
 
-    g_criterion = nn.NLLLoss(reduction="mean").to(device)
+    g_criterion = nn.CrossEntropyLoss(reduction="mean").to(device)
     g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
     print(f"length of the train loader: {len(g_train_loader)}\t #samples: {len(g_train_data)}")
@@ -187,7 +187,7 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
         pred = model(data)
 
         if model_type == "discriminator":
-            loss = criterion(pred, target.long().view((-1,)))
+            loss = criterion(pred.view((-1,)), target.float().view((-1,)))
         else:
             loss = criterion(pred, target.long().view((-1,)))
 
@@ -254,14 +254,14 @@ def adv_training(discriminator, generator, config, device, all_locs, log_dir, in
     gen_gan_loss = GANLoss().to(device)
     gen_gan_optm = optim.Adam(generator.parameters(), lr=config.g_lr, weight_decay=config.weight_decay)
     # period loss
-    # period_crit = periodLoss(time_interval=24).to(device)
+    period_crit = periodLoss(time_interval=24).to(device)
     # distance loss
-    # distance_crit = distanceLoss(locations=all_locs, device=device).to(device)
+    distance_crit = distanceLoss(locations=all_locs, device=device).to(device)
 
     # evaluation
     metrics = Metric(config, locations=all_locs, input_data=vali_data, valid_start_end_idx=vali_idx)
 
-    d_criterion = nn.NLLLoss(reduction="mean").to(device)
+    d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
     d_optimizer = optim.Adam(discriminator.parameters(), lr=config.d_lr, weight_decay=config.weight_decay)
 
     for epoch in range(config.adv_max_epoch):
@@ -291,7 +291,7 @@ def adv_training(discriminator, generator, config, device, all_locs, log_dir, in
             gen_gan_optm,
             config,
             device,
-            # crit=(period_crit, distance_crit),
+            crit=(period_crit, distance_crit),
         )
         rollout.update_params()
 
@@ -345,7 +345,7 @@ def adv_training(discriminator, generator, config, device, all_locs, log_dir, in
 
 
 def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, gen_gan_optm, config, device, crit=None):
-    # period_crit, distance_crit = crit
+    period_crit, distance_crit = crit
 
     # construct the input to the generator, add zeros before samples and delete the last column
     zeros = torch.zeros((config.d_batch_size, 1)).long().to(device)
@@ -356,15 +356,15 @@ def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, ge
 
     # calculate the reward
     rewards = rollout.get_reward(samples, roll_out_num=config.rollout_num, discriminator=discriminator, device=device)
-    rewards = torch.exp(rewards)
 
-    prob = generator.forward(inputs)
+    prob = generator(inputs)
+    prob = F.log_softmax(prob, dim=-1)
 
     gloss = gen_gan_loss(prob, targets, rewards, device)
 
     # additional losses
-    # gloss += config.periodic_loss * period_crit(samples)
-    # gloss += config.distance_loss * distance_crit(samples)
+    gloss += config.periodic_loss * period_crit(samples)
+    gloss += config.distance_loss * distance_crit(samples)
 
     running_loss = gloss.item()
     # optimize

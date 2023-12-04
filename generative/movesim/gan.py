@@ -11,8 +11,8 @@ class Discriminator(nn.Module):
 
     def __init__(self, config, embedding, dropout=0.5):
         super(Discriminator, self).__init__()
-        self.num_filters = [128, 128, 64, 64, 64]
-        self.kernel_sizes = [3, 5, 7, 9, 11]
+        self.num_filters = [32, 32]
+        self.kernel_sizes = [3, 5]
 
         self.embedding = embedding
 
@@ -20,9 +20,9 @@ class Discriminator(nn.Module):
         self.convs = nn.ModuleList(
             [nn.Conv2d(1, n, (f, config.base_emb_size)) for (n, f) in zip(self.num_filters, self.kernel_sizes)]
         )
-        self.highway = nn.Linear(sum(self.num_filters), sum(self.num_filters))
+        # self.highway = nn.Linear(sum(self.num_filters), sum(self.num_filters))
         self.dropout = nn.Dropout(p=dropout)
-        self.linear = nn.Linear(sum(self.num_filters), 2)
+        self.linear = nn.Linear(sum(self.num_filters), 1)
 
         self.init_parameters()
 
@@ -43,10 +43,10 @@ class Discriminator(nn.Module):
 
         pools = [F.max_pool1d(conv, conv.size(2)).squeeze(2) for conv in convs]  # [batch_size * num_filter]
         pred = torch.cat(pools, 1)  # batch_size * num_filters_sum
-        highway = self.highway(pred)
-        pred = F.sigmoid(highway) * F.relu(highway) + (1.0 - F.sigmoid(highway)) * pred
+        # highway = self.highway(pred)
+        # pred = F.sigmoid(highway) * F.relu(highway) + (1.0 - F.sigmoid(highway)) * pred
 
-        return F.log_softmax(self.linear(self.dropout(pred)), dim=-1)
+        return self.linear(self.dropout(pred))
 
     def init_parameters(self):
         for param in self.parameters():
@@ -163,7 +163,7 @@ class Generator(nn.Module):
         # pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
 
         pred = x
-        return F.log_softmax(pred, dim=-1)
+        return pred
 
     def step(self, input):
         """
@@ -219,20 +219,27 @@ class Generator(nn.Module):
         :param x: (batch_size, k), current generated sequence
         :return: (batch_size, seq_len), complete generated sequence
         """
+        flag = False
+
         # self.attn.flatten_parameters()
+        if x is None:
+            flag = True
 
         s = 0
-        if x is None:
+        if flag:
             if self.starting_sample == "rand":
                 x = torch.randint(low=1, high=self.total_loc_num, size=(batch_size, 1)).long().to(self.device)
             elif self.starting_sample == "real":
-                x = torch.LongTensor(
-                    torch.stack([torch.multinomial(self.starting_dist, 1) for _ in range(batch_size)], dim=0)
-                ).to(self.device)
+                x = (
+                    torch.stack([self.starting_dist.multinomial(1) for _ in range(batch_size)], dim=0)
+                    .long()
+                    .to(self.device)
+                )
+                x[x == 0] += 1
                 s = 1
 
         samples = []
-        if x is None:
+        if flag:
             if s > 0:
                 samples.append(x)
             for i in range(s, seq_len):

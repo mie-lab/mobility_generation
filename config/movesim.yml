@@ -30,8 +30,8 @@ model:
   networkName: movesim
   #
   task: attention
-  periodic_loss: 1.0
-  distance_loss: 1.0
+  periodic_loss: 0.5
+  distance_loss: 0.5
 
 optimiser:
   optimizer: Adam
@@ -42,7 +42,7 @@ optimiser:
   g_lr: 0.0001
   weight_decay: 0.000001
 
-  rollout_num: 4
+  rollout_num: 16
 
   # for decay
   patience: 3
