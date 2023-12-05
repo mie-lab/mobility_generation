@@ -4,7 +4,8 @@ from torch.optim.lr_scheduler import StepLR
 import torch.nn.functional as F
 
 from torch.utils.data.distributed import DistributedSampler
-from torch.nn.parallel import DistributedDataParallel as DDP
+
+import torch.distributed as dist
 
 import numpy as np
 from tqdm import tqdm
@@ -41,7 +42,9 @@ def pre_training(discriminator, generator, all_locs, config, world_size, device,
     # pretrain discriminator
     fake_train_samples = construct_discriminator_pretrain_dataset(train_data, train_idx, all_locs)
     fake_vali_samples = construct_discriminator_pretrain_dataset(vali_data, vali_idx, all_locs)
-    print("Pretrain discriminator")
+
+    if is_main_process():
+        print("Pretrain discriminator")
 
     # train dataset
     d_train_data = discriminator_dataset(
@@ -73,8 +76,9 @@ def pre_training(discriminator, generator, all_locs, config, world_size, device,
     d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
     d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
-    print(f"length of the train loader: {len(d_train_loader)}\t #samples: {len(d_train_data)}")
-    print(f"length of the validation loader: {len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
+    if is_main_process():
+        print(f"length of the train loader: {len(d_train_loader)}\t #samples: {len(d_train_data)}")
+        print(f"length of the validation loader: {len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
 
     discriminator = training(
         d_train_loader,
@@ -89,7 +93,8 @@ def pre_training(discriminator, generator, all_locs, config, world_size, device,
     )
 
     # pretrain generator
-    print("Pretrain generator")
+    if is_main_process():
+        print("Pretrain generator")
 
     # training dataset
     g_train_data = generator_dataset(input_data=train_data, valid_start_end_idx=train_idx)
@@ -118,7 +123,8 @@ def pre_training(discriminator, generator, all_locs, config, world_size, device,
     g_criterion = nn.CrossEntropyLoss(reduction="mean").to(device)
     g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
-    print(f"length of the train loader: {len(g_train_loader)}\t #samples: {len(g_train_data)}")
+    if is_main_process():
+        print(f"length of the train loader: {len(g_train_loader)}\t #samples: {len(g_train_data)}")
 
     generator = training(
         g_train_loader,
@@ -147,12 +153,17 @@ def training(
     model_type="discriminator",
 ):
     scheduler = StepLR(optimizer, step_size=config.lr_step_size, gamma=config.lr_gamma)
-    if config.verbose:
+    if config.verbose and is_main_process():
         print("Current learning rate: ", scheduler.get_last_lr()[0])
 
     # initialize the early_stopping object
     early_stopping = EarlyStopping(
-        log_dir, patience=config.patience, verbose=config.verbose, delta=0.001, save_name=model_type
+        log_dir,
+        patience=config.patience,
+        verbose=config.verbose,
+        main_process=is_main_process(),
+        delta=0.001,
+        save_name=model_type,
     )
 
     # Time for printing
@@ -172,7 +183,7 @@ def training(
         early_stopping(return_dict, model)
 
         if early_stopping.early_stop:
-            if config.verbose:
+            if config.verbose and is_main_process():
                 print("=" * 50)
                 print("Early stopping")
                 print("Current learning rate: {:.6f}".format(optimizer.param_groups[0]["lr"]))
@@ -220,7 +231,7 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
 
         running_loss += loss.item()
         training_loss += loss.item()
-        if (config.verbose) and ((i + 1) % config["print_step"] == 0):
+        if (config.verbose) and ((i + 1) % config["print_step"] == 0) and is_main_process():
             print(
                 "{}: Epoch {}, {:.1f}%\t loss: {:.3f}, took: {:.2f}s \r".format(
                     model_type,
@@ -235,7 +246,7 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
             running_loss = 0.0
             start_time = time.time()
 
-    if config.verbose:
+    if config.verbose and is_main_process():
         print("")
         print("Training loss = {:.5f}".format(training_loss / n_batches))
 
@@ -262,7 +273,7 @@ def validate_epoch(config, model, data_loader, criterion, device, model_type):
     # loss
     val_loss = total_val_loss / len(data_loader)
 
-    if config.verbose:
+    if config.verbose and is_main_process():
         print("Validation loss = {:.5f}".format(val_loss))
 
     return {"val_loss": val_loss}
@@ -289,7 +300,9 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
 
     for epoch in range(config.adv_max_epoch):
         # Train the generator for one step
-        print("training generator")
+
+        if is_main_process():
+            print("training generator")
         start_time = time.time()
 
         # train
@@ -298,11 +311,13 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         # evaluate current generator performance
         samples = generate_samples(generator, config, single_len=config.d_batch_size, num=config.d_batch_size)
         jsds = metrics.get_individual_jsds(gene_data=samples)
-        print(
-            "Metric: distance {:.3f}, rg {:.3f}, period {:.3f}, topk all {:.3f}, topk {:.3f}".format(
-                jsds[0], jsds[1], jsds[2], jsds[3], jsds[4]
+
+        if is_main_process():
+            print(
+                "Metric: distance {:.3f}, rg {:.3f}, period {:.3f}, topk all {:.3f}, topk {:.3f}".format(
+                    jsds[0], jsds[1], jsds[2], jsds[3], jsds[4]
+                )
             )
-        )
 
         # only once and update rollout parameter
         train_loss = train_generator(
@@ -318,7 +333,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         )
         rollout.update_params()
 
-        if config.verbose:
+        if config.verbose and is_main_process():
             print(
                 "Generator: Epoch {}\t loss: {:.3f}, took: {:.2f}s \r".format(
                     epoch + 1,
@@ -328,7 +343,8 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
             )
 
         # train discriminator
-        print("training discriminator")
+        if is_main_process():
+            print("training discriminator")
         for _ in range(1):
             samples = generate_samples(
                 generator, config, num=config.num_gen_samples, single_len=2048, print_progress=False
@@ -404,3 +420,21 @@ def save_pk_file(save_path, data):
     """Function to save data to pickle format given data and path."""
     with open(save_path, "wb") as handle:
         pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def is_dist_avail_and_initialized():
+    if not dist.is_available():
+        return False
+    if not dist.is_initialized():
+        return False
+    return True
+
+
+def get_rank():
+    if not is_dist_avail_and_initialized():
+        return 0
+    return dist.get_rank()
+
+
+def is_main_process():
+    return get_rank() == 0

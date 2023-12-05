@@ -5,7 +5,9 @@ import torch
 class EarlyStopping:
     """Early stops the training if validation loss doesn't improve after a given patience."""
 
-    def __init__(self, logdir, patience=7, verbose=False, delta=0, monitor="val_loss", save_name="checkpoint"):
+    def __init__(
+        self, logdir, patience=7, verbose=False, delta=0, main_process=True, monitor="val_loss", save_name="checkpoint"
+    ):
         """
         Args:
             patience (int): How long to wait after last time validation loss improved.
@@ -17,6 +19,7 @@ class EarlyStopping:
         """
         self.log_dir = logdir
         self.patience = patience
+        self.main_process = main_process
         self.verbose = verbose
         self.counter = 0
         self.best_score = None
@@ -42,16 +45,17 @@ class EarlyStopping:
 
         else:
             self.counter += 1
-            if self.verbose:
+            if self.verbose and self.main_process:
                 print(f"EarlyStopping counter: {self.counter} out of {self.patience}")
             if self.counter >= self.patience:
                 self.early_stop = True
 
     def save_checkpoint(self, return_dict, model):
         """Saves model when self.monitor decrease."""
-        if self.verbose:
+        if self.verbose and self.main_process:
             print(
                 f"{self.monitor} decreased ({self.best_return_dict[self.monitor]:.6f} --> {return_dict[self.monitor]:.6f}).  Saving model ..."
             )
-        torch.save(model.state_dict(), self.log_dir + f"/{self.save_name}.pt")
+        if self.main_process:
+            torch.save(model.state_dict(), self.log_dir + f"/{self.save_name}.pt")
         self.best_return_dict = return_dict

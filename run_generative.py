@@ -12,9 +12,9 @@ from shapely import wkt
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from easydict import EasyDict as edict
-
 
 from utils.utils import load_data, setup_seed, load_config, init_save_path
 from utils.dataloader import get_train_test, _get_valid_sequence
@@ -61,36 +61,48 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
     generator = Generator(
         device=rank, config=config, embedding=embedding, starting_sample="real", starting_dist=emp_visits
     ).to(rank)
+
+    # wrap the model with DDP
+    # device_ids tell DDP where is your model
+    # output_device tells DDP where to output, in our case, it is rank
+    # find_unused_parameters=True instructs DDP to find unused output of the forward() function of any module in the model
+    generator = DDP(generator, device_ids=[rank], output_device=rank, find_unused_parameters=False)
+
     discriminator = Discriminator(config=config, embedding=embedding).to(rank)
+    discriminator = DDP(discriminator, device_ids=[rank], output_device=rank, find_unused_parameters=False)
     # calculate parameters
     total_params_embed = sum(p.numel() for p in embedding.parameters() if p.requires_grad)
     total_params_generator = sum(p.numel() for p in generator.parameters() if p.requires_grad)
     total_params_discriminator = sum(p.numel() for p in discriminator.parameters() if p.requires_grad)
-    print(
-        f"#Parameters embeddings: {total_params_embed} \t generator: {total_params_generator - total_params_embed} \t discriminator: {total_params_discriminator - total_params_embed}"
-    )
 
-    # if not config.use_pretrain:
-    #     log_dir = init_save_path(config, time_now, postfix="pretrain")
+    if rank == 0:
+        print(
+            f"#Parameters embeddings: {total_params_embed} \t generator: {total_params_generator - total_params_embed} \t discriminator: {total_params_discriminator - total_params_embed}"
+        )
 
-    #     discriminator, generator = pre_training(
-    #         discriminator,
-    #         generator,
-    #         all_locs,
-    #         config,
-    #         world_size,
-    #         rank,
-    #         log_dir,
-    #         input_data=(train_data, train_idx, vali_data, vali_idx),
-    #     )
+    if not config.use_pretrain:
+        log_dir = init_save_path(config, time_now, postfix="pretrain")
 
-    # else:
-    #     generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
-    #     discriminator.load_state_dict(
-    #         torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
-    #     )
+        discriminator, generator = pre_training(
+            discriminator,
+            generator,
+            all_locs,
+            config,
+            world_size,
+            rank,
+            log_dir,
+            input_data=(train_data, train_idx, vali_data, vali_idx),
+        )
 
-    print("Advtrain generator and discriminator ...")
+    else:
+        generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
+        discriminator.load_state_dict(
+            torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
+        )
+
+    if rank == 0:
+        print("Advtrain generator and discriminator ...")
+
     log_dir = init_save_path(config, time_now)
     adv_training(
         discriminator,
@@ -108,7 +120,7 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
 
 def preprocess_datasets(config):
     # read and preprocess
-    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp_small.csv"), index_col="id")
+    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp.csv"), index_col="id")
     loc = pd.read_csv(os.path.join(config.temp_save_root, "locs_s2.csv"), index_col="id")
     sp = load_data(sp, loc)
 
