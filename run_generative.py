@@ -51,7 +51,7 @@ def get_rank():
     return dist.get_rank()
 
 
-def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, vali_idx, emp_visits):
+def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, vali_idx, emp_visits, time_now):
     # setup the process groups
     setup(rank, world_size)
     torch.cuda.set_device(rank)
@@ -81,8 +81,7 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
         )
 
     if not config.use_pretrain:
-        if rank == 0:
-            log_dir = init_save_path(config, time_now=int(datetime.now().timestamp()), postfix="pretrain")
+        log_dir = init_save_path(config, time_now=time_now, postfix="pretrain")
 
         discriminator, generator = pre_training(
             discriminator,
@@ -103,7 +102,7 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
 
     if rank == 0:
         print("Advtrain generator and discriminator ...")
-        log_dir = init_save_path(config, time_now=int(datetime.now().timestamp()))
+    log_dir = init_save_path(config, time_now=time_now)
 
     adv_training(
         discriminator,
@@ -138,6 +137,7 @@ def preprocess_datasets(config):
 
 if __name__ == "__main__":
     setup_seed(0)
+    time_now = int(datetime.now().timestamp())
 
     # load configs
     parser = argparse.ArgumentParser()
@@ -169,9 +169,6 @@ if __name__ == "__main__":
     train_idx = _get_valid_sequence(train_data, print_progress=config.verbose, previous_day=config.previous_day)
     vali_idx = _get_valid_sequence(vali_data, print_progress=config.verbose, previous_day=config.previous_day)
     # test_idx = _get_valid_sequence(test_data, print_progress=config.verbose, previous_day=config.previous_day)
-
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # device = torch.device("cpu")
 
     # get the empirical visit for sampling
     emp_visits = np.zeros(config["total_loc_num"])
