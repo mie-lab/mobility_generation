@@ -1,4 +1,5 @@
 # coding: utf-8
+import os
 
 import torch
 import torch.nn as nn
@@ -20,7 +21,7 @@ class Discriminator(nn.Module):
         self.convs = nn.ModuleList(
             [nn.Conv2d(1, n, (f, config.base_emb_size)) for (n, f) in zip(self.num_filters, self.kernel_sizes)]
         )
-        # self.highway = nn.Linear(sum(self.num_filters), sum(self.num_filters))
+        self.highway = nn.Linear(sum(self.num_filters), sum(self.num_filters))
         self.dropout = nn.Dropout(p=dropout)
         self.linear = nn.Linear(sum(self.num_filters), 1)
 
@@ -43,8 +44,8 @@ class Discriminator(nn.Module):
 
         pools = [F.max_pool1d(conv, conv.size(2)).squeeze(2) for conv in convs]  # [batch_size * num_filter]
         pred = torch.cat(pools, 1)  # batch_size * num_filters_sum
-        # highway = self.highway(pred)
-        # pred = F.sigmoid(highway) * F.relu(highway) + (1.0 - F.sigmoid(highway)) * pred
+        highway = self.highway(pred)
+        pred = F.sigmoid(highway) * F.relu(highway) + (1.0 - F.sigmoid(highway)) * pred
 
         return self.linear(self.dropout(pred))
 
@@ -81,43 +82,41 @@ class Generator(nn.Module):
             self.starting_dist = torch.tensor(starting_dist).float()
 
         # distance and empirical visits
-        # self.dist_matrix = pickle.load(open("./data/temp/dist_matrix.pk", "rb"))
-        # self.emp_matrix = pickle.load(open("./data/temp/emp_matrix.pk", "rb"))
+        # self.dist_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "dist_matrix.pk"), "rb"))
+        # self.emp_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "emp_matrix.pk"), "rb"))
 
         self.loc_embedding = embedding
         # self.tim_embedding = nn.Embedding(num_embeddings=24, embedding_dim=self.base_emb_size)
 
-        self.attn = nn.MultiheadAttention(self.hidden_dim, 16, batch_first=True)
-        self.Q = nn.Linear(self.base_emb_size, self.hidden_dim)
-        self.V = nn.Linear(self.base_emb_size, self.hidden_dim)
-        self.K = nn.Linear(self.base_emb_size, self.hidden_dim)
+        # transformer encoder
+        encoder_layer = torch.nn.TransformerEncoderLayer(
+            self.base_emb_size, nhead=16, activation="gelu", dim_feedforward=self.hidden_dim, batch_first=True
+        )
+        encoder_norm = torch.nn.LayerNorm(self.base_emb_size)
+        self.encoder = torch.nn.TransformerEncoder(
+            encoder_layer=encoder_layer,
+            num_layers=2,
+            norm=encoder_norm,
+        )
 
-        self.attn2 = nn.MultiheadAttention(self.hidden_dim, 4, batch_first=True)
-        self.Q2 = nn.Linear(self.hidden_dim, self.hidden_dim)
-        self.V2 = nn.Linear(self.hidden_dim, self.hidden_dim)
-        self.K2 = nn.Linear(self.hidden_dim, self.hidden_dim)
-
-        self.linear = nn.Linear(self.hidden_dim, self.total_loc_num)
+        self.linear = nn.Linear(self.base_emb_size, self.total_loc_num)
 
         # for distance and empirical matrics
-        # self.linear_mat1 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
-        # self.linear_mat1_2 = nn.Linear(self.hidden_dim, self.total_loc_num)
+        # self.linear_mat1 = nn.Linear(self.total_loc_num - 1, self.base_emb_size)
+        # self.linear_mat1_2 = nn.Linear(self.base_emb_size, self.total_loc_num)
 
-        # self.linear_mat2 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
-        # self.linear_mat2_2 = nn.Linear(self.hidden_dim, self.total_loc_num)
+        # self.linear_mat2 = nn.Linear(self.total_loc_num - 1, self.base_emb_size)
+        # self.linear_mat2_2 = nn.Linear(self.base_emb_size, self.total_loc_num)
 
         self.init_params()
 
     def init_params(self):
-        for param in self.parameters():
-            param.data.uniform_(-0.05, 0.05)
+        for p in self.parameters():
+            if p.dim() > 1:
+                torch.nn.init.xavier_uniform_(p)
 
-    def init_hidden(self, batch_size):
-        h = torch.LongTensor(torch.zeros((1, batch_size, self.hidden_dim)))
-        c = torch.LongTensor(torch.zeros((1, batch_size, self.hidden_dim)))
-        if self.device:
-            h, c = h.to(self.device), c.to(self.device)
-        return h, c
+    def _generate_square_subsequent_mask(self, sz):
+        return torch.triu(torch.full((sz, sz), float("-inf")), diagonal=1)
 
     def forward(self, x_l):
         # x_t
@@ -127,7 +126,7 @@ class Generator(nn.Module):
         :return:
             (batch_size * seq_len, total_locations), prediction of next stage of all locations
         """
-        src_padding_mask = x_l == 0
+        src_padding_mask = (x_l == 0).to(self.device)
 
         # locs = x_l.reshape(-1).detach().cpu().numpy() - 1  # for padding
         # dist_vec = self.dist_matrix[locs]
@@ -135,21 +134,16 @@ class Generator(nn.Module):
         # dist_vec = torch.Tensor(dist_vec).to(self.device)
         # visit_vec = torch.Tensor(visit_vec).to(self.device)
 
-        x = self.loc_embedding(x_l)
+        emb = self.loc_embedding(x_l)
 
-        Query = F.relu(self.Q(x))
-        Value = F.relu(self.V(x))
-        Key = F.relu(self.K(x))
+        #
+        src_mask = self._generate_square_subsequent_mask(x_l.shape[1]).to(self.device)
+        out = self.encoder(emb, mask=src_mask, src_key_padding_mask=src_padding_mask)
 
-        x, _ = self.attn(Query, Key, Value, key_padding_mask=src_padding_mask)
+        # for padding
+        out = out * (~src_padding_mask).unsqueeze(-1).repeat(1, 1, self.base_emb_size)
 
-        Query = F.relu(self.Q2(x))
-        Value = F.relu(self.V2(x))
-        Key = F.relu(self.K2(x))
-
-        x, _ = self.attn2(Query, Key, Value, key_padding_mask=src_padding_mask)
-
-        x = F.relu(self.linear(x.reshape(-1, self.hidden_dim)))
+        x = F.relu(self.linear(out.reshape(-1, self.base_emb_size)))
 
         # matrix calculation
         # dist_vec = F.relu(self.linear_mat1(dist_vec))
@@ -172,7 +166,7 @@ class Generator(nn.Module):
         :return:
             (batch_size, total_locations), prediction of next stage
         """
-        src_padding_mask = input == 0
+        src_padding_mask = (input == 0).to(self.device)
 
         # locs = input.reshape(-1).detach().cpu().numpy() - 1  # for padding
         # dist_vec = self.dist_matrix[locs]
@@ -180,21 +174,16 @@ class Generator(nn.Module):
         # dist_vec = torch.Tensor(dist_vec).to(self.device)
         # visit_vec = torch.Tensor(visit_vec).to(self.device)
 
-        x = self.loc_embedding(input)
+        emb = self.loc_embedding(input)
 
-        Query = F.relu(self.Q(x))
-        Value = F.relu(self.V(x))
-        Key = F.relu(self.K(x))
+        #
+        src_mask = self._generate_square_subsequent_mask(input.shape[1]).to(self.device)
+        out = self.encoder(emb, mask=src_mask, src_key_padding_mask=src_padding_mask)
 
-        attn, _ = self.attn(Query, Key, Value, key_padding_mask=src_padding_mask)
+        # for padding
+        out = out * (~src_padding_mask).unsqueeze(-1).repeat(1, 1, self.base_emb_size)
 
-        Query = F.relu(self.Q2(attn))
-        Value = F.relu(self.V2(attn))
-        Key = F.relu(self.K2(attn))
-
-        attn, _ = self.attn2(Query, Key, Value, key_padding_mask=src_padding_mask)
-
-        x = F.relu(self.linear(attn.reshape(-1, self.hidden_dim)))
+        x = F.relu(self.linear(out.reshape(-1, self.base_emb_size)))
 
         # matrix calculation
         # dist_vec = F.relu(self.linear_mat1(dist_vec))
@@ -206,7 +195,6 @@ class Generator(nn.Module):
         # visit_vec = F.normalize(visit_vec)
 
         # pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
-
         pred = x
 
         return F.softmax(pred, dim=-1)

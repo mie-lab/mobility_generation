@@ -36,37 +36,37 @@ def pre_training(discriminator, generator, all_locs, config, device, log_dir, in
     train_data, train_idx, vali_data, vali_idx = input_data
 
     # pretrain discriminator
-    fake_train_samples = construct_discriminator_pretrain_dataset(train_data, train_idx, all_locs)
-    fake_vali_samples = construct_discriminator_pretrain_dataset(vali_data, vali_idx, all_locs)
-    print("Pretrain discriminator")
+    # fake_train_samples = construct_discriminator_pretrain_dataset(train_data, train_idx, all_locs)
+    # fake_vali_samples = construct_discriminator_pretrain_dataset(vali_data, vali_idx, all_locs)
+    # print("Pretrain discriminator")
 
-    # train dataset
-    d_train_data = discriminator_dataset(
-        true_data=train_data, fake_data=fake_train_samples, valid_start_end_idx=train_idx
-    )
+    # # train dataset
+    # d_train_data = discriminator_dataset(
+    #     true_data=train_data, fake_data=fake_train_samples, valid_start_end_idx=train_idx
+    # )
     kwds_train = {
         "shuffle": True,
         "num_workers": config.num_workers,
         "batch_size": config.d_batch_size,
         "pin_memory": True,
     }
-    d_train_loader = torch.utils.data.DataLoader(d_train_data, collate_fn=discriminator_collate_fn, **kwds_train)
+    # d_train_loader = torch.utils.data.DataLoader(d_train_data, collate_fn=discriminator_collate_fn, **kwds_train)
 
     # validation dataset
-    d_vali_data = discriminator_dataset(true_data=vali_data, fake_data=fake_vali_samples, valid_start_end_idx=vali_idx)
+    # d_vali_data = discriminator_dataset(true_data=vali_data, fake_data=fake_vali_samples, valid_start_end_idx=vali_idx)
     kwds_vali = {
         "shuffle": False,
         "num_workers": config.num_workers,
         "batch_size": config.d_batch_size,
         "pin_memory": True,
     }
-    d_vali_loader = torch.utils.data.DataLoader(d_vali_data, collate_fn=discriminator_collate_fn, **kwds_vali)
+    # d_vali_loader = torch.utils.data.DataLoader(d_vali_data, collate_fn=discriminator_collate_fn, **kwds_vali)
 
-    d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
-    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
+    # d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
+    # d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
-    print(f"length of the train loader: {len(d_train_loader)}\t #samples: {len(d_train_data)}")
-    print(f"length of the validation loader: {len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
+    # print(f"length of the train loader: {len(d_train_loader)}\t #samples: {len(d_train_data)}")
+    # print(f"length of the validation loader: {len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
 
     # discriminator = training(
     #     d_train_loader,
@@ -348,14 +348,14 @@ def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, ge
     period_crit, distance_crit = crit
 
     # construct the input to the generator, add zeros before samples and delete the last column
-    zeros = torch.zeros((config.d_batch_size, 1)).long().to(device)
+    # zeros = torch.zeros((config.d_batch_size, 1)).long().to(device)
     samples = torch.Tensor(samples).long().to(device)
 
-    inputs = torch.cat([zeros, samples], dim=1)[:, :-1]
-    targets = samples.view((-1,))
+    inputs = samples[:, :-1]
+    targets = samples[:, 1:].reshape((-1,))
 
     # calculate the reward
-    rewards = rollout.get_reward(samples, roll_out_num=config.rollout_num, discriminator=discriminator, device=device)
+    rewards = rollout.get_reward(samples[:, :-1], roll_out_num=config.rollout_num, discriminator=discriminator, device=device)
 
     prob = generator(inputs)
     prob = F.log_softmax(prob, dim=-1)
