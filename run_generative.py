@@ -51,7 +51,7 @@ def get_rank():
     return dist.get_rank()
 
 
-def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, vali_idx, emp_visits, time_now):
+def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, vali_idx, emp_visits):
     # setup the process groups
     setup(rank, world_size)
     torch.cuda.set_device(rank)
@@ -81,7 +81,8 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
         )
 
     if not config.use_pretrain:
-        log_dir = init_save_path(config, time_now, postfix="pretrain")
+        if rank == 0:
+            log_dir = init_save_path(config, time_now=int(datetime.now().timestamp()), postfix="pretrain")
 
         discriminator, generator = pre_training(
             discriminator,
@@ -102,8 +103,8 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
 
     if rank == 0:
         print("Advtrain generator and discriminator ...")
+        log_dir = init_save_path(config, time_now=int(datetime.now().timestamp()))
 
-    log_dir = init_save_path(config, time_now)
     adv_training(
         discriminator,
         generator,
@@ -137,7 +138,6 @@ def preprocess_datasets(config):
 
 if __name__ == "__main__":
     setup_seed(0)
-    time_now = int(datetime.now().timestamp())
 
     # load configs
     parser = argparse.ArgumentParser()
