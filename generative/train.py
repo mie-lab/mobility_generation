@@ -3,6 +3,9 @@ from torch import nn, optim
 from torch.optim.lr_scheduler import StepLR
 import torch.nn.functional as F
 
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 import numpy as np
 from tqdm import tqdm
 
@@ -32,65 +35,85 @@ def generate_samples(model, config, num, single_len=256, print_progress=False):
     return np.array(samples)
 
 
-def pre_training(discriminator, generator, all_locs, config, device, log_dir, input_data):
+def pre_training(discriminator, generator, all_locs, config, world_size, device, log_dir, input_data):
     train_data, train_idx, vali_data, vali_idx = input_data
 
     # pretrain discriminator
-    # fake_train_samples = construct_discriminator_pretrain_dataset(train_data, train_idx, all_locs)
-    # fake_vali_samples = construct_discriminator_pretrain_dataset(vali_data, vali_idx, all_locs)
-    # print("Pretrain discriminator")
+    fake_train_samples = construct_discriminator_pretrain_dataset(train_data, train_idx, all_locs)
+    fake_vali_samples = construct_discriminator_pretrain_dataset(vali_data, vali_idx, all_locs)
+    print("Pretrain discriminator")
 
-    # # train dataset
-    # d_train_data = discriminator_dataset(
-    #     true_data=train_data, fake_data=fake_train_samples, valid_start_end_idx=train_idx
-    # )
-    kwds_train = {
-        "shuffle": True,
-        "num_workers": config.num_workers,
-        "batch_size": config.d_batch_size,
-        "pin_memory": True,
-    }
-    # d_train_loader = torch.utils.data.DataLoader(d_train_data, collate_fn=discriminator_collate_fn, **kwds_train)
+    # train dataset
+    d_train_data = discriminator_dataset(
+        true_data=train_data, fake_data=fake_train_samples, valid_start_end_idx=train_idx
+    )
+    train_sampler = DistributedSampler(d_train_data, num_replicas=world_size, rank=device, shuffle=True)
+    d_train_loader = torch.utils.data.DataLoader(
+        d_train_data,
+        collate_fn=discriminator_collate_fn,
+        num_workers=config.num_workers,
+        batch_size=config.d_batch_size,
+        pin_memory=True,
+        sampler=train_sampler,
+    )
 
     # validation dataset
-    # d_vali_data = discriminator_dataset(true_data=vali_data, fake_data=fake_vali_samples, valid_start_end_idx=vali_idx)
-    kwds_vali = {
-        "shuffle": False,
-        "num_workers": config.num_workers,
-        "batch_size": config.d_batch_size,
-        "pin_memory": True,
-    }
-    # d_vali_loader = torch.utils.data.DataLoader(d_vali_data, collate_fn=discriminator_collate_fn, **kwds_vali)
+    d_vali_data = discriminator_dataset(true_data=vali_data, fake_data=fake_vali_samples, valid_start_end_idx=vali_idx)
+    vali_sampler = DistributedSampler(d_vali_data, num_replicas=world_size, rank=device, shuffle=False)
+    d_vali_loader = torch.utils.data.DataLoader(
+        d_vali_data,
+        collate_fn=discriminator_collate_fn,
+        num_workers=config.num_workers,
+        batch_size=config.d_batch_size,
+        pin_memory=True,
+        sampler=vali_sampler,
+    )
 
-    # d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
-    # d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
+    # loss and optimizer
+    d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
+    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
-    # print(f"length of the train loader: {len(d_train_loader)}\t #samples: {len(d_train_data)}")
-    # print(f"length of the validation loader: {len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
+    print(f"length of the train loader: {len(d_train_loader)}\t #samples: {len(d_train_data)}")
+    print(f"length of the validation loader: {len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
 
-    # discriminator = training(
-    #     d_train_loader,
-    #     d_vali_loader,
-    #     d_optimizer,
-    #     d_criterion,
-    #     discriminator,
-    #     config,
-    #     device,
-    #     log_dir,
-    #     model_type="discriminator",
-    # )
+    discriminator = training(
+        d_train_loader,
+        d_vali_loader,
+        d_optimizer,
+        d_criterion,
+        discriminator,
+        config,
+        device,
+        log_dir,
+        model_type="discriminator",
+    )
 
     # pretrain generator
     print("Pretrain generator")
 
     # training dataset
     g_train_data = generator_dataset(input_data=train_data, valid_start_end_idx=train_idx)
-    kwds_train["batch_size"] = config.g_batch_size
-    g_train_loader = torch.utils.data.DataLoader(g_train_data, collate_fn=generator_collate_fn, **kwds_train)
+    train_sampler = DistributedSampler(g_train_data, num_replicas=world_size, rank=device, shuffle=True)
+    g_train_loader = torch.utils.data.DataLoader(
+        g_train_data,
+        collate_fn=generator_collate_fn,
+        num_workers=config.num_workers,
+        batch_size=config.g_batch_size,
+        pin_memory=True,
+        sampler=train_sampler,
+    )
 
+    # validation dataset
     g_vali_data = generator_dataset(input_data=vali_data, valid_start_end_idx=vali_idx)
-    kwds_vali["batch_size"] = config.g_batch_size
-    g_vali_loader = torch.utils.data.DataLoader(g_vali_data, collate_fn=generator_collate_fn, **kwds_vali)
+    vali_sampler = DistributedSampler(g_vali_data, num_replicas=world_size, rank=device, shuffle=False)
+    g_vali_loader = torch.utils.data.DataLoader(
+        g_vali_data,
+        collate_fn=generator_collate_fn,
+        num_workers=config.num_workers,
+        batch_size=config.g_batch_size,
+        pin_memory=True,
+        sampler=vali_sampler,
+    )
 
     g_criterion = nn.CrossEntropyLoss(reduction="mean").to(device)
     g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
@@ -245,7 +268,7 @@ def validate_epoch(config, model, data_loader, criterion, device, model_type):
     return {"val_loss": val_loss}
 
 
-def adv_training(discriminator, generator, config, device, all_locs, log_dir, input_data):
+def adv_training(discriminator, generator, config, world_size, device, all_locs, log_dir, input_data):
     train_data, train_idx, vali_data, vali_idx = input_data
 
     rollout = Rollout(generator, 0.9)
@@ -311,14 +334,14 @@ def adv_training(discriminator, generator, config, device, all_locs, log_dir, in
                 generator, config, num=config.num_gen_samples, single_len=2048, print_progress=False
             )
             d_train_data = discriminator_dataset(true_data=train_data, fake_data=samples, valid_start_end_idx=train_idx)
-            kwds_train = {
-                "shuffle": True,
-                "num_workers": config.num_workers,
-                "batch_size": config.d_batch_size,
-                "pin_memory": True,
-            }
+            train_sampler = DistributedSampler(d_train_data, num_replicas=world_size, rank=device, shuffle=False)
             d_train_loader = torch.utils.data.DataLoader(
-                d_train_data, collate_fn=discriminator_collate_fn, **kwds_train
+                d_train_data,
+                collate_fn=discriminator_collate_fn,
+                num_workers=config.num_workers,
+                batch_size=config.d_batch_size,
+                pin_memory=True,
+                sampler=train_sampler,
             )
 
             for i in range(1):
@@ -355,7 +378,9 @@ def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, ge
     targets = samples[:, 1:].reshape((-1,))
 
     # calculate the reward
-    rewards = rollout.get_reward(samples[:, :-1], roll_out_num=config.rollout_num, discriminator=discriminator, device=device)
+    rewards = rollout.get_reward(
+        samples[:, :-1], roll_out_num=config.rollout_num, discriminator=discriminator, device=device
+    )
 
     prob = generator(inputs)
     prob = F.log_softmax(prob, dim=-1)
@@ -363,8 +388,8 @@ def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, ge
     gloss = gen_gan_loss(prob, targets, rewards, device)
 
     # additional losses
-    gloss += config.periodic_loss * period_crit(samples)
-    gloss += config.distance_loss * distance_crit(samples)
+    # gloss += config.periodic_loss * period_crit(samples)
+    # gloss += config.distance_loss * distance_crit(samples)
 
     running_loss = gloss.item()
     # optimize

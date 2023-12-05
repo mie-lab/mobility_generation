@@ -116,7 +116,7 @@ class Generator(nn.Module):
                 torch.nn.init.xavier_uniform_(p)
 
     def _generate_square_subsequent_mask(self, sz):
-        return torch.triu(torch.full((sz, sz), bool(True)), diagonal=1)
+        return torch.triu(torch.full((sz, sz), True, dtype=torch.bool), diagonal=1)
 
     def forward(self, x_l):
         # x_t
