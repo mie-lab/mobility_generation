@@ -45,7 +45,7 @@ class Discriminator(nn.Module):
         pools = [F.max_pool1d(conv, conv.size(2)).squeeze(2) for conv in convs]  # [batch_size * num_filter]
         pred = torch.cat(pools, 1)  # batch_size * num_filters_sum
         highway = self.highway(pred)
-        pred = F.sigmoid(highway) * F.relu(highway) + (1.0 - F.sigmoid(highway)) * pred
+        pred = torch.sigmoid(highway) * F.relu(highway) + (1.0 - torch.sigmoid(highway)) * pred
 
         return self.linear(self.dropout(pred))
 
@@ -116,7 +116,7 @@ class Generator(nn.Module):
                 torch.nn.init.xavier_uniform_(p)
 
     def _generate_square_subsequent_mask(self, sz):
-        return torch.triu(torch.full((sz, sz), float("-inf")), diagonal=1)
+        return torch.triu(torch.full((sz, sz), bool(True)), diagonal=1)
 
     def forward(self, x_l):
         # x_t
@@ -147,11 +147,11 @@ class Generator(nn.Module):
 
         # matrix calculation
         # dist_vec = F.relu(self.linear_mat1(dist_vec))
-        # dist_vec = F.sigmoid(self.linear_mat1_2(dist_vec))
+        # dist_vec = torch.sigmoid(self.linear_mat1_2(dist_vec))
         # dist_vec = F.normalize(dist_vec)
 
         # visit_vec = F.relu(self.linear_mat2(visit_vec))
-        # visit_vec = F.sigmoid(self.linear_mat2_2(visit_vec))
+        # visit_vec = torch.sigmoid(self.linear_mat2_2(visit_vec))
         # visit_vec = F.normalize(visit_vec)
 
         # pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
@@ -187,11 +187,11 @@ class Generator(nn.Module):
 
         # matrix calculation
         # dist_vec = F.relu(self.linear_mat1(dist_vec))
-        # dist_vec = F.sigmoid(self.linear_mat1_2(dist_vec))
+        # dist_vec = torch.sigmoid(self.linear_mat1_2(dist_vec))
         # dist_vec = F.normalize(dist_vec)
 
         # visit_vec = F.relu(self.linear_mat2(visit_vec))
-        # visit_vec = F.sigmoid(self.linear_mat2_2(visit_vec))
+        # visit_vec = torch.sigmoid(self.linear_mat2_2(visit_vec))
         # visit_vec = F.normalize(visit_vec)
 
         # pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
@@ -223,7 +223,7 @@ class Generator(nn.Module):
                     .long()
                     .to(self.device)
                 )
-                x[x == 0] += 1
+                x[x == 0] += 1  # for padding
                 s = 1
 
         samples = []
@@ -233,7 +233,7 @@ class Generator(nn.Module):
             for i in range(s, seq_len):
                 x = self.step(x)
                 x = x.multinomial(1)
-                x[x == 0] += 1
+                x[x == 0] += 1  # for padding
                 samples.append(x)
         else:
             given_len = x.size(1)
@@ -244,11 +244,11 @@ class Generator(nn.Module):
 
             x = self.step(lis[-1])
             x = x.multinomial(1)
-            x[x == 0] += 1
+            x[x == 0] += 1  # for padding
 
             for i in range(given_len, seq_len):
                 samples.append(x)
                 x = self.step(x)
                 x = x.multinomial(1)
-                x[x == 0] += 1
+                x[x == 0] += 1  # for padding
         return torch.cat(samples, dim=1)
