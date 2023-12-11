@@ -12,8 +12,8 @@ class Discriminator(nn.Module):
 
     def __init__(self, config, embedding, dropout=0.5):
         super(Discriminator, self).__init__()
-        self.num_filters = [32, 32]
-        self.kernel_sizes = [3, 5]
+        self.num_filters = [64, 64, 64]
+        self.kernel_sizes = [3, 5, 7]
 
         self.embedding = embedding
 
@@ -93,11 +93,7 @@ class Generator(nn.Module):
             self.base_emb_size, nhead=16, activation="gelu", dim_feedforward=self.hidden_dim, batch_first=True
         )
         encoder_norm = torch.nn.LayerNorm(self.base_emb_size)
-        self.encoder = torch.nn.TransformerEncoder(
-            encoder_layer=encoder_layer,
-            num_layers=2,
-            norm=encoder_norm,
-        )
+        self.encoder = torch.nn.TransformerEncoder(encoder_layer=encoder_layer, num_layers=2, norm=encoder_norm)
 
         self.linear = nn.Linear(self.base_emb_size, self.total_loc_num)
 
@@ -121,7 +117,6 @@ class Generator(nn.Module):
     def forward(self, x_l):
         # x_t
         """
-
         :param x: (batch_size, seq_len), sequence of locations
         :return:
             (batch_size * seq_len, total_locations), prediction of next stage of all locations

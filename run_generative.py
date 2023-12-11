@@ -31,6 +31,7 @@ def setup(rank, world_size):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
     dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
 
 
 def cleanup():
@@ -51,10 +52,9 @@ def get_rank():
     return dist.get_rank()
 
 
-def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, vali_idx, emp_visits, time_now):
+def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, vali_idx, emp_visits, log_dir):
     # setup the process groups
     setup(rank, world_size)
-    torch.cuda.set_device(rank)
 
     # init models
     embedding = AllEmbedding(config=config).to(rank)
@@ -66,10 +66,12 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
     # device_ids tell DDP where is your model
     # output_device tells DDP where to output, in our case, it is rank
     # find_unused_parameters=True instructs DDP to find unused output of the forward() function of any module in the model
-    generator = DDP(generator, device_ids=[rank], output_device=rank, find_unused_parameters=False)
+    generator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(generator)
+    generator = DDP(generator, device_ids=[rank])
 
     discriminator = Discriminator(config=config, embedding=embedding).to(rank)
-    discriminator = DDP(discriminator, device_ids=[rank], output_device=rank, find_unused_parameters=False)
+    discriminator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(discriminator)
+    discriminator = DDP(discriminator, device_ids=[rank])
     # calculate parameters
     total_params_embed = sum(p.numel() for p in embedding.parameters() if p.requires_grad)
     total_params_generator = sum(p.numel() for p in generator.parameters() if p.requires_grad)
@@ -81,8 +83,6 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
         )
 
     if not config.use_pretrain:
-        log_dir = init_save_path(config, time_now=time_now, postfix="pretrain")
-
         discriminator, generator = pre_training(
             discriminator,
             generator,
@@ -95,14 +95,15 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
         )
 
     else:
-        generator.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator.pt")))
+        generator.load_state_dict(
+            torch.load(os.path.join(config.save_root, config.pretrain_filepath, "generator_pretrain.pt"))
+        )
         discriminator.load_state_dict(
-            torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator.pt"))
+            torch.load(os.path.join(config.save_root, config.pretrain_filepath, "discriminator_pretrain.pt"))
         )
 
     if rank == 0:
         print("Advtrain generator and discriminator ...")
-    log_dir = init_save_path(config, time_now=time_now)
 
     adv_training(
         discriminator,
@@ -132,12 +133,15 @@ def preprocess_datasets(config):
 
     train_data, vali_data, test_data, all_locs = get_train_test(sp, all_locs=all_locs)
 
+    train_data["id"] = np.arange(len(train_data))
+    vali_data["id"] = np.arange(len(vali_data))
+    test_data["id"] = np.arange(len(test_data))
+
     return train_data, vali_data, test_data, all_locs
 
 
 if __name__ == "__main__":
     setup_seed(0)
-    time_now = int(datetime.now().timestamp())
 
     # load configs
     parser = argparse.ArgumentParser()
@@ -155,6 +159,7 @@ if __name__ == "__main__":
     config = edict(config)
 
     world_size = config.world_size
+    log_dir = init_save_path(config, time_now=int(datetime.now().timestamp()))
 
     train_data, vali_data, test_data, all_locs = preprocess_datasets(config)
 
@@ -163,9 +168,6 @@ if __name__ == "__main__":
     config["total_user_num"] = int(train_data.user_id.max() + 1)
 
     # get valid idx for training and validation
-    train_data["id"] = np.arange(len(train_data))
-    vali_data["id"] = np.arange(len(vali_data))
-    test_data["id"] = np.arange(len(test_data))
     train_idx = _get_valid_sequence(train_data, print_progress=config.verbose, previous_day=config.previous_day)
     vali_idx = _get_valid_sequence(vali_data, print_progress=config.verbose, previous_day=config.previous_day)
     # test_idx = _get_valid_sequence(test_data, print_progress=config.verbose, previous_day=config.previous_day)
@@ -179,6 +181,16 @@ if __name__ == "__main__":
 
     mp.spawn(
         main,
-        args=(world_size, config, all_locs, train_data, vali_data, train_idx, vali_idx, emp_visits, time_now),
+        args=(
+            world_size,
+            config,
+            all_locs,
+            train_data,
+            vali_data,
+            train_idx,
+            vali_idx,
+            emp_visits,
+            log_dir,
+        ),
         nprocs=world_size,
     )

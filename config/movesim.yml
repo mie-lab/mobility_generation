@@ -17,8 +17,8 @@ misc:
   verbose: True
   debug: False
   d_batch_size: 128
-  g_batch_size: 64
-  print_step: 10
+  g_batch_size: 32
+  print_step: 1000
   num_workers: 0
   world_size: 1
   

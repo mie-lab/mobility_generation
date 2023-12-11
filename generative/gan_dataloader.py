@@ -15,7 +15,9 @@ class discriminator_dataset(torch.utils.data.Dataset):
         super(discriminator_dataset, self).__init__()
 
         # reindex the df for efficient selection
-        self.true_data = true_data
+        self.true_data = true_data.copy()
+        self.true_data.set_index("id", inplace=True)
+
         self.fake_data = fake_data
 
         self.valid_start_end_idx = valid_start_end_idx
@@ -46,7 +48,8 @@ class generator_dataset(torch.utils.data.Dataset):
     def __init__(self, input_data, valid_start_end_idx):
         super(generator_dataset, self).__init__()
 
-        self.data = input_data
+        self.data = input_data.copy()
+        self.data.set_index("id", inplace=True)
 
         self.valid_start_end_idx = valid_start_end_idx
         self.len = len(valid_start_end_idx)
@@ -97,10 +100,11 @@ def generator_collate_fn(batch):
 
 
 def construct_discriminator_pretrain_dataset(input_data, input_idx, all_locs):
-
     fake_sequences = []
+
+    data_df = input_data.set_index("id")
     for start_idx, end_idx in input_idx:
-        curr_seq = input_data.iloc[start_idx:end_idx]["location_id"].values
+        curr_seq = data_df.iloc[start_idx:end_idx]["location_id"].values.copy()
 
         random_seq = curr_seq.copy()
         np.random.shuffle(random_seq)
@@ -108,7 +112,7 @@ def construct_discriminator_pretrain_dataset(input_data, input_idx, all_locs):
 
         # random choose one location and switch to another location
         selected_idx = np.random.randint(len(curr_seq), size=1)
-        curr_seq[selected_idx] = np.random.randint(len(all_locs) + 1, size=1)
+        curr_seq[selected_idx] = np.random.randint(low=1, high=len(all_locs) + 1, size=1)
 
         fake_sequences.append(curr_seq)
 

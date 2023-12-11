@@ -32,25 +32,21 @@ from utils.earlystopping import EarlyStopping
 def generate_samples(model, config, num, single_len=256, print_progress=False):
     samples = []
     for _ in tqdm(range(int(num / single_len)), disable=not print_progress):
-        samples.extend(model.sample(single_len, config.generate_len).cpu().data.numpy().tolist())
+        samples.extend(model.module.sample(single_len, config.generate_len).cpu().data.numpy().tolist())
     return np.array(samples)
 
 
-def pre_training(discriminator, generator, all_locs, config, world_size, device, log_dir, input_data):
+def get_pretrain_loaders(config, input_data, all_locs, world_size, device):
     train_data, train_idx, vali_data, vali_idx = input_data
 
-    # pretrain discriminator
+    # train dataset
     fake_train_samples = construct_discriminator_pretrain_dataset(train_data, train_idx, all_locs)
     fake_vali_samples = construct_discriminator_pretrain_dataset(vali_data, vali_idx, all_locs)
 
-    if is_main_process():
-        print("Pretrain discriminator")
-
-    # train dataset
     d_train_data = discriminator_dataset(
         true_data=train_data, fake_data=fake_train_samples, valid_start_end_idx=train_idx
     )
-    train_sampler = DistributedSampler(d_train_data, num_replicas=world_size, rank=device, shuffle=True)
+    train_sampler = DistributedSampler(d_train_data, num_replicas=world_size, rank=device, shuffle=True, drop_last=True)
     d_train_loader = torch.utils.data.DataLoader(
         d_train_data,
         collate_fn=discriminator_collate_fn,
@@ -71,30 +67,6 @@ def pre_training(discriminator, generator, all_locs, config, world_size, device,
         pin_memory=True,
         sampler=vali_sampler,
     )
-
-    # loss and optimizer
-    d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
-    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
-
-    if is_main_process():
-        print(f"length of the train loader: {len(d_train_loader)}\t #samples: {len(d_train_data)}")
-        print(f"length of the validation loader: {len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
-
-    discriminator = training(
-        d_train_loader,
-        d_vali_loader,
-        d_optimizer,
-        d_criterion,
-        discriminator,
-        config,
-        device,
-        log_dir,
-        model_type="discriminator",
-    )
-
-    # pretrain generator
-    if is_main_process():
-        print("Pretrain generator")
 
     # training dataset
     g_train_data = generator_dataset(input_data=train_data, valid_start_end_idx=train_idx)
@@ -120,11 +92,29 @@ def pre_training(discriminator, generator, all_locs, config, world_size, device,
         sampler=vali_sampler,
     )
 
+    if is_main_process():
+        print(f"len d_train loader:\t{len(d_train_loader)}\t #samples: {len(d_train_data)}")
+        print(f"len d_vali loader:\t{len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
+        print(f"len g_train loader:\t{len(g_train_loader)}\t #samples: {len(g_train_data)}")
+        print(f"len g_vali loader:\t{len(g_vali_loader)}\t #samples: {len(g_vali_data)}")
+
+    return d_train_loader, d_vali_loader, g_train_loader, g_vali_loader
+
+
+def pre_training(discriminator, generator, all_locs, config, world_size, device, log_dir, input_data):
+    d_train_loader, d_vali_loader, g_train_loader, g_vali_loader = get_pretrain_loaders(
+        config, input_data, all_locs, world_size, device
+    )
+
+    # loss and optimizer
+    d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
+    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
     g_criterion = nn.CrossEntropyLoss(reduction="mean").to(device)
     g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
+    # pretrain generator
     if is_main_process():
-        print(f"length of the train loader: {len(g_train_loader)}\t #samples: {len(g_train_data)}")
+        print("Pretrain generator")
 
     generator = training(
         g_train_loader,
@@ -136,6 +126,21 @@ def pre_training(discriminator, generator, all_locs, config, world_size, device,
         device,
         log_dir,
         model_type="generator",
+    )
+
+    # pretrain discriminator
+    if is_main_process():
+        print("Pretrain discriminator")
+    discriminator = training(
+        d_train_loader,
+        d_vali_loader,
+        d_optimizer,
+        d_criterion,
+        discriminator,
+        config,
+        device,
+        log_dir,
+        model_type="discriminator",
     )
 
     return discriminator, generator
@@ -163,7 +168,7 @@ def training(
         verbose=config.verbose,
         main_process=is_main_process(),
         delta=0.001,
-        save_name=model_type,
+        save_name=model_type + "_pretrain",
     )
 
     # Time for printing
@@ -172,6 +177,9 @@ def training(
 
     # Loop for n_epochs
     for epoch in range(config.max_epoch):
+        train_loader.sampler.set_epoch(epoch)
+        val_loader.sampler.set_epoch(epoch)
+
         # train for one epoch
         train_epoch(config, model, train_loader, optimizer, criterion, device, epoch, model_type)
 
@@ -189,11 +197,16 @@ def training(
                 print("Current learning rate: {:.6f}".format(optimizer.param_groups[0]["lr"]))
             if scheduler_count == 2:
                 # early_stopping.best_return_dict
-                print("Training finished.\t Time: {:.2f}s.".format((time.time() - training_start_time)))
+                if is_main_process():
+                    print("Training finished.\t Time: {:.2f}s.".format((time.time() - training_start_time)))
                 break
 
+            # for multigpu
+            dist.barrier()
+            map_location = {"cuda:%d" % 0: "cuda:%d" % device}
+            model.load_state_dict(torch.load(log_dir + f"/{model_type}_pretrain.pt", map_location=map_location))
+            #
             scheduler_count += 1
-            model.load_state_dict(torch.load(log_dir + f"/{model_type}.pt"))
             early_stopping.early_stop = False
             early_stopping.counter = 0
             scheduler.step()
@@ -201,13 +214,13 @@ def training(
         if config.debug is True:
             break
 
-    # return model, performance
-
     return model
 
 
 def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch, model_type):
     n_batches = len(data_loader)
+
+    model.train()
 
     running_loss = 0.0
     training_loss = 0
@@ -225,8 +238,11 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
         else:
             loss = criterion(pred, target.long().view((-1,)))
 
+        if torch.isnan(loss):
+            assert False
         optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
         optimizer.step()
 
         running_loss += loss.item()
@@ -254,7 +270,7 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
 def validate_epoch(config, model, data_loader, criterion, device, model_type):
     total_val_loss = 0
 
-    # change to validation mode
+    # change to validation mode. Warning in inference mode regarding the transformer mask
     model.eval()
     with torch.no_grad():
         for data, target in data_loader:
@@ -303,7 +319,6 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
 
         if is_main_process():
             print("training generator")
-        start_time = time.time()
 
         # train
         start_time = time.time()
@@ -319,6 +334,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
                 )
             )
 
+        set_requires_grad(discriminator, False)
         # only once and update rollout parameter
         train_loss = train_generator(
             generator,
@@ -345,12 +361,13 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         # train discriminator
         if is_main_process():
             print("training discriminator")
+        set_requires_grad(discriminator, True)
         for _ in range(1):
             samples = generate_samples(
                 generator, config, num=config.num_gen_samples, single_len=2048, print_progress=False
             )
             d_train_data = discriminator_dataset(true_data=train_data, fake_data=samples, valid_start_end_idx=train_idx)
-            train_sampler = DistributedSampler(d_train_data, num_replicas=world_size, rank=device, shuffle=False)
+            train_sampler = DistributedSampler(d_train_data, num_replicas=world_size, rank=device, shuffle=True)
             d_train_loader = torch.utils.data.DataLoader(
                 d_train_data,
                 collate_fn=discriminator_collate_fn,
@@ -361,6 +378,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
             )
 
             for i in range(1):
+                d_train_loader.sampler.set_epoch(i)
                 train_epoch(
                     config,
                     discriminator,
@@ -372,6 +390,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
                     model_type="discriminator",
                 )
 
+        # save models
         torch.save(generator.state_dict(), log_dir + "/generator.pt")
         torch.save(discriminator.state_dict(), log_dir + "/discriminator.pt")
 
@@ -411,6 +430,7 @@ def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, ge
     # optimize
     gen_gan_optm.zero_grad()
     gloss.backward()
+    torch.nn.utils.clip_grad_norm_(generator.parameters(), 1)
     gen_gan_optm.step()
 
     return running_loss
@@ -420,6 +440,17 @@ def save_pk_file(save_path, data):
     """Function to save data to pickle format given data and path."""
     with open(save_path, "wb") as handle:
         pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def set_requires_grad(net, requires_grad=False):
+    """Set requies_grad=False for network to avoid unnecessary computations
+    Parameters:
+        nets (network)   -- a network
+        requires_grad (bool)  -- whether the networks require gradients or not
+    """
+    if net is not None:
+        for param in net.parameters():
+            param.requires_grad = requires_grad
 
 
 def is_dist_avail_and_initialized():

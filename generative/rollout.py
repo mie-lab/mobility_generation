@@ -32,14 +32,14 @@ class Rollout(object):
             for step in range(1, seq_len):
                 data = x[:, :step]
                 # use own model
-                samples = self.own_model.sample(batch_size, seq_len, data)
+                samples = self.own_model.module.sample(batch_size, seq_len, data)
                 pred = discriminator(samples)
 
-                rewards[:, step - 1] += torch.sigmoid(pred).detach().view((-1,))
+                rewards[:, step - 1] += torch.sigmoid(pred).view((-1,))
 
             # for the last token
             pred = discriminator(x)
-            rewards[:, seq_len - 1] += torch.sigmoid(pred).detach().view((-1,))
+            rewards[:, seq_len - 1] += torch.sigmoid(pred).view((-1,))
 
         rewards = rewards / roll_out_num
         return rewards.view((-1,))  # batch_size * (seq_len -1)
