@@ -8,15 +8,32 @@ import torch.nn.functional as F
 from torch import Tensor
 
 
+class AllEmbedding(nn.Module):
+    def __init__(self, config) -> None:
+        super(AllEmbedding, self).__init__()
+        # emberdding layers
+
+        # location embedding
+        self.emb_loc = nn.Embedding(
+            num_embeddings=config.total_loc_num, embedding_dim=config.base_emb_size, padding_idx=0
+        )
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self, src) -> Tensor:
+        emb = self.emb_loc(src)
+
+        return self.dropout(emb)
+
+
 class Discriminator(nn.Module):
     """Basic discriminator."""
 
-    def __init__(self, config, embedding, dropout=0.5):
+    def __init__(self, config, dropout=0.5):
         super(Discriminator, self).__init__()
-        self.num_filters = [64, 64, 64]
-        self.kernel_sizes = [3, 5, 7]
+        self.num_filters = [32, 32]
+        self.kernel_sizes = [3, 5]
 
-        self.embedding = embedding
+        self.embedding = AllEmbedding(config=config)
 
         # changed it to account for the paddings of variable length
         self.convs = nn.ModuleList(
@@ -61,7 +78,6 @@ class Generator(nn.Module):
     def __init__(
         self,
         config,
-        embedding,
         device=None,
         starting_sample="rand",
         starting_dist=None,
@@ -86,7 +102,7 @@ class Generator(nn.Module):
         # self.dist_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "dist_matrix.pk"), "rb"))
         # self.emp_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "emp_matrix.pk"), "rb"))
 
-        self.loc_embedding = embedding
+        self.loc_embedding = AllEmbedding(config=config)
         # self.tim_embedding = nn.Embedding(num_embeddings=24, embedding_dim=self.base_emb_size)
 
         # transformer encoder

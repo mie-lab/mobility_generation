@@ -377,7 +377,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         # only once and update rollout parameter
         for _ in range(config.g_step):
             # evaluate current generator performance
-            samples = generate_samples(generator, config, single_len=512, num=512)
+            samples = generate_samples(generator, config, single_len=32, num=32)
             jsds = metrics.get_individual_jsds(gene_data=samples)
 
             if is_main_process():
@@ -487,7 +487,7 @@ def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, ge
 
     # additional losses
     # gloss += config.periodic_loss * period_crit(samples)
-    # gloss += config.distance_loss * distance_crit(samples)
+    gloss += config.distance_loss * distance_crit(samples)
 
     running_loss = gloss.item()
     # optimize

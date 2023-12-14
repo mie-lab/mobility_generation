@@ -19,7 +19,7 @@ from easydict import EasyDict as edict
 from utils.utils import load_data, setup_seed, load_config, init_save_path
 from utils.dataloader import get_train_test, _get_valid_sequence
 
-from generative.movesim import Discriminator, Generator, AllEmbedding
+from generative.movesim import Discriminator, Generator
 from generative.train import pre_training, adv_training
 
 
@@ -57,10 +57,7 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
     setup(rank, world_size)
 
     # init models
-    embedding = AllEmbedding(config=config).to(rank)
-    generator = Generator(
-        device=rank, config=config, embedding=embedding, starting_sample="real", starting_dist=emp_visits
-    ).to(rank)
+    generator = Generator(device=rank, config=config, starting_sample="real", starting_dist=emp_visits).to(rank)
 
     # wrap the model with DDP
     # device_ids tell DDP where is your model
@@ -70,18 +67,18 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
     generator = DDP(
         generator,
         device_ids=[rank],
-        # find_unused_parameters=True,
+        find_unused_parameters=True,
     )
 
-    discriminator = Discriminator(config=config, embedding=embedding).to(rank)
+    discriminator = Discriminator(config=config).to(rank)
     discriminator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(discriminator)
     discriminator = DDP(
         discriminator,
         device_ids=[rank],
-        # find_unused_parameters=True,
+        find_unused_parameters=True,
     )
     # calculate parameters
-    total_params_embed = sum(p.numel() for p in embedding.parameters() if p.requires_grad)
+    total_params_embed = sum(p.numel() for p in generator.module.loc_embedding.parameters() if p.requires_grad)
     total_params_generator = sum(p.numel() for p in generator.parameters() if p.requires_grad)
     total_params_discriminator = sum(p.numel() for p in discriminator.parameters() if p.requires_grad)
 
