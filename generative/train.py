@@ -233,7 +233,7 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
     start_time = time.time()
     optimizer.zero_grad()
     for i, (data, target) in enumerate(data_loader):
-        data = data.long().to(device).transpose(0, 1)
+        data = data.long().to(device)
         target = target.to(device)
 
         pred = model(data)
@@ -311,7 +311,7 @@ def validate_epoch(config, model, data_loader, criterion, device, model_type):
     model.eval()
     with torch.no_grad():
         for data, target in data_loader:
-            data = data.long().to(device).transpose(0, 1)
+            data = data.long().to(device)
             target = target.to(device)
 
             pred = model(data)
