@@ -1,10 +1,11 @@
 # coding: utf-8
 import os
+import pickle as pickle
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pickle as pickle
+from torch import Tensor
 
 
 class Discriminator(nn.Module):
@@ -90,14 +91,16 @@ class Generator(nn.Module):
 
         # transformer encoder
         encoder_layer = torch.nn.TransformerEncoderLayer(
-            self.base_emb_size, nhead=16, activation="gelu", dim_feedforward=self.hidden_dim, batch_first=True
+            self.base_emb_size, nhead=config.head, activation="gelu", dim_feedforward=self.hidden_dim, batch_first=True
         )
         encoder_norm = torch.nn.LayerNorm(self.base_emb_size)
-        self.encoder = torch.nn.TransformerEncoder(encoder_layer=encoder_layer, num_layers=2, norm=encoder_norm)
+        self.encoder = torch.nn.TransformerEncoder(
+            encoder_layer=encoder_layer, num_layers=config.layer, norm=encoder_norm
+        )
 
-        self.linear = nn.Linear(self.base_emb_size, self.total_loc_num)
+        self.fc = FullyConnected(self.base_emb_size, if_residual_layer=True, total_loc_num=self.total_loc_num)
 
-        # for distance and empirical matrics
+        # # for distance and empirical matrics
         # self.linear_mat1 = nn.Linear(self.total_loc_num - 1, self.base_emb_size)
         # self.linear_mat1_2 = nn.Linear(self.base_emb_size, self.total_loc_num)
 
@@ -133,12 +136,10 @@ class Generator(nn.Module):
 
         #
         src_mask = self._generate_square_subsequent_mask(x_l.shape[1]).to(self.device)
-        out = self.encoder(emb, mask=src_mask, src_key_padding_mask=src_padding_mask)
+        x = self.encoder(emb, mask=src_mask, src_key_padding_mask=src_padding_mask)
 
         # for padding
-        out = out * (~src_padding_mask).unsqueeze(-1).repeat(1, 1, self.base_emb_size)
-
-        x = F.relu(self.linear(out.reshape(-1, self.base_emb_size)))
+        # out = out * (~src_padding_mask).unsqueeze(-1).repeat(1, 1, self.base_emb_size)
 
         # matrix calculation
         # dist_vec = F.relu(self.linear_mat1(dist_vec))
@@ -149,10 +150,13 @@ class Generator(nn.Module):
         # visit_vec = torch.sigmoid(self.linear_mat2_2(visit_vec))
         # visit_vec = F.normalize(visit_vec)
 
-        # pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
+        # # for padding
+        # dist_vec = dist_vec * (~src_padding_mask).reshape(-1).unsqueeze(-1).repeat(1, self.total_loc_num)
+        # visit_vec = visit_vec * (~src_padding_mask).reshape(-1).unsqueeze(-1).repeat(1, self.total_loc_num)
 
-        pred = x
-        return pred
+        # x = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
+
+        return self.fc(x.reshape(-1, self.base_emb_size))
 
     def step(self, input):
         """
@@ -173,14 +177,12 @@ class Generator(nn.Module):
 
         #
         src_mask = self._generate_square_subsequent_mask(input.shape[1]).to(self.device)
-        out = self.encoder(emb, mask=src_mask, src_key_padding_mask=src_padding_mask)
+        x = self.encoder(emb, mask=src_mask, src_key_padding_mask=src_padding_mask)
 
         # for padding
-        out = out * (~src_padding_mask).unsqueeze(-1).repeat(1, 1, self.base_emb_size)
+        # out = out * (~src_padding_mask).unsqueeze(-1).repeat(1, 1, self.base_emb_size)
 
-        x = F.relu(self.linear(out.reshape(-1, self.base_emb_size)))
-
-        # matrix calculation
+        # # matrix calculation
         # dist_vec = F.relu(self.linear_mat1(dist_vec))
         # dist_vec = torch.sigmoid(self.linear_mat1_2(dist_vec))
         # dist_vec = F.normalize(dist_vec)
@@ -189,8 +191,13 @@ class Generator(nn.Module):
         # visit_vec = torch.sigmoid(self.linear_mat2_2(visit_vec))
         # visit_vec = F.normalize(visit_vec)
 
-        # pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
-        pred = x
+        # # for padding
+        # dist_vec = dist_vec * (~src_padding_mask).reshape(-1).unsqueeze(-1).repeat(1, self.total_loc_num)
+        # visit_vec = visit_vec * (~src_padding_mask).reshape(-1).unsqueeze(-1).repeat(1, self.total_loc_num)
+
+        # x = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
+
+        pred = self.fc(x.reshape(-1, self.base_emb_size))
 
         return F.softmax(pred, dim=-1)
 
@@ -218,7 +225,8 @@ class Generator(nn.Module):
                     .long()
                     .to(self.device)
                 )
-                x[x == 0] += 1  # for padding
+                if (x == 0).any():
+                    assert False  # for padding
                 s = 1
 
         samples = []
@@ -247,3 +255,37 @@ class Generator(nn.Module):
                 x = x.multinomial(1)
                 x[x == 0] += 1  # for padding
         return torch.cat(samples, dim=1)
+
+
+class FullyConnected(nn.Module):
+    def __init__(self, d_input, total_loc_num, if_residual_layer=True):
+        super(FullyConnected, self).__init__()
+        # the last fully connected layer
+
+        fc_dim = d_input
+
+        self.fc_loc = nn.Linear(fc_dim, total_loc_num)
+        self.dropout = nn.Dropout(p=0.1)
+
+        self.if_residual_layer = if_residual_layer
+        if self.if_residual_layer:
+            # the residual
+            self.linear1 = nn.Linear(fc_dim, fc_dim * 2)
+            self.linear2 = nn.Linear(fc_dim * 2, fc_dim)
+
+            self.norm = nn.BatchNorm1d(fc_dim)
+            self.fc_dropout1 = nn.Dropout(p=0.1)
+            self.fc_dropout2 = nn.Dropout(p=0.1)
+
+    def forward(self, out) -> Tensor:
+        out = self.dropout(out)
+
+        # residual
+        if self.if_residual_layer:
+            out = self.norm(out + self._res_block(out))
+
+        return self.fc_loc(out)
+
+    def _res_block(self, x: Tensor) -> Tensor:
+        x = self.linear2(self.fc_dropout1(F.relu(self.linear1(x))))
+        return self.fc_dropout2(x)

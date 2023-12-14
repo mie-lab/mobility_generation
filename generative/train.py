@@ -7,6 +7,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 import torch.distributed as dist
 
+import random
 import numpy as np
 from tqdm import tqdm
 
@@ -32,7 +33,7 @@ from utils.earlystopping import EarlyStopping
 def generate_samples(model, config, num, single_len=256, print_progress=False):
     samples = []
     for _ in tqdm(range(int(num / single_len)), disable=not print_progress):
-        samples.extend(model.module.sample(single_len, config.generate_len).cpu().data.numpy().tolist())
+        samples.extend(model.module.sample(single_len, config.generate_len).cpu().detach().numpy().tolist())
     return np.array(samples)
 
 
@@ -108,8 +109,8 @@ def pre_training(discriminator, generator, all_locs, config, world_size, device,
 
     # loss and optimizer
     d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
-    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
-    g_criterion = nn.CrossEntropyLoss(reduction="mean").to(device)
+    d_optimizer = optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
+    g_criterion = nn.CrossEntropyLoss(reduction="mean", ignore_index=0).to(device)  # ignore_index for padding
     g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
     # pretrain generator
@@ -224,6 +225,10 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
 
     running_loss = 0.0
     training_loss = 0
+    all_correct = 0
+    all_total = 0
+    curr_correct = 0
+    curr_total = 0
 
     start_time = time.time()
     optimizer.zero_grad()
@@ -235,8 +240,31 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
 
         if model_type == "discriminator":
             loss = criterion(pred.view((-1,)), target.float().view((-1,)))
+
+            # get the accuracy
+            prob = torch.sigmoid(pred).view(-1)
+
+            correct = torch.sum(torch.eq(prob > 0.5, target.to(bool)))
+            total = len(target)
+
+            all_correct += correct
+            all_total += total
+            curr_correct += correct
+            curr_total += total
+
         else:
             loss = criterion(pred, target.long().view((-1,)))
+
+            # get the accuracy
+            prediction = torch.topk(pred, k=1, dim=-1).indices.view(-1)
+            valid_idx = target.view(-1) != 0
+
+            correct = torch.sum(torch.eq(prediction[valid_idx], target.view(-1)[valid_idx]))
+            total = len(target.view(-1)[valid_idx])
+            all_correct += correct
+            all_total += total
+            curr_correct += correct
+            curr_total += total
 
         if torch.isnan(loss):
             assert False
@@ -249,26 +277,35 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
         training_loss += loss.item()
         if (config.verbose) and ((i + 1) % config["print_step"] == 0) and is_main_process():
             print(
-                "{}: Epoch {}, {:.1f}%\t loss: {:.3f}, took: {:.2f}s \r".format(
+                "{}: Epoch {}, {:.1f}%\t loss: {:.3f}, acc: {:.2f} took: {:.2f}s \r".format(
                     model_type,
                     epoch + 1,
                     100 * (i + 1) / n_batches,
                     running_loss / config["print_step"],
+                    curr_correct * 100 / curr_total,
                     time.time() - start_time,
                 ),
                 end="",
                 flush=True,
             )
             running_loss = 0.0
+            curr_correct = 0
+            curr_total = 0
             start_time = time.time()
 
     if config.verbose and is_main_process():
         print("")
-        print("Training loss = {:.5f}".format(training_loss / n_batches))
+        print(
+            "Training loss = {:.5f}\t Accuracy = {:.2f}".format(
+                training_loss / n_batches, all_correct * 100 / all_total
+            )
+        )
 
 
 def validate_epoch(config, model, data_loader, criterion, device, model_type):
     total_val_loss = 0
+    correct = 0
+    total = 0
 
     # change to validation mode. Warning in inference mode regarding the transformer mask
     model.eval()
@@ -281,8 +318,21 @@ def validate_epoch(config, model, data_loader, criterion, device, model_type):
 
             if model_type == "discriminator":
                 loss = criterion(pred.view((-1,)), target.float().view((-1,)))
+
+                # get the accuracy
+                prob = torch.sigmoid(pred).view(-1)
+
+                correct += torch.sum(torch.eq(prob > 0.5, target.to(bool)))
+                total += len(target)
             else:
                 loss = criterion(pred, target.long().view((-1,)))
+
+                # get the accuracy
+                prediction = torch.topk(pred, k=1, dim=-1).indices.view(-1)
+                valid_idx = target.view(-1) != 0
+
+                correct += torch.sum(torch.eq(prediction[valid_idx], target.view(-1)[valid_idx]))
+                total += len(target.view(-1)[valid_idx])
 
             total_val_loss += loss.item()
 
@@ -290,7 +340,7 @@ def validate_epoch(config, model, data_loader, criterion, device, model_type):
     val_loss = total_val_loss / len(data_loader)
 
     if config.verbose and is_main_process():
-        print("Validation loss = {:.5f}".format(val_loss))
+        print("Validation loss = {:.5f}\t Accuracy = {:.2f}".format(val_loss, correct * 100 / total))
 
     return {"val_loss": val_loss}
 
@@ -298,7 +348,7 @@ def validate_epoch(config, model, data_loader, criterion, device, model_type):
 def adv_training(discriminator, generator, config, world_size, device, all_locs, log_dir, input_data):
     train_data, train_idx, vali_data, vali_idx = input_data
 
-    rollout = Rollout(generator, 0.9)
+    rollout = Rollout(generator, 0.8)
 
     # gan loss and optimizer
     gen_gan_loss = GANLoss().to(device)
@@ -318,55 +368,66 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         # Train the generator for one step
 
         if is_main_process():
+            print("=" * 50)
             print("training generator")
 
-        # train
-        start_time = time.time()
-
-        # evaluate current generator performance
-        samples = generate_samples(generator, config, single_len=config.d_batch_size, num=config.d_batch_size)
-        jsds = metrics.get_individual_jsds(gene_data=samples)
-
-        if is_main_process():
-            print(
-                "Metric: distance {:.3f}, rg {:.3f}, period {:.3f}, topk all {:.3f}, topk {:.3f}".format(
-                    jsds[0], jsds[1], jsds[2], jsds[3], jsds[4]
-                )
-            )
-
         set_requires_grad(discriminator, False)
+        discriminator.eval()
+        generator.train()
         # only once and update rollout parameter
-        train_loss = train_generator(
-            generator,
-            discriminator,
-            samples,
-            rollout,
-            gen_gan_loss,
-            gen_gan_optm,
-            config,
-            device,
-            crit=(period_crit, distance_crit),
-        )
-        rollout.update_params()
+        for _ in range(config.g_step):
+            # evaluate current generator performance
+            samples = generate_samples(generator, config, single_len=512, num=512)
+            jsds = metrics.get_individual_jsds(gene_data=samples)
 
-        if config.verbose and is_main_process():
-            print(
-                "Generator: Epoch {}\t loss: {:.3f}, took: {:.2f}s \r".format(
-                    epoch + 1,
-                    train_loss,
-                    time.time() - start_time,
+            if is_main_process():
+                print(
+                    "Metric: distance {:.4f}, rg {:.4f}, period {:.4f}, topk all {:.4f}, topk {:.4f}".format(
+                        jsds[0], jsds[1], jsds[2], jsds[3], jsds[4]
+                    )
                 )
+
+            # train
+            start_time = time.time()
+            train_loss = train_generator(
+                generator,
+                discriminator,
+                samples,
+                rollout,
+                gen_gan_loss,
+                gen_gan_optm,
+                config,
+                device,
+                crit=(period_crit, distance_crit),
             )
+
+            if config.verbose and is_main_process():
+                print(
+                    "Generator: Epoch {}\t loss: {:.3f}, took: {:.2f}s \r".format(
+                        epoch + 1,
+                        train_loss,
+                        time.time() - start_time,
+                    )
+                )
+        rollout.update_params()
 
         # train discriminator
         if is_main_process():
             print("training discriminator")
         set_requires_grad(discriminator, True)
-        for _ in range(1):
+        discriminator.train()
+        generator.eval()
+        for _ in range(config.d_step):
             samples = generate_samples(
                 generator, config, num=config.num_gen_samples, single_len=2048, print_progress=False
             )
-            d_train_data = discriminator_dataset(true_data=train_data, fake_data=samples, valid_start_end_idx=train_idx)
+            # sample approapriate amount of training data
+            curr_train_idx = train_idx
+            if len(train_idx) > config.num_gen_samples:
+                curr_train_idx = random.sample(train_idx, config.num_gen_samples)
+            d_train_data = discriminator_dataset(
+                true_data=train_data, fake_data=samples, valid_start_end_idx=curr_train_idx
+            )
             train_sampler = DistributedSampler(d_train_data, num_replicas=world_size, rank=device, shuffle=True)
             d_train_loader = torch.utils.data.DataLoader(
                 d_train_data,
@@ -376,8 +437,10 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
                 pin_memory=True,
                 sampler=train_sampler,
             )
+            if is_main_process():
+                print(f"len d_train loader:\t{len(d_train_loader)}\t #samples: {len(d_train_data)}")
 
-            for i in range(1):
+            for i in range(config.k_d):
                 d_train_loader.sampler.set_epoch(i)
                 train_epoch(
                     config,

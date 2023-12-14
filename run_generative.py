@@ -67,11 +67,19 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
     # output_device tells DDP where to output, in our case, it is rank
     # find_unused_parameters=True instructs DDP to find unused output of the forward() function of any module in the model
     generator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(generator)
-    generator = DDP(generator, device_ids=[rank])
+    generator = DDP(
+        generator,
+        device_ids=[rank],
+        # find_unused_parameters=True,
+    )
 
     discriminator = Discriminator(config=config, embedding=embedding).to(rank)
     discriminator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(discriminator)
-    discriminator = DDP(discriminator, device_ids=[rank])
+    discriminator = DDP(
+        discriminator,
+        device_ids=[rank],
+        # find_unused_parameters=True,
+    )
     # calculate parameters
     total_params_embed = sum(p.numel() for p in embedding.parameters() if p.requires_grad)
     total_params_generator = sum(p.numel() for p in generator.parameters() if p.requires_grad)
@@ -119,9 +127,9 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
     cleanup()
 
 
-def preprocess_datasets(config):
+def preprocess_datasets(config, dataset="sp"):
     # read and preprocess
-    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp.csv"), index_col="id")
+    sp = pd.read_csv(os.path.join(config.temp_save_root, f"{dataset}.csv"), index_col="id")
     loc = pd.read_csv(os.path.join(config.temp_save_root, "locs_s2.csv"), index_col="id")
     sp = load_data(sp, loc)
 

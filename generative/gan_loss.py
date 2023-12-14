@@ -20,11 +20,8 @@ class GANLoss(nn.Module):
             target : (N, ), torch Variable
             reward : (N, ), torch Variable
         """
-        one_hot = torch.zeros((target.size(0), prob.size(1))).to(device)
+        one_hot = torch.zeros((target.size(0), prob.size(1)), dtype=torch.bool).to(device)
         one_hot.scatter_(1, target.view((-1, 1)), 1)
-        one_hot = one_hot.type(torch.BoolTensor)
-        one_hot = Variable(one_hot).to(device)
-
         loss = torch.masked_select(prob, one_hot)
         loss = loss * reward
         return -torch.mean(loss)

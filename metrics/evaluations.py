@@ -35,7 +35,9 @@ class Metric(object):
         self.get_reference_metrics()
 
     def extract_reference_dataset(self, input_data, valid_start_end_idx):
-        return [input_data.iloc[idx[0] : idx[1]]["location_id"].values for idx in valid_start_end_idx]
+        input = input_data.copy()
+        input.set_index("id", inplace=True)
+        return [input.iloc[idx[0] : idx[1]]["location_id"].values for idx in valid_start_end_idx]
 
     def get_reference_metrics(self):
         ref_dist = self.get_distances(self.reference_data)
