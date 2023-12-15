@@ -30,10 +30,10 @@ from metrics.evaluations import Metric
 from utils.earlystopping import EarlyStopping
 
 
-def generate_samples(model, config, num, single_len=256, print_progress=False):
+def generate_samples(model, seq_len, num, single_len=256, print_progress=False):
     samples = []
     for _ in tqdm(range(int(num / single_len)), disable=not print_progress):
-        samples.extend(model.module.sample(single_len, config.generate_len).cpu().detach().numpy().tolist())
+        samples.extend(model.module.sample(single_len, seq_len).detach().cpu().numpy().tolist())
     return np.array(samples)
 
 
@@ -109,9 +109,9 @@ def pre_training(discriminator, generator, all_locs, config, world_size, device,
 
     # loss and optimizer
     d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
-    d_optimizer = optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
+    d_optimizer = optim.Adam(discriminator.parameters(), lr=config.pre_d_lr, weight_decay=config.weight_decay)
     g_criterion = nn.CrossEntropyLoss(reduction="mean", ignore_index=0).to(device)  # ignore_index for padding
-    g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
+    g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_g_lr, weight_decay=config.weight_decay)
 
     # pretrain generator
     if is_main_process():
@@ -158,7 +158,7 @@ def training(
     log_dir,
     model_type="discriminator",
 ):
-    scheduler = StepLR(optimizer, step_size=config.lr_step_size, gamma=config.lr_gamma)
+    scheduler = StepLR(optimizer, step_size=1, gamma=config.lr_gamma)
     if config.verbose and is_main_process():
         print("Current learning rate: ", scheduler.get_last_lr()[0])
 
@@ -377,7 +377,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         # only once and update rollout parameter
         for _ in range(config.g_step):
             # evaluate current generator performance
-            samples = generate_samples(generator, config, single_len=32, num=32)
+            samples = generate_samples(generator, config.generate_len + 1, single_len=32, num=32)
             jsds = metrics.get_individual_jsds(gene_data=samples)
 
             if is_main_process():
@@ -419,7 +419,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         generator.eval()
         for _ in range(config.d_step):
             samples = generate_samples(
-                generator, config, num=config.num_gen_samples, single_len=2048, print_progress=False
+                generator, config.generate_len, num=config.num_gen_samples, single_len=2048, print_progress=False
             )
             # sample approapriate amount of training data
             curr_train_idx = train_idx
@@ -459,7 +459,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
 
         if epoch > 10:
             samples = generate_samples(
-                generator, config, num=config.num_gen_samples, single_len=1024, print_progress=False
+                generator, config.generate_len, num=config.num_gen_samples, single_len=1024, print_progress=False
             )
             save_path = os.path.join(config.temp_save_root, "temp", f"generated_samples_{epoch}.pk")
             save_pk_file(save_path, samples)
@@ -484,6 +484,8 @@ def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, ge
     prob = F.log_softmax(prob, dim=-1)
 
     gloss = gen_gan_loss(prob, targets, rewards, device)
+
+    print(gloss.item())
 
     # additional losses
     # gloss += config.periodic_loss * period_crit(samples)

@@ -67,7 +67,7 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
     generator = DDP(
         generator,
         device_ids=[rank],
-        find_unused_parameters=True,
+        # find_unused_parameters=True,
     )
 
     discriminator = Discriminator(config=config).to(rank)
@@ -75,7 +75,7 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
     discriminator = DDP(
         discriminator,
         device_ids=[rank],
-        find_unused_parameters=True,
+        # find_unused_parameters=True,
     )
     # calculate parameters
     total_params_embed = sum(p.numel() for p in generator.module.loc_embedding.parameters() if p.requires_grad)
@@ -110,16 +110,16 @@ def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, v
     if rank == 0:
         print("Advtrain generator and discriminator ...")
 
-    adv_training(
-        discriminator,
-        generator,
-        config,
-        world_size,
-        rank,
-        all_locs,
-        log_dir,
-        input_data=(train_data, train_idx, vali_data, vali_idx),
-    )
+    # adv_training(
+    #     discriminator,
+    #     generator,
+    #     config,
+    #     world_size,
+    #     rank,
+    #     all_locs,
+    #     log_dir,
+    #     input_data=(train_data, train_idx, vali_data, vali_idx),
+    # )
 
     cleanup()
 

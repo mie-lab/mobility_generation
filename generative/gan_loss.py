@@ -24,7 +24,7 @@ class GANLoss(nn.Module):
         one_hot.scatter_(1, target.view((-1, 1)), 1)
         loss = torch.masked_select(prob, one_hot)
         loss = loss * reward
-        return -torch.mean(loss)
+        return -torch.sum(loss)
 
 
 class distanceLoss(nn.Module):
@@ -53,7 +53,7 @@ class distanceLoss(nn.Module):
         dx = x1 - x2
         dy = y1 - y2
         loss = dx**2 + dy**2
-        loss = torch.mean(loss) / 1000000 / loss.size(0)
+        loss = torch.mean(loss) / 1000000
         return loss
 
 

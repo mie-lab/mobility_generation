@@ -40,7 +40,7 @@ class Rollout(object):
             # for the last token
             pred = discriminator(x)
             rewards[:, seq_len - 1] += torch.sigmoid(pred).view((-1,))
-        print((torch.sigmoid(pred) < 0.5).sum() / pred.shape[0])
+        # print((torch.sigmoid(pred) < 0.5).sum() / pred.shape[0])
 
         rewards = rewards / roll_out_num
         return rewards.view((-1,))  # batch_size * (seq_len -1)
