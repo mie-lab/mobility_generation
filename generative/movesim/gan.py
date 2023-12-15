@@ -80,6 +80,8 @@ class Generator(nn.Module):
         config,
         device=None,
         starting_sample="rand",
+        dist_matrix=None,
+        emp_matrix=None,
         starting_dist=None,
     ):
         """
@@ -98,9 +100,8 @@ class Generator(nn.Module):
         if self.starting_sample == "real":
             self.starting_dist = torch.tensor(starting_dist).float()
 
-        # distance and empirical visits
-        self.dist_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "dist_matrix.pk"), "rb"))
-        self.emp_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "emp_matrix.pk"), "rb"))
+        self.dist_matrix = dist_matrix
+        self.emp_matrix = emp_matrix
 
         self.loc_embedding = AllEmbedding(config=config)
         # self.tim_embedding = nn.Embedding(num_embeddings=24, embedding_dim=self.base_emb_size)

@@ -6,6 +6,7 @@ import pandas as pd
 import geopandas as gpd
 
 from datetime import datetime
+import pickle as pickle
 
 from shapely import wkt
 
@@ -52,12 +53,32 @@ def get_rank():
     return dist.get_rank()
 
 
-def main(rank, world_size, config, all_locs, train_data, vali_data, train_idx, vali_idx, emp_visits, log_dir):
+def main(
+    rank,
+    world_size,
+    config,
+    all_locs,
+    train_data,
+    vali_data,
+    train_idx,
+    vali_idx,
+    emp_visits,
+    dist_matrix,
+    emp_matrix,
+    log_dir,
+):
     # setup the process groups
     setup(rank, world_size)
 
     # init models
-    generator = Generator(device=rank, config=config, starting_sample="real", starting_dist=emp_visits).to(rank)
+    generator = Generator(
+        device=rank,
+        config=config,
+        starting_sample="real",
+        dist_matrix=dist_matrix,
+        emp_matrix=emp_matrix,
+        starting_dist=emp_visits,
+    ).to(rank)
 
     # wrap the model with DDP
     # device_ids tell DDP where is your model
@@ -184,6 +205,10 @@ if __name__ == "__main__":
         emp_visits[loc] = visits.iloc[i]
     emp_visits = emp_visits / emp_visits.sum()
 
+    # distance and empirical visits
+    dist_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "dist_matrix.pk"), "rb"))
+    emp_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "emp_matrix.pk"), "rb"))
+
     mp.spawn(
         main,
         args=(
@@ -195,6 +220,8 @@ if __name__ == "__main__":
             train_idx,
             vali_idx,
             emp_visits,
+            dist_matrix,
+            emp_matrix,
             log_dir,
         ),
         nprocs=world_size,
