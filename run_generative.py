@@ -84,6 +84,7 @@ def main(
     # device_ids tell DDP where is your model
     # output_device tells DDP where to output, in our case, it is rank
     # find_unused_parameters=True instructs DDP to find unused output of the forward() function of any module in the model
+    # find_unused_parameters=True for GAN training
     generator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(generator)
     generator = DDP(
         generator,
@@ -91,6 +92,7 @@ def main(
         # find_unused_parameters=True,
     )
 
+    # find_unused_parameters=True for GAN training
     discriminator = Discriminator(config=config).to(rank)
     discriminator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(discriminator)
     discriminator = DDP(

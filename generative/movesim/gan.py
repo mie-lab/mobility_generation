@@ -107,16 +107,18 @@ class Generator(nn.Module):
         # self.tim_embedding = nn.Embedding(num_embeddings=24, embedding_dim=self.base_emb_size)
 
         # transformer encoder
-        encoder_layer = torch.nn.TransformerEncoderLayer(
-            self.base_emb_size, nhead=config.head, activation="gelu", dim_feedforward=self.hidden_dim, batch_first=True
-        )
-        encoder_norm = torch.nn.LayerNorm(self.base_emb_size)
-        self.encoder = torch.nn.TransformerEncoder(
-            encoder_layer=encoder_layer, num_layers=config.layer, norm=encoder_norm
-        )
+        self.attn = nn.MultiheadAttention(self.hidden_dim, 4, batch_first=True)
+        self.Q = nn.Linear(self.base_emb_size, self.hidden_dim)
+        self.V = nn.Linear(self.base_emb_size, self.hidden_dim)
+        self.K = nn.Linear(self.base_emb_size, self.hidden_dim)
+
+        self.attn2 = nn.MultiheadAttention(self.hidden_dim, 1, batch_first=True)
+        self.Q2 = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.V2 = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.K2 = nn.Linear(self.hidden_dim, self.hidden_dim)
 
         # self.fc = FullyConnected(self.base_emb_size, if_residual_layer=True, total_loc_num=self.total_loc_num)
-        self.linear = nn.Linear(self.base_emb_size, self.total_loc_num)
+        self.linear = nn.Linear(self.hidden_dim, self.total_loc_num)
 
         # for distance and empirical matrics
         self.linear_mat1 = nn.Linear(self.total_loc_num - 1, self.base_emb_size)
@@ -135,56 +137,7 @@ class Generator(nn.Module):
     def _generate_square_subsequent_mask(self, sz):
         return torch.triu(torch.full((sz, sz), True, dtype=torch.bool), diagonal=1)
 
-    def forward(self, x_l):
-        # x_t
-        """
-        :param x: (batch_size, seq_len), sequence of locations
-        :return:
-            (batch_size * seq_len, total_locations), prediction of next stage of all locations
-        """
-        src_padding_mask = (x_l == 0).to(self.device)
-
-        locs = x_l.reshape(-1).detach().cpu().numpy() - 1  # for padding
-        dist_vec = self.dist_matrix[locs]
-        visit_vec = self.emp_matrix[locs]
-        dist_vec = torch.Tensor(dist_vec).to(self.device)
-        visit_vec = torch.Tensor(visit_vec).to(self.device)
-
-        emb = self.loc_embedding(x_l)
-
-        #
-        src_mask = self._generate_square_subsequent_mask(x_l.shape[1]).to(self.device)
-        x = self.encoder(emb, mask=src_mask, src_key_padding_mask=src_padding_mask)
-
-        # for padding
-        # out = out * (~src_padding_mask).unsqueeze(-1).repeat(1, 1, self.base_emb_size)
-
-        x = F.relu(self.linear(x.reshape(-1, self.base_emb_size)))
-
-        # matrix calculation
-        dist_vec = F.relu(self.linear_mat1(dist_vec))
-        dist_vec = torch.sigmoid(self.linear_mat1_2(dist_vec))
-        dist_vec = F.normalize(dist_vec)
-
-        visit_vec = F.relu(self.linear_mat2(visit_vec))
-        visit_vec = torch.sigmoid(self.linear_mat2_2(visit_vec))
-        visit_vec = F.normalize(visit_vec)
-
-        # for padding
-        dist_vec = dist_vec * (~src_padding_mask).reshape(-1).unsqueeze(-1).repeat(1, self.total_loc_num)
-        visit_vec = visit_vec * (~src_padding_mask).reshape(-1).unsqueeze(-1).repeat(1, self.total_loc_num)
-
-        pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
-
-        return pred
-
-    def step(self, input):
-        """
-
-        :param x: (batch_size, 1), current location
-        :return:
-            (batch_size, total_locations), prediction of next stage
-        """
+    def _single_step(self, input):
         src_padding_mask = (input == 0).to(self.device)
 
         locs = input.reshape(-1).detach().cpu().numpy() - 1  # for padding
@@ -193,14 +146,26 @@ class Generator(nn.Module):
         dist_vec = torch.Tensor(dist_vec).to(self.device)
         visit_vec = torch.Tensor(visit_vec).to(self.device)
 
-        emb = self.loc_embedding(input)
+        x = self.loc_embedding(input)
 
         #
         src_mask = self._generate_square_subsequent_mask(input.shape[1]).to(self.device)
-        x = self.encoder(emb, mask=src_mask, src_key_padding_mask=src_padding_mask)
+
+        Query = F.relu(self.Q(x))
+        Value = F.relu(self.V(x))
+        Key = F.relu(self.K(x))
+
+        x, _ = self.attn(Query, Key, Value, key_padding_mask=src_padding_mask, attn_mask=src_mask, need_weights=False)
+
+        Query = F.relu(self.Q2(x))
+        Value = F.relu(self.V2(x))
+        Key = F.relu(self.K2(x))
+
+        x, _ = self.attn2(Query, Key, Value, key_padding_mask=src_padding_mask, attn_mask=src_mask, need_weights=False)
 
         # for padding
         # out = out * (~src_padding_mask).unsqueeze(-1).repeat(1, 1, self.base_emb_size)
+        x = F.relu(self.linear(x.reshape(-1, self.hidden_dim)))
 
         # matrix calculation
         dist_vec = F.relu(self.linear_mat1(dist_vec))
@@ -215,7 +180,25 @@ class Generator(nn.Module):
         dist_vec = dist_vec * (~src_padding_mask).reshape(-1).unsqueeze(-1).repeat(1, self.total_loc_num)
         visit_vec = visit_vec * (~src_padding_mask).reshape(-1).unsqueeze(-1).repeat(1, self.total_loc_num)
 
-        pred = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
+        return x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec)
+
+    def forward(self, input):
+        """
+        :param x: (batch_size, seq_len), sequence of locations
+        :return:
+            (batch_size * seq_len, total_locations), prediction of next stage of all locations
+        """
+        pred = self._single_step(input)
+
+        return pred
+
+    def step(self, input):
+        """
+        :param x: (batch_size, 1), current location
+        :return:
+            (batch_size, total_locations), prediction of next stage
+        """
+        pred = self._single_step(input)
 
         return F.softmax(pred, dim=-1)
 
@@ -273,37 +256,3 @@ class Generator(nn.Module):
                 x = x.multinomial(1)
                 x[x == 0] += 1  # for padding
         return torch.cat(samples, dim=1)
-
-
-# class FullyConnected(nn.Module):
-#     def __init__(self, d_input, total_loc_num, if_residual_layer=True):
-#         super(FullyConnected, self).__init__()
-#         # the last fully connected layer
-
-#         fc_dim = d_input
-
-#         self.fc_loc = nn.Linear(fc_dim, total_loc_num)
-#         self.dropout = nn.Dropout(p=0.1)
-
-#         self.if_residual_layer = if_residual_layer
-#         if self.if_residual_layer:
-#             # the residual
-#             self.linear1 = nn.Linear(fc_dim, fc_dim * 2)
-#             self.linear2 = nn.Linear(fc_dim * 2, fc_dim)
-
-#             self.norm = nn.BatchNorm1d(fc_dim)
-#             self.fc_dropout1 = nn.Dropout(p=0.1)
-#             self.fc_dropout2 = nn.Dropout(p=0.1)
-
-#     def forward(self, out) -> Tensor:
-#         out = self.dropout(out)
-
-#         # residual
-#         if self.if_residual_layer:
-#             out = self.norm(out + self._res_block(out))
-
-#         return self.fc_loc(out)
-
-#     def _res_block(self, x: Tensor) -> Tensor:
-#         x = self.linear2(self.fc_dropout1(F.relu(self.linear1(x))))
-#         return self.fc_dropout2(x)

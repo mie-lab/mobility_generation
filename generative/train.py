@@ -377,7 +377,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         # only once and update rollout parameter
         for _ in range(config.g_step):
             # evaluate current generator performance
-            samples = generate_samples(generator, config.generate_len + 1, single_len=32, num=32)
+            samples = generate_samples(generator, config.generate_len + 1, single_len=64, num=64)
             jsds = metrics.get_individual_jsds(gene_data=samples)
 
             if is_main_process():
@@ -419,7 +419,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         generator.eval()
         for _ in range(config.d_step):
             samples = generate_samples(
-                generator, config.generate_len, num=config.num_gen_samples, single_len=2048, print_progress=False
+                generator, config.generate_len, num=config.num_gen_samples, single_len=1024, print_progress=False
             )
             # sample approapriate amount of training data
             curr_train_idx = train_idx
@@ -457,12 +457,12 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         torch.save(generator.state_dict(), log_dir + "/generator.pt")
         torch.save(discriminator.state_dict(), log_dir + "/discriminator.pt")
 
-        if epoch > 10:
-            samples = generate_samples(
-                generator, config.generate_len, num=config.num_gen_samples, single_len=1024, print_progress=False
-            )
-            save_path = os.path.join(config.temp_save_root, "temp", f"generated_samples_{epoch}.pk")
-            save_pk_file(save_path, samples)
+        # if epoch > 10:
+        #     samples = generate_samples(
+        #         generator, config.generate_len, num=config.num_gen_samples, single_len=1024, print_progress=False
+        #     )
+        #     save_path = os.path.join(config.temp_save_root, "temp", f"generated_samples_{epoch}.pk")
+        #     save_pk_file(save_path, samples)
 
 
 def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, gen_gan_optm, config, device, crit=None):
