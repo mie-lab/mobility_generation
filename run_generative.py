@@ -133,21 +133,21 @@ def main(
     if rank == 0:
         print("Advtrain generator and discriminator ...")
 
-    # adv_training(
-    #     discriminator,
-    #     generator,
-    #     config,
-    #     world_size,
-    #     rank,
-    #     all_locs,
-    #     log_dir,
-    #     input_data=(train_data, train_idx, vali_data, vali_idx),
-    # )
+    adv_training(
+        discriminator,
+        generator,
+        config,
+        world_size,
+        rank,
+        all_locs,
+        log_dir,
+        input_data=(train_data, train_idx, vali_data, vali_idx),
+    )
 
     cleanup()
 
 
-def preprocess_datasets(config, dataset="sp"):
+def preprocess_datasets(config, dataset="sp_small"):
     # read and preprocess
     sp = pd.read_csv(os.path.join(config.temp_save_root, f"{dataset}.csv"), index_col="id")
     loc = pd.read_csv(os.path.join(config.temp_save_root, "locs_s2.csv"), index_col="id")

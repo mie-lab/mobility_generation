@@ -1,8 +1,8 @@
 misc:
   dataset: mobis
 
-  use_pretrain: False
-  pretrain_filepath: mobis_movesim
+  use_pretrain: True
+  pretrain_filepath: mobis_movesim_2
 
 
   generate_len: 50
@@ -10,8 +10,8 @@ misc:
 
   num_gen_samples: 10240
   g_step: 1
-  d_step: 4
-  k_d: 2
+  d_step: 1
+  k_d: 1
   # 
   if_embed_time: False
   if_embed_user: True
@@ -49,7 +49,7 @@ optimiser:
   g_lr: 0.0001
   weight_decay: 0.000001
 
-  rollout_num: 4
+  rollout_num: 1
 
   # for decay
   patience: 3

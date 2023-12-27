@@ -40,20 +40,20 @@ class Metric(object):
         return [input.iloc[idx[0] : idx[1]]["location_id"].values for idx in valid_start_end_idx]
 
     def get_reference_metrics(self):
-        ref_dist = self.get_distances(self.reference_data)
-        self.ref_dist_p, _ = np.histogram(ref_dist, bins=np.arange(0, self.max_distance, self.max_distance / 10000))
+        ref_dist = self.get_distances(self.reference_data) / self.max_distance
+        self.ref_dist_p, _ = np.histogram(ref_dist, bins=np.arange(0, 1, 1 / 1000))
 
-        ref_rg = self.get_rg(self.reference_data)
-        self.ref_rg_p, _ = np.histogram(ref_rg, bins=np.arange(0, self.max_distance, self.max_distance / 10000))
+        ref_rg = self.get_rg(self.reference_data) / self.max_distance
+        self.ref_rg_p, _ = np.histogram(ref_rg, bins=np.arange(0, 1, 1 / 1000))
 
         ref_period = self.get_periodicity(self.reference_data)
-        self.ref_period_p, _ = np.histogram(ref_period, bins=np.arange(0, 1, 1 / 100))
+        self.ref_period_p, _ = np.histogram(ref_period, bins=np.arange(0, 1, 1 / 1000))
 
-        ref_overall_topk_freq = self.get_overall_topk_freq(self.reference_data, K=100)
-        self.ref_overall_topk_freq_p, _ = np.histogram(ref_overall_topk_freq, bins=np.arange(0, 1, 1 / 100))
+        ref_overall_topk_freq = self.get_overall_topk_freq(self.reference_data, K=20)
+        self.ref_overall_topk_freq_p, _ = np.histogram(ref_overall_topk_freq, bins=np.arange(0, 1, 1 / 1000))
 
         ref_topk_freq = self.get_topk_freq(self.reference_data, K=10)
-        self.ref_topk_freq_p, _ = np.histogram(ref_topk_freq, bins=np.arange(0, 1, 1 / 100))
+        self.ref_topk_freq_p, _ = np.histogram(ref_topk_freq, bins=np.arange(0, 1, 1 / 1000))
 
     def get_distances(self, trajs):
         dists = []
@@ -145,25 +145,25 @@ class Metric(object):
         """
         # gene_data = gene_data.detach().cpu().numpy()
 
-        gene_dist = self.get_distances(gene_data)
-        gene_rg = self.get_rg(gene_data)
+        gene_dist = self.get_distances(gene_data) / self.max_distance
+        gene_rg = self.get_rg(gene_data) / self.max_distance
         gene_period = self.get_periodicity(gene_data)
-        gene_overall_topk_freq = self.get_overall_topk_freq(gene_data, K=100)
+        gene_overall_topk_freq = self.get_overall_topk_freq(gene_data, K=20)
         gene_topk_freq = self.get_topk_freq(gene_data, K=10)
 
-        gene_dist_p, _ = np.histogram(gene_dist, bins=np.arange(0, self.max_distance, self.max_distance / 10000))
+        gene_dist_p, _ = np.histogram(gene_dist, bins=np.arange(0, 1, 1 / 1000))
         dist_jsd = distance.jensenshannon(gene_dist_p, self.ref_dist_p)
 
-        gene_rg_p, _ = np.histogram(gene_rg, bins=np.arange(0, self.max_distance, self.max_distance / 10000))
+        gene_rg_p, _ = np.histogram(gene_rg, bins=np.arange(0, 1, 1 / 1000))
         rg_jsd = distance.jensenshannon(gene_rg_p, self.ref_rg_p)
 
-        gene_period_p, _ = np.histogram(gene_period, bins=np.arange(0, 1, 1 / 100))
+        gene_period_p, _ = np.histogram(gene_period, bins=np.arange(0, 1, 1 / 1000))
         period_jsd = distance.jensenshannon(gene_period_p, self.ref_period_p)
 
-        gene_overall_topk_freq_p, _ = np.histogram(gene_overall_topk_freq, bins=np.arange(0, 1, 1 / 100))
+        gene_overall_topk_freq_p, _ = np.histogram(gene_overall_topk_freq, bins=np.arange(0, 1, 1 / 1000))
         overall_topk_freq_jsd = distance.jensenshannon(gene_overall_topk_freq_p, self.ref_overall_topk_freq_p)
 
-        gene_topk_freq_p, _ = np.histogram(gene_topk_freq, bins=np.arange(0, 1, 1 / 100))
+        gene_topk_freq_p, _ = np.histogram(gene_topk_freq, bins=np.arange(0, 1, 1 / 1000))
         topk_freq_jsd = distance.jensenshannon(gene_topk_freq_p, self.ref_topk_freq_p)
 
         return dist_jsd, rg_jsd, period_jsd, overall_topk_freq_jsd, topk_freq_jsd

@@ -382,7 +382,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
 
             if is_main_process():
                 print(
-                    "Metric: distance {:.4f}, rg {:.4f}, period {:.4f}, topk all {:.4f}, topk {:.4f}".format(
+                    "Metric: distance {:.4f}, rg {:.4f}, period {:.4f}, all_topk {:.4f}, topk {:.4f}".format(
                         jsds[0], jsds[1], jsds[2], jsds[3], jsds[4]
                     )
                 )
