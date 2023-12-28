@@ -52,7 +52,7 @@ def get_pretrain_loaders(config, input_data, all_locs, world_size, device):
         d_train_data,
         collate_fn=discriminator_collate_fn,
         num_workers=config.num_workers,
-        batch_size=config.d_batch_size,
+        batch_size=config.batch_size,
         pin_memory=True,
         sampler=train_sampler,
     )
@@ -64,7 +64,7 @@ def get_pretrain_loaders(config, input_data, all_locs, world_size, device):
         d_vali_data,
         collate_fn=discriminator_collate_fn,
         num_workers=config.num_workers,
-        batch_size=config.d_batch_size,
+        batch_size=config.batch_size,
         pin_memory=True,
         sampler=vali_sampler,
     )
@@ -76,7 +76,7 @@ def get_pretrain_loaders(config, input_data, all_locs, world_size, device):
         g_train_data,
         collate_fn=generator_collate_fn,
         num_workers=config.num_workers,
-        batch_size=config.g_batch_size,
+        batch_size=config.batch_size,
         pin_memory=True,
         sampler=train_sampler,
     )
@@ -88,7 +88,7 @@ def get_pretrain_loaders(config, input_data, all_locs, world_size, device):
         g_vali_data,
         collate_fn=generator_collate_fn,
         num_workers=config.num_workers,
-        batch_size=config.g_batch_size,
+        batch_size=config.batch_size,
         pin_memory=True,
         sampler=vali_sampler,
     )
@@ -109,9 +109,9 @@ def pre_training(discriminator, generator, all_locs, config, world_size, device,
 
     # loss and optimizer
     d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
-    d_optimizer = optim.Adam(discriminator.parameters(), lr=config.pre_d_lr, weight_decay=config.weight_decay)
+    d_optimizer = optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
     g_criterion = nn.CrossEntropyLoss(reduction="mean", ignore_index=0).to(device)  # ignore_index for padding
-    g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_g_lr, weight_decay=config.weight_decay)
+    g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
     # pretrain generator
     if is_main_process():
@@ -364,7 +364,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
     d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
     d_optimizer = optim.Adam(discriminator.parameters(), lr=config.d_lr, weight_decay=config.weight_decay)
 
-    for epoch in range(config.adv_max_epoch):
+    for epoch in range(config.max_epoch):
         # Train the generator for one step
 
         if is_main_process():
@@ -377,7 +377,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         # only once and update rollout parameter
         for _ in range(config.g_step):
             # evaluate current generator performance
-            samples = generate_samples(generator, config.generate_len + 1, single_len=64, num=64)
+            samples = generate_samples(generator, config.generate_len + 1, single_len=64, num=128)
             jsds = metrics.get_individual_jsds(gene_data=samples)
 
             if is_main_process():
@@ -433,7 +433,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
                 d_train_data,
                 collate_fn=discriminator_collate_fn,
                 num_workers=config.num_workers,
-                batch_size=config.d_batch_size,
+                batch_size=config.batch_size,
                 pin_memory=True,
                 sampler=train_sampler,
             )
@@ -469,7 +469,7 @@ def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, ge
     period_crit, distance_crit = crit
 
     # construct the input to the generator, add zeros before samples and delete the last column
-    # zeros = torch.zeros((config.d_batch_size, 1)).long().to(device)
+    # zeros = torch.zeros((config.batch_size, 1)).long().to(device)
     samples = torch.Tensor(samples).long().to(device)
 
     inputs = samples[:, :-1]

@@ -19,8 +19,7 @@ misc:
 
   verbose: True
   debug: False
-  d_batch_size: 64
-  g_batch_size: 64
+  batch_size: 64
   print_step: 20
   num_workers: 0
   world_size: 1
@@ -42,9 +41,7 @@ model:
 optimiser:
   optimizer: Adam
   max_epoch: 100
-  adv_max_epoch: 100
-  pre_d_lr: 0.0001
-  pre_g_lr: 0.001
+  pre_lr: 0.01
   d_lr: 0.00001
   g_lr: 0.0001
   weight_decay: 0.000001
