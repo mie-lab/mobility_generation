@@ -1,7 +1,7 @@
 misc:
   dataset: mobis
 
-  use_pretrain: True
+  use_pretrain: False
   pretrain_filepath: mobis_movesim_2
 
 
@@ -20,8 +20,8 @@ misc:
   verbose: True
   debug: False
   d_batch_size: 64
-  g_batch_size: 8
-  print_step: 10
+  g_batch_size: 64
+  print_step: 20
   num_workers: 0
   world_size: 1
   

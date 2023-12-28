@@ -65,6 +65,7 @@ def main(
     emp_visits,
     dist_matrix,
     emp_matrix,
+    fct_matrix,
     log_dir,
 ):
     # setup the process groups
@@ -77,6 +78,7 @@ def main(
         starting_sample="real",
         dist_matrix=dist_matrix,
         emp_matrix=emp_matrix,
+        fct_matrix=fct_matrix,
         starting_dist=emp_visits,
     ).to(rank)
 
@@ -147,13 +149,13 @@ def main(
     cleanup()
 
 
-def preprocess_datasets(config, dataset="sp_small"):
+def preprocess_datasets(config, dataset="sp"):
     # read and preprocess
     sp = pd.read_csv(os.path.join(config.temp_save_root, f"{dataset}.csv"), index_col="id")
     loc = pd.read_csv(os.path.join(config.temp_save_root, "locs_s2.csv"), index_col="id")
     sp = load_data(sp, loc)
 
-    all_locs = pd.read_csv(os.path.join(config.temp_save_root, "all_locations.csv"), index_col="id")
+    all_locs = pd.read_csv(os.path.join(config.temp_save_root, "test", "all_locations.csv"), index_col="id")
     all_locs["geometry"] = all_locs["geometry"].apply(wkt.loads)
     all_locs = gpd.GeoDataFrame(all_locs, geometry="geometry", crs="EPSG:4326")
     # transform to projected coordinate systems
@@ -208,8 +210,9 @@ if __name__ == "__main__":
     emp_visits = emp_visits / emp_visits.sum()
 
     # distance and empirical visits
-    dist_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "dist_matrix.pk"), "rb"))
-    emp_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "emp_matrix.pk"), "rb"))
+    dist_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "dist_matrix_test.pk"), "rb"))
+    emp_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "emp_matrix_test.pk"), "rb"))
+    fct_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "function_matrix_test.pk"), "rb"))
 
     mp.spawn(
         main,
@@ -224,6 +227,7 @@ if __name__ == "__main__":
             emp_visits,
             dist_matrix,
             emp_matrix,
+            fct_matrix,
             log_dir,
         ),
         nprocs=world_size,
