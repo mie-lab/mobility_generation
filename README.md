@@ -2,25 +2,38 @@
 
 ## Design choices
 
-Preprocessing:
-- Staypoints with all activity except waiting is considering activity staypoints.
--  User filtering (after filtering 2094 users):
+Preprocessing sp (4,811,539):
+- Filter duplicates: remove sps or tpls that have overlapping timeline (4,804,194). 
+- Activity definition (activity: 3,589,215, non-activity: 1,214,979):
+    - waiting
+    - "unknown" and duration < 25min
+-  User filtering (users: 2,113. sp: 1,578,245):
     - tracked for more than 50 days
-    - quality during tracking: calculate quality for every 5 week. Considered user shall have min quality > 0.5 and mean quality > 0.6 
-- Only consider staypoints within Switzerland (after filtering 1440822 staypoints).
-- Merging staypoints withh time gap shorter than 1 minutes (after merging 1197153 staypoints).
+    - quality during tracking: quality for every 5 week shall have min quality > 0.5 and mean quality > 0.6 
+- Spatial filter: Only sp within Switzerland (sp: 1,460,189).
+- Filter for activity sp (sp: 1,094,017). 
+- Filter non-location sp (sp: 1,094,017). 
+- Merge sp with time gap shorter than 1 minutes (sp: 1,079,922).
+- Final user: 2112. Final sp: 1,079,922.
 
-Location generation:
-- DBSCAN algorithm parameter: epsilon=20, num_samples=2, agg_level="dataset". We obtain 62673 locations after generation. 
-- Location spatial binning. Use s2geometry to bin locations: 
-    - Single level location binning:
-        - Level 14: 174434 locations covering Switzerland. Original locations are projected into 15841 binned locations.
-        - Level 13: 44106 locations covering Switzerland. Original locations are projected into 8964 binned locations.
-    - hierarchical s2 location generation: [10, 13]. 33144 locations covering Switzerland. Original locations are projected into 8964 binned locations.
+Generating locations:
+- DBSCAN algorithm (unique locs: 162,303)
+    - epsilon=20
+    - num_samples=1
+    - agg_level="dataset"
+- Location spatial binning using s2geometry: 
+    - Single level:
+        - Level 14 (mean 0.32 km2 globally): 174,434 locations covering Switzerland (41,285 km2). Original locations are projected into 28,742 binned locations.
+        - Level 13 (mean 1.27 km2 globally): 44,106 locations covering Switzerland. Original locations are projected into 14,881 binned locations.
+    - Hierarchical: 
+        - [10, 14]: 142,575 locations covering Switzerland. Original locations are projected into 28,742 binned locations.
+        - [10, 13]: 39,177 locations covering Switzerland. Original locations are projected into 14,881 binned locations.
+        
 
 - Definition of activity behavior:
-    - We preserve the self-transitions
-    - TODO: activity duration: activity duration + the transit duration to reach the location
+    - Preserve the self-transitions
+    - Activity duration: activity duration + the transit duration to reach the location (finished_at - previous finished_at)
+
 ## Generation
 
 ### Next location prediction. 
@@ -37,9 +50,9 @@ User split 6:2:2 according to time.
 
 Trained model autoregressively generate 50 locations for each test sequence. 
 
-TODO: 
-    - hyper-parameter search
-    - implement beam search
+TODO:
+- hyper-parameter search
+- implement beam search
 
 ### With mechanistic individual models. 
 
