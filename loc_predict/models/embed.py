@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
+import torch.nn.functional as F
 
 import math
 
@@ -32,9 +33,10 @@ class TemporalEmbedding(nn.Module):
         weekday = 7
 
         if self.emb_info == "all":
-            self.minute_embed = nn.Embedding(self.minute_size, d_input)
-            self.hour_embed = nn.Embedding(hour_size, d_input)
-            self.weekday_embed = nn.Embedding(weekday, d_input)
+            # add 1 for padding
+            self.minute_embed = nn.Embedding(self.minute_size + 1, d_input)
+            self.hour_embed = nn.Embedding(hour_size + 1, d_input)
+            self.weekday_embed = nn.Embedding(weekday + 1, d_input)
         elif self.emb_info == "time":
             self.time_embed = nn.Embedding(self.minute_size * hour_size, d_input)
         elif self.emb_info == "weekday":
@@ -56,6 +58,29 @@ class TemporalEmbedding(nn.Module):
             return self.weekday_embed(weekday)
 
 
+class POINet(nn.Module):
+    def __init__(self, poi_vector_size, out):
+        super(POINet, self).__init__()
+
+        # poi_vector_size -> poi_vector_size*4 -> poi_vector_size
+        self.linear1 = torch.nn.Linear(poi_vector_size, poi_vector_size * 4)
+        self.linear2 = torch.nn.Linear(poi_vector_size * 4, poi_vector_size)
+        self.dropout1 = nn.Dropout(p=0.1)
+        self.dropout2 = nn.Dropout(p=0.1)
+        self.norm2 = nn.LayerNorm(poi_vector_size)
+
+        # poi_vector_size -> out
+        self.fc = nn.Linear(poi_vector_size, out)
+
+    def forward(self, x):
+        x = self.norm2(x + self._dense_block(x))
+        return self.fc(x)
+
+    def _dense_block(self, x: Tensor) -> Tensor:
+        x = self.linear2(self.dropout1(F.relu(self.linear1(x))))
+        return self.dropout2(x)
+
+
 class AllEmbedding(nn.Module):
     def __init__(self, d_input, config, if_pos_encoder=True, emb_info="all") -> None:
         super(AllEmbedding, self).__init__()
@@ -73,7 +98,13 @@ class AllEmbedding(nn.Module):
         # duration is in minutes, possible duration for two days is 60 * 24 * 2 // 30
         self.if_include_duration = config.if_embed_duration
         if self.if_include_duration:
-            self.emb_duration = nn.Embedding(60 * 24 * 2 // 30, d_input)
+            # add 1 for padding
+            self.emb_duration = nn.Embedding((60 * 24 * 2) // 30 + 1, d_input)
+
+        # poi
+        self.if_include_poi = config.if_embed_poi
+        if self.if_include_poi:
+            self.poi_net = POINet(config.poi_original_size, d_input)
 
         # position encoder for transformer
         self.if_pos_encoder = if_pos_encoder
@@ -90,6 +121,9 @@ class AllEmbedding(nn.Module):
 
         if self.if_include_duration:
             emb = emb + self.emb_duration(context_dict["duration"])
+
+        if self.if_include_poi:
+            emb = emb + self.poi_net(context_dict["poi"])
 
         if self.if_pos_encoder:
             return self.pos_encoder(emb * math.sqrt(self.d_input))

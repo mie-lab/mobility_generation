@@ -5,6 +5,7 @@ import os
 
 import pandas as pd
 import datetime
+import pickle
 
 from easydict import EasyDict as edict
 
@@ -33,7 +34,7 @@ def single_run(train_loader, val_loader, test_loader, config, device, log_dir):
 
 
 if __name__ == "__main__":
-    setup_seed(0)
+    setup_seed(1)
 
     # load configs
     parser = argparse.ArgumentParser()
@@ -51,12 +52,15 @@ if __name__ == "__main__":
     config = edict(config)
 
     # read and preprocess
-    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp.csv"), index_col="id")
-    loc = pd.read_csv(os.path.join(config.temp_save_root, "locs_s2.csv"), index_col="id")
+    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp_small.csv"), index_col="id")
+    loc = pd.read_csv(os.path.join(config.temp_save_root, "loc_s2_level10_14.csv"))
+    if config.if_embed_poi:
+        loc_poi = pd.DataFrame(pickle.load(open(os.path.join(config.temp_save_root, "s2_loc_poi_level10_14.pk"), "rb")))
+        loc = loc.merge(loc_poi, left_on="s2_id", right_on="loc_id", how="left").drop(columns={"loc_id"})
     sp = load_data(sp, loc)
 
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device = torch.device("cuda")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cpu")
 
     # get dataloaders
     train_data, vali_data, test_data = get_train_test(sp)
@@ -72,16 +76,16 @@ if __name__ == "__main__":
         if not config.use_pretrain:  # for training
             # possibility to enable multiple runs
             result_ls = []
-            for i in range(1):
+            for i in range(2):
                 # train, validate and test
-                log_dir = init_save_path(config)
+                log_dir = init_save_path(config, time_now=int(datetime.datetime.now().timestamp()))
                 # res_single contains the performance of validation and test of the current run
                 res_single = single_run(train_loader, val_loader, test_loader, config, device, log_dir)
                 result_ls.extend(res_single)
 
             # save results
             result_df = pd.DataFrame(result_ls)
-            train_type = "default"
+            train_type = "all"
             filename = os.path.join(
                 config.save_root,
                 f"{config.dataset}_{config.networkName}_{train_type}_{str(int(datetime.datetime.now().timestamp()))}.csv",

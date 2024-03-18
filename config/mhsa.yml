@@ -5,9 +5,10 @@ misc:
   pretrain_filepath: mobis_mhsa_1698746890
   generate_len: 50
   # 
-  if_embed_time: False
+  if_embed_time: True
   if_embed_user: True
-  if_embed_duration: False
+  if_embed_poi: True
+  if_embed_duration: True
 
   verbose: True
   debug: False
@@ -18,6 +19,7 @@ misc:
 
 embedding:
   base_emb_size: 64
+  poi_original_size: 16
 
 model:
   networkName: mhsa

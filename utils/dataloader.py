@@ -14,9 +14,10 @@ import trackintel as ti
 
 
 class traj_dataset(torch.utils.data.Dataset):
-    def __init__(self, input_data, valid_start_end_idx):
+    def __init__(self, input_data, config, valid_start_end_idx):
         self.data = input_data
 
+        self.if_embed_poi = config.if_embed_poi
         self.valid_start_end_idx = valid_start_end_idx
         self.len = len(valid_start_end_idx)
 
@@ -39,11 +40,14 @@ class traj_dataset(torch.utils.data.Dataset):
         # [1]
         return_dict["user"] = torch.tensor(selected["user_id"].values[0])
         # [sequence_len] binned in 15 minutes
-        return_dict["time"] = torch.tensor(selected["start_min"].values[:-1] // 15)
+        return_dict["time"] = torch.tensor(selected["start_min"].values[:-1] // 15 + 1)
         # [sequence_len]
-        return_dict["weekday"] = torch.tensor(selected["weekday"].values[:-1], dtype=torch.int64)
+        return_dict["weekday"] = torch.tensor(selected["weekday"].values[:-1] + 1, dtype=torch.int64)
         # [sequence_len] binned in 30 minutes
-        return_dict["duration"] = torch.tensor(selected["duration"].values[:-1] // 30, dtype=torch.long)
+        return_dict["duration"] = torch.tensor(selected["act_duration"].values[:-1] // 30 + 1, dtype=torch.long)
+
+        if self.if_embed_poi:
+            return_dict["poi"] = torch.tensor(np.stack(selected["poiValues"].values[:-1]), dtype=torch.float32)
 
         return x, y, return_dict
 
@@ -89,9 +93,9 @@ def get_dataloaders(train_data, vali_data, test_data, config):
         train_data, vali_data, test_data, print_progress=config.verbose
     )
 
-    dataset_train = traj_dataset(train_data, valid_start_end_idx=train_idx)
-    dataset_val = traj_dataset(vali_data, valid_start_end_idx=vali_idx)
-    dataset_test = traj_dataset(test_data, valid_start_end_idx=test_idx)
+    dataset_train = traj_dataset(train_data, config, valid_start_end_idx=train_idx)
+    dataset_val = traj_dataset(vali_data, config, valid_start_end_idx=vali_idx)
+    dataset_test = traj_dataset(test_data, config, valid_start_end_idx=test_idx)
 
     kwds_train = {
         "shuffle": True,
@@ -139,8 +143,7 @@ def get_train_test(sp, all_locs=None):
     sp["user_id"] = enc.fit_transform(sp["user_id"].values.reshape(-1, 1)) + 1
 
     # truncate too long duration, >2 days to 2 days
-    sp["duration"] = sp["duration"] / 60
-    sp.loc[sp["duration"] > 60 * 24 * 2 - 1, "duration"] = 60 * 24 * 2 - 1
+    sp.loc[sp["act_duration"] > 60 * 24 * 2 - 1, "act_duration"] = 60 * 24 * 2 - 1
 
     # split the datasets, user dependent 0.6, 0.2, 0.2
     train_data, vali_data, test_data = _split_dataset(sp)

@@ -26,7 +26,6 @@ def load_data(sp, loc):
         df["start_day"] = (df["started_at"] - min_day).dt.days
         df["start_min"] = df["started_at"].dt.hour * 60 + df["started_at"].dt.minute
         df["weekday"] = df["started_at"].dt.weekday
-        df["duration"] = (df["duration"] * 60).round()
         return df
 
     sp = sp.groupby("user_id", group_keys=False).apply(_get_time_info)
