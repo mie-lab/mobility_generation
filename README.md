@@ -45,33 +45,30 @@ User split 6:2:2 according to time.
 - MHSA: 
     - Use previous 7 days, predict the next location. 
     - hyperparameter: 
-        - parameter 2065394: num_encoder_layers: 2; nhead: 4; dim_feedforward: 128; fc_dropout: 0.1: validation loss 2.86, accuracy 42.74% (TODO: tune)
+        - parameter 2065394: num_encoder_layers: 2; nhead: 4; dim_feedforward: 128; fc_dropout: 0.1 (TODO: tune)
     - Test runs (small) for level 10-14 with features:
-        - None (1,384,999):
-            - validation acc@1: 42.43; Test acc@1 = 39.34 f1 = 31.20 mrr = 51.81
-            - validation acc@1: 42.58; Test acc@1 = 39.59 f1 = 31.94 mrr = 51.83
-        - User (1,417,063): 
-            - validation acc@1: 43.25; Test acc@1 = 40.05 f1 = 31.90 mrr = 52.56
-            - validation acc@1: 43.01; Test acc@1 = 39.73 f1 = 32.22 mrr = 52.40
-        - User + poi (1,420,311):
-            - validation acc@1: 43.27; Test acc@1 = 40.09 f1 = 32.18 mrr = 52.70
-            - validation acc@1: 43.35; Test acc@1 = 40.29 f1 = 31.75 mrr = 52.71
-        - User + Time (1,419,495):
-            - validation acc@1: 45.55; Test acc@1 = 42.53 f1 = 34.91 mrr = 54.16
-            - validation acc@1: 45.30; Test acc@1 = 42.08 f1 = 33.87 mrr = 53.84
-        - User + Duration (1,423,271):
-            - validation acc@1: 45.16; Test acc@1 = 41.82 f1 = 33.90 mrr = 53.71
-            - validation acc@1: 45.30; Test acc@1 = 42.04 f1 = 34.01 mrr = 53.76
-        - User + Duration + Time (1,425,703): 
-            - validation acc@1: 48.02; Test acc@1 = 44.62 f1 = 36.35 mrr = 55.31
-            - validation acc@1: 48.74; Test acc@1 = 45.29 f1 = 37.55 mrr = 55.78
-            - validation acc@1: 48.30; Test acc@1 = 45.23 f1 = 37.68 mrr = 55.73
-            - validation acc@1: 48.08; Test acc@1 = 44.72 f1 = 36.43 mrr = 55.44
-        - All (1,428,951)
-            - validation acc@1: 48.78; Test acc@1 = 45.69 f1 = 38.13 mrr = 56.03
-            - validation acc@1: 48.66; Test acc@1 = 45.36 f1 = 37.89 mrr = 55.82
-            - validation acc@1: 48.72; Test acc@1 = 45.70 f1 = 37.73 mrr = 56.03
-            - validation acc@1: 48.48; Test acc@1 = 45.28 f1 = 37.78 mrr = 55.74
+        - None (1,418,280):
+            - validation acc@1: 42.89; Test acc@1 = 39.80 f1 = 31.51 mrr = 52.15
+            - validation acc@1: 42.57; Test acc@1 = 39.53 f1 = 31.75 mrr = 51.74
+        - User (1,450,344):  
+            - validation acc@1: 42.83; Test acc@1 = 39.71 f1 = 32.08 mrr = 52.19
+            - validation acc@1: 42.69; Test acc@1 = 39.72 f1 = 31.80 mrr = 52.17
+        - User + poi (1,453,592):
+            - validation acc@1: 43.34; Test acc@1 = 40.07 f1 = 31.59 mrr = 52.67
+            - validation acc@1: 43.37; Test acc@1 = 40.54 f1 = 32.56 mrr = 52.98
+        - User + Time (1,452,776):
+            - validation acc@1: 46.19; Test acc@1 = 43.08 f1 = 35.30 mrr = 54.47
+            - validation acc@1: 45.38; Test acc@1 = 42.29 f1 = 34.42 mrr = 53.95
+        - User + Duration (1,456,552):
+            - validation acc@1: 45.31; Test acc@1 = 42.18 f1 = 34.04 mrr = 53.81
+            - validation acc@1: 44.99; Test acc@1 = 41.92 f1 = 34.20 mrr = 53.73
+        - User + Duration + Time (1,458,984): 
+            - validation acc@1: 48.38; Test acc@1 = 45.03 f1 = 37.35 mrr = 55.60
+            - validation acc@1: 48.86; Test acc@1 = 45.20 f1 = 37.69 mrr = 55.59
+        - All (1,462,232)
+            - validation acc@1: 48.79; Test acc@1 = 45.50 f1 = 37.57 mrr = 55.81
+            - validation acc@1: 48.99; Test acc@1 = 45.38 f1 = 37.97 mrr = 55.79
+
 - Markov: 
     - Train user model with train and validation (6+2) sequences. 
     - Each next location is sampled from the top3 most likely locations according to the markov transition matrix. If no prior knowledge, next location sampled from the top3 overall most visited locations.

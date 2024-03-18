@@ -85,7 +85,7 @@ if __name__ == "__main__":
 
             # save results
             result_df = pd.DataFrame(result_ls)
-            train_type = "all"
+            train_type = "none"
             filename = os.path.join(
                 config.save_root,
                 f"{config.dataset}_{config.networkName}_{train_type}_{str(int(datetime.datetime.now().timestamp()))}.csv",

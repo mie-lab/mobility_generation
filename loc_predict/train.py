@@ -32,7 +32,7 @@ def get_performance_dict(return_dict):
 
 
 def send_to_device(inputs, device, config):
-    x, y, x_dict = inputs
+    x, y, x_dict, y_dict = inputs
     if config.networkName == "deepmove":
         x = (x[0].to(device), x[1].to(device))
 
@@ -44,9 +44,11 @@ def send_to_device(inputs, device, config):
         x = x.to(device)
         for key in x_dict:
             x_dict[key] = x_dict[key].to(device)
+        for key in y_dict:
+            y_dict[key] = y_dict[key].to(device)
     y = y.to(device)
 
-    return x, y, x_dict
+    return x, y, x_dict, y_dict
 
 
 def calculate_correct_total_prediction(logits, true_y):
@@ -211,6 +213,7 @@ def single_train(
     n_batches = len(train_loader)
 
     CEL = torch.nn.CrossEntropyLoss(reduction="mean", ignore_index=0)
+    MSE = torch.nn.MSELoss(reduction="mean")
 
     # define start time
     start_time = time.time()
@@ -218,14 +221,16 @@ def single_train(
     for i, inputs in enumerate(train_loader):
         globaliter += 1
 
-        x, y, x_dict = send_to_device(inputs, device, config)
+        x, y, x_dict, y_dict = send_to_device(inputs, device, config)
 
-        logits = model(x, x_dict, device)
+        logits, dur_pred = model(x, x_dict, device)
 
-        loss_size = CEL(logits, y.reshape(-1))
+        loc_loss_size = CEL(logits, y.reshape(-1))
+        dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
+        loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
 
         optim.zero_grad()
-        loss_size.backward()
+        loss.backward()
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
         optim.step()
@@ -233,7 +238,7 @@ def single_train(
             scheduler.step()
 
         # Print statistics
-        running_loss += loss_size.item()
+        running_loss += loss.item()
 
         batch_result_arr, _, _ = calculate_correct_total_prediction(logits, y)
         result_arr += batch_result_arr
@@ -271,15 +276,19 @@ def single_validate(config, model, data_loader, device):
 
     result_arr = np.array([0, 0, 0, 0, 0, 0], dtype=np.float32)
     CEL = torch.nn.CrossEntropyLoss(reduction="mean", ignore_index=0)
+    MSE = torch.nn.MSELoss(reduction="mean")
     # change to validation mode
     model.eval()
     with torch.no_grad():
         for inputs in data_loader:
-            x, y, x_dict = send_to_device(inputs, device, config)
+            x, y, x_dict, y_dict = send_to_device(inputs, device, config)
 
-            logits = model(x, x_dict, device)
+            logits, dur_pred = model(x, x_dict, device)
 
-            loss = CEL(logits, y.reshape(-1))
+            loc_loss_size = CEL(logits, y.reshape(-1))
+            dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
+            loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
+
             total_val_loss += loss.item()
 
             batch_result_arr, batch_true, batch_top1 = calculate_correct_total_prediction(logits, y)
@@ -327,9 +336,9 @@ def single_test(config, model, data_loader, device):
     model.eval()
     with torch.no_grad():
         for inputs in data_loader:
-            x, y, x_dict = send_to_device(inputs, device, config)
+            x, y, x_dict, y_dict = send_to_device(inputs, device, config)
 
-            logits = model(x, x_dict, device)
+            logits, dur_pred = model(x, x_dict, device)
 
             batch_result_arr, batch_true, batch_top1 = calculate_correct_total_prediction(logits, y)
             result_arr += batch_result_arr
