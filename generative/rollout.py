@@ -16,7 +16,7 @@ class Rollout(object):
         self.own_model = copy.deepcopy(model)
         self.update_rate = update_rate
 
-    def get_reward(self, x, roll_out_num, discriminator, device):
+    def get_reward(self, x, x_dict, roll_out_num, discriminator, device):
         """
         Args:
             x : (batch_size, seq_len) input data
@@ -31,14 +31,15 @@ class Rollout(object):
         for _ in range(roll_out_num):
             for step in range(1, seq_len):
                 data = x[:, :step]
+                data_dict = {"duration": x_dict["duration"][:, :step]}
                 # use own model
-                samples = self.own_model.module.sample(batch_size, seq_len, data)
-                pred = discriminator(samples)
+                samples = self.own_model.module.sample(batch_size, seq_len, x=data, x_dict=data_dict)
+                pred = discriminator(samples["locs"], {"duration": samples["durs"]})
 
                 rewards[:, step - 1] += torch.sigmoid(pred).view((-1,))
 
             # for the last token
-            pred = discriminator(x)
+            pred = discriminator(x, x_dict)
             rewards[:, seq_len - 1] += torch.sigmoid(pred).view((-1,))
         # print((torch.sigmoid(pred) < 0.5).sum() / pred.shape[0])
 

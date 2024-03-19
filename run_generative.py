@@ -100,7 +100,7 @@ def main(
     discriminator = DDP(
         discriminator,
         device_ids=[rank],
-        # find_unused_parameters=True,
+        find_unused_parameters=True
     )
     # calculate parameters
     total_params_embed = sum(p.numel() for p in generator.module.embedding.parameters() if p.requires_grad)
@@ -210,9 +210,15 @@ if __name__ == "__main__":
     emp_visits = emp_visits / emp_visits.sum()
 
     # distance and empirical visits
-    dist_matrix = pickle.load(open(os.path.join(config.temp_save_root, "matrix", "distance_13.pk"), "rb"))
-    emp_matrix = pickle.load(open(os.path.join(config.temp_save_root, "matrix", "visits_13.pk"), "rb"))
-    fct_matrix = pickle.load(open(os.path.join(config.temp_save_root, "matrix", "function_13.pk"), "rb"))
+    dist_matrix = pickle.load(open(os.path.join(config.temp_save_root, "matrix", "distance_13.pk"), "rb")).astype(
+        np.float32
+    )
+    emp_matrix = pickle.load(open(os.path.join(config.temp_save_root, "matrix", "visits_13.pk"), "rb")).astype(
+        np.float32
+    )
+    fct_matrix = pickle.load(open(os.path.join(config.temp_save_root, "matrix", "function_13.pk"), "rb")).astype(
+        np.float32
+    )
 
     mp.spawn(
         main,

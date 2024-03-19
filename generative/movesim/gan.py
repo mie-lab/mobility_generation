@@ -106,7 +106,7 @@ class Generator(nn.Module):
         self.starting_sample = starting_sample
 
         if self.starting_sample == "real":
-            self.starting_dist = torch.tensor(starting_dist).float()
+            self.starting_dist = torch.tensor(starting_dist, dtype=torch.float)
 
         self.dist_matrix = dist_matrix
         self.emp_matrix = emp_matrix
@@ -158,9 +158,9 @@ class Generator(nn.Module):
         dist_vec = self.dist_matrix[locs]
         visit_vec = self.emp_matrix[locs]
         fct_vec = self.fct_matrix[locs]
-        dist_vec = torch.Tensor(dist_vec).to(self.device)
-        visit_vec = torch.Tensor(visit_vec).to(self.device)
-        fct_vec = torch.Tensor(fct_vec).to(self.device)
+        dist_vec = torch.tensor(dist_vec, dtype=torch.float, device=self.device)
+        visit_vec = torch.tensor(visit_vec, dtype=torch.float, device=self.device)
+        fct_vec = torch.tensor(fct_vec, dtype=torch.float, device=self.device)
 
         # matrix calculation
         dist_vec = torch.sigmoid(self.linear_mat1(dist_vec))
@@ -216,23 +216,24 @@ class Generator(nn.Module):
 
         return loc_pred, dur_pred
 
-    def step(self, input):
+    def step(self, input, context_dict):
         """
         :param x: (batch_size, 1), current location
         :return:
             (batch_size, total_locations), prediction of next stage
         """
-        pred = self._single_step(input)
+        loc_pred, dur_pred = self._single_step(input, context_dict)
 
-        return F.softmax(pred, dim=-1)
+        return F.softmax(loc_pred, dim=-1), dur_pred
 
-    def sample(self, batch_size, seq_len, x=None):
+    def sample(self, batch_size, seq_len, x=None, x_dict=None):
         """
         :param batch_size: int, size of a batch of training data
         :param seq_len: int, length of the sequence
         :param x: (batch_size, k), current generated sequence
         :return: (batch_size, seq_len), complete generated sequence
         """
+        duration_upper_limit = 60 * 24 * 2
         flag = False
 
         if x is None:
@@ -248,33 +249,49 @@ class Generator(nn.Module):
                     .long()
                     .to(self.device)
                 )
-                if (x == 0).any():
-                    assert False  # for padding
-                s = 1
+            if (x == 0).any():
+                assert False  # for padding
+            s = 1
+            # random sample duration
+            duration = torch.randint(low=0, high=duration_upper_limit, size=(batch_size, 1)).long().to(self.device)
+            duration = duration // 30 + 1
 
-        samples = []
+        samples = {"locs": [], "durs": []}
         if flag:
             if s > 0:
-                samples.append(x)
+                samples["locs"].append(x)
+                samples["durs"].append(duration)
+
             for i in range(s, seq_len):
-                x = self.step(x)
+                x, duration = self.step(x, {"duration": duration})
                 x = x.multinomial(1)
                 x[x == 0] += 1  # for padding
-                samples.append(x)
+                duration = torch.clamp(torch.round(duration), min=1, max=duration_upper_limit + 1).long()
+
+                samples["locs"].append(x)
+                samples["durs"].append(duration)
         else:
             given_len = x.size(1)
 
-            lis = x.chunk(given_len, dim=1)
+            lis_loc = x.chunk(given_len, dim=1)
+            lis_dur = x_dict["duration"].chunk(given_len, dim=1)
             for i in range(given_len):
-                samples.append(lis[i])
+                samples["locs"].append(lis_loc[i])
+                samples["durs"].append(lis_dur[i])
 
-            x = self.step(lis[-1])
+            x, dur_pred = self.step(lis_loc[-1], {"duration": lis_dur[-1]})
             x = x.multinomial(1)
             x[x == 0] += 1  # for padding
+            dur_pred = torch.clamp(torch.round(dur_pred), min=1, max=duration_upper_limit + 1).long()
 
             for i in range(given_len, seq_len):
-                samples.append(x)
-                x = self.step(x)
+                samples["locs"].append(x)
+                samples["durs"].append(dur_pred)
+
+                x, dur_pred = self.step(x, {"duration": dur_pred})
                 x = x.multinomial(1)
                 x[x == 0] += 1  # for padding
-        return torch.cat(samples, dim=1)
+                dur_pred = torch.clamp(torch.round(dur_pred), min=1, max=duration_upper_limit + 1).long()
+        samples["locs"] = torch.cat(samples["locs"], dim=1)
+        samples["durs"] = torch.cat(samples["durs"], dim=1)
+        return samples

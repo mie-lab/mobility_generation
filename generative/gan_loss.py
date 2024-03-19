@@ -13,7 +13,7 @@ class GANLoss(nn.Module):
     def __init__(self):
         super(GANLoss, self).__init__()
 
-    def forward(self, prob, target, reward, device):
+    def forward(self, prob, dur_loss, target, reward, device, loss_weight=0.1):
         """
         Args:
             prob: (N, C), torch Variable
@@ -23,8 +23,10 @@ class GANLoss(nn.Module):
         one_hot = torch.zeros((target.size(0), prob.size(1)), dtype=torch.bool).to(device)
         one_hot.scatter_(1, target.view((-1, 1)), 1)
         loss = torch.masked_select(prob, one_hot)
+
+        loss = loss + loss_weight * dur_loss / (dur_loss / loss).detach()
         loss = loss * reward
-        return -torch.sum(loss)
+        return -torch.mean(loss)
 
 
 class distanceLoss(nn.Module):

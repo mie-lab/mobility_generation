@@ -1,25 +1,25 @@
 misc:
   dataset: mobis
 
-  use_pretrain: False
-  pretrain_filepath: mobis_movesim_3
+  use_pretrain: True
+  pretrain_filepath: mobis_movesim
 
 
   generate_len: 50
   previous_day: 7
 
-  num_gen_samples: 102400
+  num_gen_samples: 1024
   g_step: 1
-  d_step: 2
-  k_d: 2
+  d_step: 1
+  k_d: 1
   # 
   if_embed_time: False
   if_embed_user: True
   if_embed_duration: True
 
   verbose: True
-  debug: True
-  batch_size: 32
+  debug: False
+  batch_size: 64
   print_step: 50
   num_workers: 0
   world_size: 1
@@ -35,8 +35,6 @@ model:
   layer: 2
   head: 4
   task: attention
-  periodic_loss: 0.5
-  distance_loss: 0.5
 
 optimiser:
   optimizer: Adam
@@ -48,7 +46,7 @@ optimiser:
 
   loss_weight: 0.1
 
-  rollout_num: 4
+  rollout_num: 1
 
   # for decay
   patience: 3

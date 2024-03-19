@@ -144,12 +144,13 @@ class Metric(object):
         :return:
         """
         # gene_data = gene_data.detach().cpu().numpy()
+        loc_seq = gene_data["locs"]
 
-        gene_dist = self.get_distances(gene_data) / self.max_distance
-        gene_rg = self.get_rg(gene_data) / self.max_distance
-        gene_period = self.get_periodicity(gene_data)
-        gene_overall_topk_freq = self.get_overall_topk_freq(gene_data, K=20)
-        gene_topk_freq = self.get_topk_freq(gene_data, K=10)
+        gene_dist = self.get_distances(loc_seq) / self.max_distance
+        gene_rg = self.get_rg(loc_seq) / self.max_distance
+        gene_period = self.get_periodicity(loc_seq)
+        gene_overall_topk_freq = self.get_overall_topk_freq(loc_seq, K=20)
+        gene_topk_freq = self.get_topk_freq(loc_seq, K=10)
 
         gene_dist_p, _ = np.histogram(gene_dist, bins=np.arange(0, 1, 1 / 1000))
         dist_jsd = distance.jensenshannon(gene_dist_p, self.ref_dist_p)

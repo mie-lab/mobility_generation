@@ -92,10 +92,16 @@ Use 4 weeks as input (TODO: Tune weeks)
 
 - SeqGAN (TODO:) 
     - implement
-- moveSim (TODO:) 
-    - sample from population distribution
-    - functional similarity of POIs
-    - period loss to account for variable activity time prediction 
+- moveSim (TODO:)
+    - Generator: 
+        - Sample from emperical visit frequency
+        - functional similarity of POIs
+
+    - Discriminator:
+    Loss:
+    - implemented 
+    - Decide to not include period loss
+
 - VOLUNTEER (TODO:)
     - implement
 - DiffSeq (TODO:)

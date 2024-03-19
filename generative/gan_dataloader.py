@@ -22,7 +22,7 @@ class discriminator_dataset(torch.utils.data.Dataset):
 
         self.valid_start_end_idx = valid_start_end_idx
         self.true_len = len(valid_start_end_idx)
-        self.fake_len = len(fake_data)
+        self.fake_len = len(fake_data["locs"])
 
     def __len__(self):
         """Return the length of the current dataloader."""
@@ -150,7 +150,7 @@ def construct_discriminator_pretrain_dataset(input_data, input_idx, all_locs):
     fake_seqs = {"locs": [], "durs": []}
 
     data_df = input_data.set_index("id")
-    for start_idx, end_idx in input_idx:
+    for start_idx, end_idx in tqdm(input_idx):
         curr_seq = data_df.iloc[start_idx:end_idx].copy()
 
         # only take the training idx
@@ -169,7 +169,7 @@ def construct_discriminator_pretrain_dataset(input_data, input_idx, all_locs):
         new_loc_seq = loc_seq.copy()
         new_dur_seq = dur_seq.copy()
         new_loc_seq[select_idx] = np.random.randint(low=1, high=len(all_locs) + 1, size=1)
-        new_dur_seq[select_idx] = np.random.randint(low=1, high=60 * 24 * 2, size=1)
+        new_dur_seq[select_idx] = np.random.randint(low=0, high=60 * 24 * 2, size=1)
 
         fake_seqs["locs"].append(new_loc_seq)
         fake_seqs["durs"].append(new_dur_seq)

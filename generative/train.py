@@ -52,14 +52,16 @@ def send_to_device(inputs, device, model_type="discriminator"):
 
 
 def generate_samples(model, seq_len, num, single_len=256, print_progress=False):
-    samples = []
     samples = {"locs": [], "durs": []}
     for _ in tqdm(range(int(num / single_len)), disable=not print_progress):
-        model.module.sample(single_len, seq_len).detach().cpu().numpy().tolist()
+        gen_samples = model.module.sample(single_len, seq_len)
 
-        samples["locs"].extend()
-        samples["durs"].extend()
-    return np.array(samples)
+        samples["locs"].extend(gen_samples["locs"].detach().cpu().numpy().tolist())
+        samples["durs"].extend(gen_samples["durs"].detach().cpu().numpy().tolist())
+
+    samples["locs"] = np.array(samples["locs"])
+    samples["durs"] = np.array(samples["durs"])
+    return samples
 
 
 def get_pretrain_loaders(config, input_data, all_locs, world_size, device):
@@ -138,21 +140,21 @@ def pre_training(discriminator, generator, all_locs, config, world_size, device,
     g_criterion = nn.CrossEntropyLoss(reduction="mean", ignore_index=0).to(device)  # ignore_index for padding
     g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
-    # # pretrain generator
-    # if is_main_process():
-    #     print("Pretrain generator")
+    # pretrain generator
+    if is_main_process():
+        print("Pretrain generator")
 
-    # generator = training(
-    #     g_train_loader,
-    #     g_vali_loader,
-    #     g_optimizer,
-    #     g_criterion,
-    #     generator,
-    #     config,
-    #     device,
-    #     log_dir,
-    #     model_type="generator",
-    # )
+    generator = training(
+        g_train_loader,
+        g_vali_loader,
+        g_optimizer,
+        g_criterion,
+        generator,
+        config,
+        device,
+        log_dir,
+        model_type="generator",
+    )
 
     # pretrain discriminator
     if is_main_process():
@@ -470,7 +472,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         generator.eval()
         for _ in range(config.d_step):
             samples = generate_samples(
-                generator, config.generate_len, num=config.num_gen_samples, single_len=1024, print_progress=False
+                generator, config.generate_len, num=config.num_gen_samples, single_len=1024, print_progress=True
             )
             # sample approapriate amount of training data
             curr_train_idx = train_idx
@@ -518,28 +520,32 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
 def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, gen_gan_optm, config, device, crit=None):
     period_crit, distance_crit = crit
 
+    MSE = torch.nn.MSELoss(reduction="mean")
+
     # construct the input to the generator, add zeros before samples and delete the last column
     # zeros = torch.zeros((config.batch_size, 1)).long().to(device)
-    samples = torch.Tensor(samples).long().to(device)
+    locs = torch.Tensor(samples["locs"]).long().to(device)
+    durs = torch.Tensor(samples["durs"]).long().to(device)
 
-    inputs = samples[:, :-1]
-    targets = samples[:, 1:].reshape((-1,))
+    x = locs[:, :-1]
+    targets = locs[:, 1:].reshape((-1,))
+    x_dict = {"duration": durs[:, :-1]}
 
     # calculate the reward
-    rewards = rollout.get_reward(
-        samples[:, :-1], roll_out_num=config.rollout_num, discriminator=discriminator, device=device
-    )
+    rewards = rollout.get_reward(x, x_dict, roll_out_num=config.rollout_num, discriminator=discriminator, device=device)
 
-    prob = generator(inputs)
+    prob, dur_pred = generator(x, x_dict)
     prob = F.log_softmax(prob, dim=-1)
 
-    gloss = gen_gan_loss(prob, targets, rewards, device)
+    dur_loss = MSE(dur_pred.reshape(-1), x_dict["duration"].reshape(-1).float())
 
-    print(gloss.item())
+    gloss = gen_gan_loss(prob, dur_loss, targets, rewards, device, loss_weight=config.loss_weight)
 
     # additional losses
-    # gloss += config.periodic_loss * period_crit(samples)
-    gloss += config.distance_loss * distance_crit(samples)
+    distance_loss = distance_crit(locs)
+    # gloss += config.loss_weight * period_crit(samples)
+
+    gloss = gloss + config.loss_weight * distance_loss / (distance_loss / gloss).detach()
 
     running_loss = gloss.item()
     # optimize
