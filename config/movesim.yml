@@ -18,7 +18,7 @@ misc:
   if_embed_duration: True
 
   verbose: True
-  debug: False
+  debug: True
   batch_size: 32
   print_step: 50
   num_workers: 0

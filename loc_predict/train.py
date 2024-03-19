@@ -10,7 +10,27 @@ import time
 from transformers import get_linear_schedule_with_warmup
 
 from utils.earlystopping import EarlyStopping
-from utils.utils import send_to_device
+
+
+def send_to_device(inputs, device, config):
+    x, y, x_dict, y_dict = inputs
+    if config.networkName == "deepmove":
+        x = (x[0].to(device), x[1].to(device))
+
+        for key in x_dict[0]:
+            x_dict[0][key] = x_dict[0][key].to(device)
+        for key in x_dict[1]:
+            x_dict[1][key] = x_dict[1][key].to(device)
+    else:
+        x = x.to(device)
+        for key in x_dict:
+            x_dict[key] = x_dict[key].to(device)
+        for key in y_dict:
+            y_dict[key] = y_dict[key].to(device)
+    y = y.to(device)
+
+    return x, y, x_dict, y_dict
+
 
 def get_performance_dict(return_dict):
     perf = {

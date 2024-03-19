@@ -52,14 +52,14 @@ class Discriminator(nn.Module):
 
         self.init_parameters()
 
-    def forward(self, x):
+    def forward(self, x, context_dict):
         """
         Args:
             x: (batch_size * seq_len)
         """
         padding_mask = x != 0  # batch_size * seq_len
 
-        emb = self.embedding(x).unsqueeze(1)  # batch_size * 1 * seq_len * emb_dim
+        emb = self.embedding(x, context_dict).unsqueeze(1)  # batch_size * 1 * seq_len * emb_dim
 
         convs = [
             F.relu(conv(emb)).squeeze(3)  # batch_size * num_filter * seq_len
@@ -228,7 +228,6 @@ class Generator(nn.Module):
 
     def sample(self, batch_size, seq_len, x=None):
         """
-
         :param batch_size: int, size of a batch of training data
         :param seq_len: int, length of the sequence
         :param x: (batch_size, k), current generated sequence
@@ -236,7 +235,6 @@ class Generator(nn.Module):
         """
         flag = False
 
-        # self.attn.flatten_parameters()
         if x is None:
             flag = True
 

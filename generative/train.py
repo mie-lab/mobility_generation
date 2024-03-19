@@ -28,13 +28,37 @@ from generative.rollout import Rollout
 from generative.gan_loss import GANLoss, periodLoss, distanceLoss
 from metrics.evaluations import Metric
 from utils.earlystopping import EarlyStopping
-from utils.utils import send_to_device
+
+
+def send_to_device(inputs, device, model_type="discriminator"):
+    if model_type == "discriminator":
+        x, y, x_dict = inputs
+
+        x = x.to(device)
+        for key in x_dict:
+            x_dict[key] = x_dict[key].to(device)
+        y = y.to(device)
+        return x, y, x_dict
+    else:
+        x, y, x_dict, y_dict = inputs
+
+        x = x.to(device)
+        for key in x_dict:
+            x_dict[key] = x_dict[key].to(device)
+        for key in y_dict:
+            y_dict[key] = y_dict[key].to(device)
+        y = y.to(device)
+        return x, y, x_dict, y_dict
 
 
 def generate_samples(model, seq_len, num, single_len=256, print_progress=False):
     samples = []
+    samples = {"locs": [], "durs": []}
     for _ in tqdm(range(int(num / single_len)), disable=not print_progress):
-        samples.extend(model.module.sample(single_len, seq_len).detach().cpu().numpy().tolist())
+        model.module.sample(single_len, seq_len).detach().cpu().numpy().tolist()
+
+        samples["locs"].extend()
+        samples["durs"].extend()
     return np.array(samples)
 
 
@@ -114,21 +138,21 @@ def pre_training(discriminator, generator, all_locs, config, world_size, device,
     g_criterion = nn.CrossEntropyLoss(reduction="mean", ignore_index=0).to(device)  # ignore_index for padding
     g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
 
-    # pretrain generator
-    if is_main_process():
-        print("Pretrain generator")
+    # # pretrain generator
+    # if is_main_process():
+    #     print("Pretrain generator")
 
-    generator = training(
-        g_train_loader,
-        g_vali_loader,
-        g_optimizer,
-        g_criterion,
-        generator,
-        config,
-        device,
-        log_dir,
-        model_type="generator",
-    )
+    # generator = training(
+    #     g_train_loader,
+    #     g_vali_loader,
+    #     g_optimizer,
+    #     g_criterion,
+    #     generator,
+    #     config,
+    #     device,
+    #     log_dir,
+    #     model_type="generator",
+    # )
 
     # pretrain discriminator
     if is_main_process():
@@ -237,16 +261,16 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
     start_time = time.time()
     optimizer.zero_grad()
     for i, inputs in enumerate(data_loader):
-        x, y, x_dict, y_dict = send_to_device(inputs, device, config)
-        x = x.long()
-
-        loc_pred, dur_pred = model(x, x_dict)
-
         if model_type == "discriminator":
-            loss = criterion(loc_pred.view((-1,)), y.float().view((-1,)))
+            x, y, x_dict = send_to_device(inputs, device, model_type=model_type)
+            x = x.long()
+
+            pred = model(x, x_dict)
+
+            loss = criterion(pred.view((-1,)), y.float().view((-1,)))
 
             # get the accuracy
-            prob = torch.sigmoid(loc_pred).view(-1)
+            prob = torch.sigmoid(pred).view(-1)
 
             correct = torch.sum(torch.eq(prob > 0.5, y.to(bool)))
             total = len(y)
@@ -257,6 +281,11 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
             curr_total += total
 
         else:
+            x, y, x_dict, y_dict = send_to_device(inputs, device, config)
+            x = x.long()
+
+            loc_pred, dur_pred = model(x, x_dict)
+
             loc_loss_size = criterion(loc_pred, y.long().view((-1,)))
             dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
             loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
@@ -300,6 +329,9 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
             curr_total = 0
             start_time = time.time()
 
+        if config.debug and (i > 20):
+            break
+
     if config.verbose and is_main_process():
         print("")
         print(
@@ -320,20 +352,25 @@ def validate_epoch(config, model, data_loader, criterion, device, model_type):
     model.eval()
     with torch.no_grad():
         for inputs in data_loader:
-            x, y, x_dict, y_dict = send_to_device(inputs, device, config)
-            x = x.long()
-
-            loc_pred, dur_pred = model(x, x_dict)
-
             if model_type == "discriminator":
-                loss = criterion(loc_pred.view((-1,)), y.float().view((-1,)))
+                x, y, x_dict = send_to_device(inputs, device, model_type=model_type)
+                x = x.long()
+
+                pred = model(x, x_dict)
+
+                loss = criterion(pred.view((-1,)), y.float().view((-1,)))
 
                 # get the accuracy
-                prob = torch.sigmoid(loc_pred).view(-1)
+                prob = torch.sigmoid(pred).view(-1)
 
                 correct += torch.sum(torch.eq(prob > 0.5, y.to(bool)))
                 total += len(y)
             else:
+                x, y, x_dict, y_dict = send_to_device(inputs, device, config)
+                x = x.long()
+
+                loc_pred, dur_pred = model(x, x_dict)
+
                 loc_loss_size = criterion(loc_pred, y.long().view((-1,)))
                 dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
                 loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
@@ -346,6 +383,9 @@ def validate_epoch(config, model, data_loader, criterion, device, model_type):
                 total += len(y.view(-1)[valid_idx])
 
             total_val_loss += loss.item()
+
+            if config.debug:
+                break
 
     # loss
     val_loss = total_val_loss / len(data_loader)
@@ -467,7 +507,6 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         # save models
         torch.save(generator.state_dict(), log_dir + "/generator.pt")
         torch.save(discriminator.state_dict(), log_dir + "/discriminator.pt")
-
         # if epoch > 10:
         #     samples = generate_samples(
         #         generator, config.generate_len, num=config.num_gen_samples, single_len=1024, print_progress=False
@@ -524,9 +563,8 @@ def set_requires_grad(net, requires_grad=False):
         nets (network)   -- a network
         requires_grad (bool)  -- whether the networks require gradients or not
     """
-    if net is not None:
-        for param in net.parameters():
-            param.requires_grad = requires_grad
+    for param in net.parameters():
+        param.requires_grad = requires_grad
 
 
 def is_dist_avail_and_initialized():
