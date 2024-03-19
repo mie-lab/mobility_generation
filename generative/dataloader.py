@@ -4,7 +4,8 @@ from tqdm import tqdm
 
 from torch.nn.utils.rnn import pad_sequence
 import torch
-
+from torch.utils.data.distributed import DistributedSampler
+import torch.distributed as dist
 
 import trackintel as ti
 
@@ -145,7 +146,85 @@ def generator_collate_fn(batch):
     return src_batch, tgt_batch, src_dict_batch, tgt_dict_batch
 
 
-def construct_discriminator_pretrain_dataset(input_data, input_idx, all_locs):
+def generate_samples(model, seq_len, num, single_len=256, print_progress=False):
+    samples = {"locs": [], "durs": []}
+    for _ in tqdm(range(int(num / single_len)), disable=not print_progress):
+        gen_samples = model.module.sample(single_len, seq_len)
+
+        samples["locs"].extend(gen_samples["locs"].detach().cpu().numpy().tolist())
+        samples["durs"].extend(gen_samples["durs"].detach().cpu().numpy().tolist())
+
+    samples["locs"] = np.array(samples["locs"])
+    samples["durs"] = np.array(samples["durs"])
+    return samples
+
+
+def get_pretrain_loaders(input_data, all_locs, world_size, config, device):
+    train_data, train_idx, vali_data, vali_idx = input_data
+
+    # train dataset
+    fake_train_samples = _construct_discriminator_pretrain_dataset(train_data, train_idx, all_locs)
+    fake_vali_samples = _construct_discriminator_pretrain_dataset(vali_data, vali_idx, all_locs)
+
+    d_train_data = discriminator_dataset(
+        true_data=train_data, fake_data=fake_train_samples, valid_start_end_idx=train_idx
+    )
+    train_sampler = DistributedSampler(d_train_data, num_replicas=world_size, rank=device, shuffle=True, drop_last=True)
+    d_train_loader = torch.utils.data.DataLoader(
+        d_train_data,
+        collate_fn=discriminator_collate_fn,
+        num_workers=config.num_workers,
+        batch_size=config.batch_size,
+        pin_memory=True,
+        sampler=train_sampler,
+    )
+
+    # validation dataset
+    d_vali_data = discriminator_dataset(true_data=vali_data, fake_data=fake_vali_samples, valid_start_end_idx=vali_idx)
+    vali_sampler = DistributedSampler(d_vali_data, num_replicas=world_size, rank=device, shuffle=False)
+    d_vali_loader = torch.utils.data.DataLoader(
+        d_vali_data,
+        collate_fn=discriminator_collate_fn,
+        num_workers=config.num_workers,
+        batch_size=config.batch_size,
+        pin_memory=True,
+        sampler=vali_sampler,
+    )
+
+    # training dataset
+    g_train_data = generator_dataset(input_data=train_data, valid_start_end_idx=train_idx)
+    train_sampler = DistributedSampler(g_train_data, num_replicas=world_size, rank=device, shuffle=True)
+    g_train_loader = torch.utils.data.DataLoader(
+        g_train_data,
+        collate_fn=generator_collate_fn,
+        num_workers=config.num_workers,
+        batch_size=config.batch_size,
+        pin_memory=True,
+        sampler=train_sampler,
+    )
+
+    # validation dataset
+    g_vali_data = generator_dataset(input_data=vali_data, valid_start_end_idx=vali_idx)
+    vali_sampler = DistributedSampler(g_vali_data, num_replicas=world_size, rank=device, shuffle=False)
+    g_vali_loader = torch.utils.data.DataLoader(
+        g_vali_data,
+        collate_fn=generator_collate_fn,
+        num_workers=config.num_workers,
+        batch_size=config.batch_size,
+        pin_memory=True,
+        sampler=vali_sampler,
+    )
+
+    if is_main_process():
+        print(f"len d_train loader:\t{len(d_train_loader)}\t #samples: {len(d_train_data)}")
+        print(f"len d_vali loader:\t{len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
+        print(f"len g_train loader:\t{len(g_train_loader)}\t #samples: {len(g_train_data)}")
+        print(f"len g_vali loader:\t{len(g_vali_loader)}\t #samples: {len(g_vali_data)}")
+
+    return d_train_loader, d_vali_loader, g_train_loader, g_vali_loader
+
+
+def _construct_discriminator_pretrain_dataset(input_data, input_idx, all_locs):
     fake_seqs = {"locs": [], "durs": []}
 
     data_df = input_data.set_index("id")
@@ -176,7 +255,34 @@ def construct_discriminator_pretrain_dataset(input_data, input_idx, all_locs):
     return fake_seqs
 
 
-def save_pk_file(save_path, data):
-    """Function to save data to pickle format given data and path."""
-    with open(save_path, "wb") as handle:
-        pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+def get_discriminator_dataloaders(train_data, train_idx, fake_data, world_size, config, device):
+    d_train_data = discriminator_dataset(true_data=train_data, fake_data=fake_data, valid_start_end_idx=train_idx)
+    train_sampler = DistributedSampler(d_train_data, num_replicas=world_size, rank=device, shuffle=True)
+    d_train_loader = torch.utils.data.DataLoader(
+        d_train_data,
+        collate_fn=discriminator_collate_fn,
+        num_workers=config.num_workers,
+        batch_size=config.batch_size,
+        pin_memory=True,
+        sampler=train_sampler,
+    )
+
+    return d_train_data, d_train_loader
+
+
+def is_dist_avail_and_initialized():
+    if not dist.is_available():
+        return False
+    if not dist.is_initialized():
+        return False
+    return True
+
+
+def get_rank():
+    if not is_dist_avail_and_initialized():
+        return 0
+    return dist.get_rank()
+
+
+def is_main_process():
+    return get_rank() == 0

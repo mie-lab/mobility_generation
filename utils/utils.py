@@ -13,6 +13,8 @@ from joblib import Parallel, delayed
 
 from tqdm import tqdm
 
+import pickle as pickle
+
 
 def load_data(sp, loc):
     sp = sp.merge(loc.reset_index().drop(columns={"user_id"}), how="left", left_on="location_id", right_on="id")
@@ -65,6 +67,7 @@ def load_config(path):
             config[k] = v
 
     return config
+
 
 
 def init_save_path(config, time_now):

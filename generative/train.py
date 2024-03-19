@@ -3,10 +3,9 @@ from torch import nn, optim
 from torch.optim.lr_scheduler import StepLR
 import torch.nn.functional as F
 
-from torch.utils.data.distributed import DistributedSampler
-
 import torch.distributed as dist
 
+import os
 import random
 import numpy as np
 from tqdm import tqdm
@@ -15,13 +14,7 @@ import pickle as pickle
 
 import time
 
-from generative.gan_dataloader import (
-    discriminator_dataset,
-    discriminator_collate_fn,
-    generator_dataset,
-    generator_collate_fn,
-    construct_discriminator_pretrain_dataset,
-)
+from generative.dataloader import get_discriminator_dataloaders, get_pretrain_loaders, generate_samples
 from generative.rollout import Rollout
 from generative.gan_loss import GANLoss, periodLoss, distanceLoss
 from metrics.evaluations import Metric
@@ -49,87 +42,9 @@ def send_to_device(inputs, device, model_type="discriminator"):
         return x, y, x_dict, y_dict
 
 
-def generate_samples(model, seq_len, num, single_len=256, print_progress=False):
-    samples = {"locs": [], "durs": []}
-    for _ in tqdm(range(int(num / single_len)), disable=not print_progress):
-        gen_samples = model.module.sample(single_len, seq_len)
-
-        samples["locs"].extend(gen_samples["locs"].detach().cpu().numpy().tolist())
-        samples["durs"].extend(gen_samples["durs"].detach().cpu().numpy().tolist())
-
-    samples["locs"] = np.array(samples["locs"])
-    samples["durs"] = np.array(samples["durs"])
-    return samples
-
-
-def get_pretrain_loaders(config, input_data, all_locs, world_size, device):
-    train_data, train_idx, vali_data, vali_idx = input_data
-
-    # train dataset
-    fake_train_samples = construct_discriminator_pretrain_dataset(train_data, train_idx, all_locs)
-    fake_vali_samples = construct_discriminator_pretrain_dataset(vali_data, vali_idx, all_locs)
-
-    d_train_data = discriminator_dataset(
-        true_data=train_data, fake_data=fake_train_samples, valid_start_end_idx=train_idx
-    )
-    train_sampler = DistributedSampler(d_train_data, num_replicas=world_size, rank=device, shuffle=True, drop_last=True)
-    d_train_loader = torch.utils.data.DataLoader(
-        d_train_data,
-        collate_fn=discriminator_collate_fn,
-        num_workers=config.num_workers,
-        batch_size=config.batch_size,
-        pin_memory=True,
-        sampler=train_sampler,
-    )
-
-    # validation dataset
-    d_vali_data = discriminator_dataset(true_data=vali_data, fake_data=fake_vali_samples, valid_start_end_idx=vali_idx)
-    vali_sampler = DistributedSampler(d_vali_data, num_replicas=world_size, rank=device, shuffle=False)
-    d_vali_loader = torch.utils.data.DataLoader(
-        d_vali_data,
-        collate_fn=discriminator_collate_fn,
-        num_workers=config.num_workers,
-        batch_size=config.batch_size,
-        pin_memory=True,
-        sampler=vali_sampler,
-    )
-
-    # training dataset
-    g_train_data = generator_dataset(input_data=train_data, valid_start_end_idx=train_idx)
-    train_sampler = DistributedSampler(g_train_data, num_replicas=world_size, rank=device, shuffle=True)
-    g_train_loader = torch.utils.data.DataLoader(
-        g_train_data,
-        collate_fn=generator_collate_fn,
-        num_workers=config.num_workers,
-        batch_size=config.batch_size,
-        pin_memory=True,
-        sampler=train_sampler,
-    )
-
-    # validation dataset
-    g_vali_data = generator_dataset(input_data=vali_data, valid_start_end_idx=vali_idx)
-    vali_sampler = DistributedSampler(g_vali_data, num_replicas=world_size, rank=device, shuffle=False)
-    g_vali_loader = torch.utils.data.DataLoader(
-        g_vali_data,
-        collate_fn=generator_collate_fn,
-        num_workers=config.num_workers,
-        batch_size=config.batch_size,
-        pin_memory=True,
-        sampler=vali_sampler,
-    )
-
-    if is_main_process():
-        print(f"len d_train loader:\t{len(d_train_loader)}\t #samples: {len(d_train_data)}")
-        print(f"len d_vali loader:\t{len(d_vali_loader)}\t #samples: {len(d_vali_data)}")
-        print(f"len g_train loader:\t{len(g_train_loader)}\t #samples: {len(g_train_data)}")
-        print(f"len g_vali loader:\t{len(g_vali_loader)}\t #samples: {len(g_vali_data)}")
-
-    return d_train_loader, d_vali_loader, g_train_loader, g_vali_loader
-
-
 def pre_training(discriminator, generator, all_locs, config, world_size, device, log_dir, input_data):
     d_train_loader, d_vali_loader, g_train_loader, g_vali_loader = get_pretrain_loaders(
-        config, input_data, all_locs, world_size, device
+        input_data, all_locs, world_size, config, device
     )
 
     # loss and optimizer
@@ -476,17 +391,14 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
             curr_train_idx = train_idx
             if len(train_idx) > config.num_gen_samples:
                 curr_train_idx = random.sample(train_idx, config.num_gen_samples)
-            d_train_data = discriminator_dataset(
-                true_data=train_data, fake_data=samples, valid_start_end_idx=curr_train_idx
-            )
-            train_sampler = DistributedSampler(d_train_data, num_replicas=world_size, rank=device, shuffle=True)
-            d_train_loader = torch.utils.data.DataLoader(
-                d_train_data,
-                collate_fn=discriminator_collate_fn,
-                num_workers=config.num_workers,
-                batch_size=config.batch_size,
-                pin_memory=True,
-                sampler=train_sampler,
+
+            d_train_data, d_train_loader = get_discriminator_dataloaders(
+                train_data=train_data,
+                train_idx=curr_train_idx,
+                fake_data=samples,
+                world_size=world_size,
+                config=config,
+                device=device,
             )
             if is_main_process():
                 print(f"len d_train loader:\t{len(d_train_loader)}\t #samples: {len(d_train_data)}")
@@ -504,15 +416,16 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
                     model_type="discriminator",
                 )
 
-        # save models
-        torch.save(generator.state_dict(), log_dir + "/generator.pt")
-        torch.save(discriminator.state_dict(), log_dir + "/discriminator.pt")
         # if epoch > 10:
         #     samples = generate_samples(
         #         generator, config.generate_len, num=config.num_gen_samples, single_len=1024, print_progress=False
         #     )
         #     save_path = os.path.join(config.temp_save_root, "temp", f"generated_samples_{epoch}.pk")
-        #     save_pk_file(save_path, samples)
+        #     with open(save_path, "wb") as handle:
+        #         pickle.dump(samples, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        # save models
+        torch.save(generator.state_dict(), log_dir + "/generator.pt")
+        torch.save(discriminator.state_dict(), log_dir + "/discriminator.pt")
 
 
 def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, gen_gan_optm, config, device, crit=None):
@@ -553,12 +466,6 @@ def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, ge
     gen_gan_optm.step()
 
     return running_loss
-
-
-def save_pk_file(save_path, data):
-    """Function to save data to pickle format given data and path."""
-    with open(save_path, "wb") as handle:
-        pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def set_requires_grad(net, requires_grad=False):
