@@ -1,5 +1,4 @@
 # coding: utf-8
-import os
 import pickle as pickle
 
 import torch

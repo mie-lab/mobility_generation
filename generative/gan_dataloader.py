@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import pickle as pickle
 from tqdm import tqdm

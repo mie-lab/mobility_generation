@@ -1,11 +1,7 @@
 # -*- coding:utf-8 -*-
 
 import copy
-import numpy as np
 import torch
-import torch.nn.functional as F
-
-from tqdm import tqdm
 
 
 class Rollout(object):

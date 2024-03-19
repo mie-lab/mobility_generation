@@ -92,15 +92,19 @@ Use 4 weeks as input (TODO: Tune weeks)
 
 - SeqGAN (TODO:) 
     - implement
-- moveSim (TODO:)
+- moveSim
     - Generator: 
-        - Sample from emperical visit frequency
-        - functional similarity of POIs
-
+        - Samples from emperical visit frequency
+        - Inputs Physical distance, function similarity, and historical transition matrices
+        - Accepts duration and location as input. Output duration and location of the next step. 
     - Discriminator:
-    Loss:
-    - implemented 
-    - Decide to not include period loss
+        - Accepts duration and location as input. Output p of real
+    - Loss:
+        - implemented reward based on rollout
+        - Based on CrossEntropyLoss and MSELoss
+        - Included distance loss; decide to not include period loss
+    - Training:
+        Learning signal weak -> Generator capacity low
 
 - VOLUNTEER (TODO:)
     - implement

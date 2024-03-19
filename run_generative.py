@@ -17,8 +17,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from easydict import EasyDict as edict
 
-from utils.utils import load_data, setup_seed, load_config, init_save_path
-from utils.dataloader import get_train_test, _get_valid_sequence
+from utils.utils import load_data, setup_seed, load_config, init_save_path, get_train_test, get_valid_start_end_idx
 
 from generative.movesim import Discriminator, Generator
 from generative.train import pre_training, adv_training
@@ -97,11 +96,7 @@ def main(
     # find_unused_parameters=True for GAN training
     discriminator = Discriminator(config=config).to(rank)
     discriminator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(discriminator)
-    discriminator = DDP(
-        discriminator,
-        device_ids=[rank],
-        find_unused_parameters=True
-    )
+    discriminator = DDP(discriminator, device_ids=[rank], find_unused_parameters=True)
     # calculate parameters
     total_params_embed = sum(p.numel() for p in generator.module.embedding.parameters() if p.requires_grad)
     total_params_generator = sum(p.numel() for p in generator.parameters() if p.requires_grad)
@@ -155,19 +150,34 @@ def preprocess_datasets(config):
     loc = pd.read_csv(os.path.join(config.temp_save_root, "loc_s2_level10_13.csv"), index_col="id")
     sp = load_data(sp, loc)
 
+    # get all possible locations
     all_locs = pd.read_csv(os.path.join(config.temp_save_root, "s2_loc_visited_level10_13.csv"), index_col="id")
     all_locs["geometry"] = all_locs["geometry"].apply(wkt.loads)
     all_locs = gpd.GeoDataFrame(all_locs, geometry="geometry", crs="EPSG:4326")
     # transform to projected coordinate systems
     all_locs = all_locs.to_crs("EPSG:2056")
 
-    train_data, vali_data, test_data, all_locs = get_train_test(sp, all_locs=all_locs)
+    train_data, vali_data, _, all_locs = get_train_test(sp, all_locs=all_locs)
 
     train_data["id"] = np.arange(len(train_data))
     vali_data["id"] = np.arange(len(vali_data))
-    test_data["id"] = np.arange(len(test_data))
+    # test_data["id"] = np.arange(len(test_data))
 
-    return train_data, vali_data, test_data, all_locs
+    print(f"Max location id:{all_locs.loc_id.max()}, unique location id:{all_locs.loc_id.unique().shape[0]}")
+    config["total_loc_num"] = int(all_locs.loc_id.max() + 1)
+    config["total_user_num"] = int(train_data.user_id.max() + 1)
+
+    # get valid idx for training and validation
+    train_idx, vali_idx = get_valid_start_end_idx(
+        train_data,
+        vali_data,
+        test_data=None,
+        print_progress=config.verbose,
+        previous_day=config.previous_day,
+        return_test=False,
+    )
+
+    return train_data, train_idx, vali_data, vali_idx, all_locs
 
 
 if __name__ == "__main__":
@@ -191,16 +201,7 @@ if __name__ == "__main__":
     world_size = config.world_size
     log_dir = init_save_path(config, time_now=int(datetime.now().timestamp()))
 
-    train_data, vali_data, test_data, all_locs = preprocess_datasets(config)
-
-    print(f"Max location id:{all_locs.loc_id.max()}, unique location id:{all_locs.loc_id.unique().shape[0]}")
-    config["total_loc_num"] = int(all_locs.loc_id.max() + 1)
-    config["total_user_num"] = int(train_data.user_id.max() + 1)
-
-    # get valid idx for training and validation
-    train_idx = _get_valid_sequence(train_data, print_progress=config.verbose, previous_day=config.previous_day)
-    vali_idx = _get_valid_sequence(vali_data, print_progress=config.verbose, previous_day=config.previous_day)
-    # test_idx = _get_valid_sequence(test_data, print_progress=config.verbose, previous_day=config.previous_day)
+    train_data, train_idx, vali_data, vali_idx, all_locs = preprocess_datasets(config)
 
     # get the empirical visit for sampling
     emp_visits = np.zeros(config["total_loc_num"])

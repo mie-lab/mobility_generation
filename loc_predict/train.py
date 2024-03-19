@@ -336,9 +336,9 @@ def single_test(config, model, data_loader, device):
     model.eval()
     with torch.no_grad():
         for inputs in data_loader:
-            x, y, x_dict, y_dict = send_to_device(inputs, device, config)
+            x, y, x_dict, _ = send_to_device(inputs, device, config)
 
-            logits, dur_pred = model(x, x_dict, device)
+            logits, _ = model(x, x_dict, device)
 
             batch_result_arr, batch_true, batch_top1 = calculate_correct_total_prediction(logits, y)
             result_arr += batch_result_arr

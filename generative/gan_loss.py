@@ -1,10 +1,6 @@
 # coding: utf-8
-import pdb
 import torch
-import numpy as np
 import torch.nn as nn
-from torch.autograd import Variable
-import torch.nn.functional as F
 
 
 class GANLoss(nn.Module):
