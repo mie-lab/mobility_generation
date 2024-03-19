@@ -68,7 +68,14 @@ class generator_dataset(torch.utils.data.Dataset):
         # [sequence_len]
         y = torch.tensor(loc_seq[1:])
 
-        return x, y
+        return_dict = {}
+        y_dict = {}
+        #
+        return_dict["duration"] = torch.tensor(selected["act_duration"].values[:-1] // 30 + 1, dtype=torch.long)
+        # predict without padding, need to add padding in autoregressive prediction
+        y_dict["duration"] = torch.tensor(selected["act_duration"].values[1:] // 30, dtype=torch.float32)
+
+        return x, y, return_dict, y_dict
 
 
 def discriminator_collate_fn(batch):
@@ -89,14 +96,34 @@ def generator_collate_fn(batch):
     """function to collate data samples into batch tensors."""
     src_batch, tgt_batch = [], []
 
-    for src_sample, tgt_sample in batch:
+    # get one sample batch
+    src_dict_batch = {}
+    for key in batch[0][-2]:
+        src_dict_batch[key] = []
+
+    tgt_dict_batch = {}
+    for key in batch[0][-1]:
+        tgt_dict_batch[key] = []
+
+    for src_sample, tgt_sample, src_dict, tgt_dict in batch:
         src_batch.append(src_sample)
         tgt_batch.append(tgt_sample)
+
+        for key in src_dict:
+            src_dict_batch[key].append(src_dict[key])
+
+        for key in tgt_dict:
+            tgt_dict_batch[key].append(tgt_dict[key])
 
     src_batch = pad_sequence(src_batch, padding_value=0, batch_first=True)
     tgt_batch = pad_sequence(tgt_batch, padding_value=0, batch_first=True)
 
-    return src_batch, tgt_batch
+    for key in src_dict_batch:
+        src_dict_batch[key] = pad_sequence(src_dict_batch[key], padding_value=0, batch_first=True)
+    for key in tgt_dict_batch:
+        tgt_dict_batch[key] = pad_sequence(tgt_dict_batch[key], padding_value=0, batch_first=True)
+
+    return src_batch, tgt_batch, src_dict_batch, tgt_dict_batch
 
 
 def construct_discriminator_pretrain_dataset(input_data, input_idx, all_locs):

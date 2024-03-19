@@ -1,7 +1,7 @@
 misc:
   dataset: mobis
 
-  use_pretrain: True
+  use_pretrain: False
   pretrain_filepath: mobis_movesim_3
 
 
@@ -15,12 +15,12 @@ misc:
   # 
   if_embed_time: False
   if_embed_user: True
-  if_embed_duration: False
+  if_embed_duration: True
 
   verbose: True
   debug: False
-  batch_size: 64
-  print_step: 20
+  batch_size: 32
+  print_step: 50
   num_workers: 0
   world_size: 1
   
@@ -41,10 +41,12 @@ model:
 optimiser:
   optimizer: Adam
   max_epoch: 100
-  pre_lr: 0.01
+  pre_lr: 0.001
   d_lr: 0.00001
   g_lr: 0.0001
   weight_decay: 0.000001
+
+  loss_weight: 0.1
 
   rollout_num: 4
 

@@ -103,13 +103,13 @@ def main(
         # find_unused_parameters=True,
     )
     # calculate parameters
-    total_params_embed = sum(p.numel() for p in generator.module.loc_embedding.parameters() if p.requires_grad)
+    total_params_embed = sum(p.numel() for p in generator.module.embedding.parameters() if p.requires_grad)
     total_params_generator = sum(p.numel() for p in generator.parameters() if p.requires_grad)
     total_params_discriminator = sum(p.numel() for p in discriminator.parameters() if p.requires_grad)
 
     if rank == 0:
         print(
-            f"#Parameters embeddings: {total_params_embed} \t generator: {total_params_generator - total_params_embed} \t discriminator: {total_params_discriminator - total_params_embed}"
+            f"#Paras embeds: {total_params_embed} \t G: {total_params_generator - total_params_embed} \t D: {total_params_discriminator - total_params_embed}"
         )
 
     if not config.use_pretrain:
@@ -149,13 +149,13 @@ def main(
     cleanup()
 
 
-def preprocess_datasets(config, dataset="sp"):
+def preprocess_datasets(config):
     # read and preprocess
-    sp = pd.read_csv(os.path.join(config.temp_save_root, f"{dataset}.csv"), index_col="id")
-    loc = pd.read_csv(os.path.join(config.temp_save_root, "locs_s2.csv"), index_col="id")
+    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp_small.csv"), index_col="id")
+    loc = pd.read_csv(os.path.join(config.temp_save_root, "loc_s2_level10_13.csv"), index_col="id")
     sp = load_data(sp, loc)
 
-    all_locs = pd.read_csv(os.path.join(config.temp_save_root, "test", "all_locations.csv"), index_col="id")
+    all_locs = pd.read_csv(os.path.join(config.temp_save_root, "s2_loc_visited_level10_13.csv"), index_col="id")
     all_locs["geometry"] = all_locs["geometry"].apply(wkt.loads)
     all_locs = gpd.GeoDataFrame(all_locs, geometry="geometry", crs="EPSG:4326")
     # transform to projected coordinate systems
@@ -210,9 +210,9 @@ if __name__ == "__main__":
     emp_visits = emp_visits / emp_visits.sum()
 
     # distance and empirical visits
-    dist_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "dist_matrix_test.pk"), "rb"))
-    emp_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "emp_matrix_test.pk"), "rb"))
-    fct_matrix = pickle.load(open(os.path.join(config.temp_save_root, "temp", "function_matrix_test.pk"), "rb"))
+    dist_matrix = pickle.load(open(os.path.join(config.temp_save_root, "matrix", "distance_13.pk"), "rb"))
+    emp_matrix = pickle.load(open(os.path.join(config.temp_save_root, "matrix", "visits_13.pk"), "rb"))
+    fct_matrix = pickle.load(open(os.path.join(config.temp_save_root, "matrix", "function_13.pk"), "rb"))
 
     mp.spawn(
         main,

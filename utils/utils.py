@@ -9,6 +9,26 @@ import yaml
 import random
 
 
+def send_to_device(inputs, device, config):
+    x, y, x_dict, y_dict = inputs
+    if config.networkName == "deepmove":
+        x = (x[0].to(device), x[1].to(device))
+
+        for key in x_dict[0]:
+            x_dict[0][key] = x_dict[0][key].to(device)
+        for key in x_dict[1]:
+            x_dict[1][key] = x_dict[1][key].to(device)
+    else:
+        x = x.to(device)
+        for key in x_dict:
+            x_dict[key] = x_dict[key].to(device)
+        for key in y_dict:
+            y_dict[key] = y_dict[key].to(device)
+    y = y.to(device)
+
+    return x, y, x_dict, y_dict
+
+
 def load_data(sp, loc):
     sp = sp.merge(loc.reset_index().drop(columns={"user_id"}), how="left", left_on="location_id", right_on="id")
     sp = sp.drop(columns={"location_id", "id", "center", "extent"})

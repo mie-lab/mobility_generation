@@ -14,13 +14,20 @@ class AllEmbedding(nn.Module):
         # emberdding layers
 
         # location embedding
-        self.emb_loc = nn.Embedding(
-            num_embeddings=config.total_loc_num, embedding_dim=config.base_emb_size, padding_idx=0
-        )
+        self.emb_loc = nn.Embedding(config.total_loc_num, config.base_emb_size, padding_idx=0)
+        # duration is in minutes, possible duration for two days is 60 * 24 * 2 // 30
+        self.if_include_duration = config.if_embed_duration
+        if self.if_include_duration:
+            # add 1 for padding
+            self.emb_duration = nn.Embedding((60 * 24 * 2) // 30 + 1, config.base_emb_size, padding_idx=0)
+
         self.dropout = nn.Dropout(0.1)
 
-    def forward(self, src) -> Tensor:
+    def forward(self, src, context_dict) -> Tensor:
         emb = self.emb_loc(src)
+
+        if self.if_include_duration:
+            emb = emb + self.emb_duration(context_dict["duration"])
 
         return self.dropout(emb)
 
@@ -105,7 +112,7 @@ class Generator(nn.Module):
         self.emp_matrix = emp_matrix
         self.fct_matrix = fct_matrix
 
-        self.loc_embedding = AllEmbedding(config=config)
+        self.embedding = AllEmbedding(config=config)
         # self.tim_embedding = nn.Embedding(num_embeddings=24, embedding_dim=self.base_emb_size)
 
         # transformer encoder
@@ -121,6 +128,15 @@ class Generator(nn.Module):
 
         # self.fc = FullyConnected(self.base_emb_size, if_residual_layer=True, total_loc_num=self.total_loc_num)
         self.linear = nn.Linear(self.hidden_dim, self.total_loc_num)
+
+        # the residual for duration
+        self.fc_dur = nn.Linear(self.hidden_dim, 1)
+        self.linear1 = nn.Linear(self.hidden_dim, self.hidden_dim * 2)
+        self.linear2 = nn.Linear(self.hidden_dim * 2, self.hidden_dim)
+
+        self.norm1 = nn.BatchNorm1d(self.hidden_dim)
+        self.fc_dropout1 = nn.Dropout(p=0.1)
+        self.fc_dropout2 = nn.Dropout(p=0.1)
 
         # for distance, empirical, and function matrics
         self.linear_mat1 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
@@ -158,10 +174,14 @@ class Generator(nn.Module):
 
         return dist_vec, visit_vec, fct_vec
 
-    def _single_step(self, input):
+    def _res_block(self, x: Tensor) -> Tensor:
+        x = self.linear2(self.fc_dropout1(F.relu(self.linear1(x))))
+        return self.fc_dropout2(x)
+
+    def _single_step(self, input, context_dict):
         src_padding_mask = (input == 0).to(self.device)
 
-        x = self.loc_embedding(input)
+        x = self.embedding(input, context_dict)
 
         #
         src_mask = self._generate_square_subsequent_mask(input.shape[1]).to(self.device)
@@ -184,17 +204,17 @@ class Generator(nn.Module):
         dist_vec, visit_vec, fct_vec = self.matrix_calculation(input)
         x = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec) + torch.mul(x, fct_vec)
 
-        return self.linear(x)
+        return self.linear(x), self.fc_dur(self.norm1(x + self._res_block(x)))
 
-    def forward(self, input):
+    def forward(self, input, context_dict):
         """
         :param x: (batch_size, seq_len), sequence of locations
         :return:
             (batch_size * seq_len, total_locations), prediction of next stage of all locations
         """
-        pred = self._single_step(input)
+        loc_pred, dur_pred = self._single_step(input, context_dict)
 
-        return pred
+        return loc_pred, dur_pred
 
     def step(self, input):
         """

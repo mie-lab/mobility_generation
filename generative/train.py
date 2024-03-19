@@ -28,6 +28,7 @@ from generative.rollout import Rollout
 from generative.gan_loss import GANLoss, periodLoss, distanceLoss
 from metrics.evaluations import Metric
 from utils.earlystopping import EarlyStopping
+from utils.utils import send_to_device
 
 
 def generate_samples(model, seq_len, num, single_len=256, print_progress=False):
@@ -212,6 +213,8 @@ def training(
             early_stopping.counter = 0
             scheduler.step()
 
+        if config.verbose:
+            print("=" * 50)
         if config.debug is True:
             break
 
@@ -229,23 +232,24 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
     all_total = 0
     curr_correct = 0
     curr_total = 0
+    MSE = torch.nn.MSELoss(reduction="mean")
 
     start_time = time.time()
     optimizer.zero_grad()
-    for i, (data, target) in enumerate(data_loader):
-        data = data.long().to(device)
-        target = target.to(device)
+    for i, inputs in enumerate(data_loader):
+        x, y, x_dict, y_dict = send_to_device(inputs, device, config)
+        x = x.long()
 
-        pred = model(data)
+        loc_pred, dur_pred = model(x, x_dict)
 
         if model_type == "discriminator":
-            loss = criterion(pred.view((-1,)), target.float().view((-1,)))
+            loss = criterion(loc_pred.view((-1,)), y.float().view((-1,)))
 
             # get the accuracy
-            prob = torch.sigmoid(pred).view(-1)
+            prob = torch.sigmoid(loc_pred).view(-1)
 
-            correct = torch.sum(torch.eq(prob > 0.5, target.to(bool)))
-            total = len(target)
+            correct = torch.sum(torch.eq(prob > 0.5, y.to(bool)))
+            total = len(y)
 
             all_correct += correct
             all_total += total
@@ -253,14 +257,17 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
             curr_total += total
 
         else:
-            loss = criterion(pred, target.long().view((-1,)))
+            loc_loss_size = criterion(loc_pred, y.long().view((-1,)))
+            dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
+            loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
 
             # get the accuracy
-            prediction = torch.topk(pred, k=1, dim=-1).indices.view(-1)
-            valid_idx = target.view(-1) != 0
+            prediction = torch.topk(loc_pred, k=1, dim=-1).indices.view(-1)
+            valid_idx = y.view(-1) != 0
 
-            correct = torch.sum(torch.eq(prediction[valid_idx], target.view(-1)[valid_idx]))
-            total = len(target.view(-1)[valid_idx])
+            correct = torch.sum(torch.eq(prediction[valid_idx], y.view(-1)[valid_idx]))
+            total = len(y.view(-1)[valid_idx])
+
             all_correct += correct
             all_total += total
             curr_correct += correct
@@ -307,32 +314,36 @@ def validate_epoch(config, model, data_loader, criterion, device, model_type):
     correct = 0
     total = 0
 
+    MSE = torch.nn.MSELoss(reduction="mean")
+
     # change to validation mode. Warning in inference mode regarding the transformer mask
     model.eval()
     with torch.no_grad():
-        for data, target in data_loader:
-            data = data.long().to(device)
-            target = target.to(device)
+        for inputs in data_loader:
+            x, y, x_dict, y_dict = send_to_device(inputs, device, config)
+            x = x.long()
 
-            pred = model(data)
+            loc_pred, dur_pred = model(x, x_dict)
 
             if model_type == "discriminator":
-                loss = criterion(pred.view((-1,)), target.float().view((-1,)))
+                loss = criterion(loc_pred.view((-1,)), y.float().view((-1,)))
 
                 # get the accuracy
-                prob = torch.sigmoid(pred).view(-1)
+                prob = torch.sigmoid(loc_pred).view(-1)
 
-                correct += torch.sum(torch.eq(prob > 0.5, target.to(bool)))
-                total += len(target)
+                correct += torch.sum(torch.eq(prob > 0.5, y.to(bool)))
+                total += len(y)
             else:
-                loss = criterion(pred, target.long().view((-1,)))
+                loc_loss_size = criterion(loc_pred, y.long().view((-1,)))
+                dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
+                loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
 
                 # get the accuracy
-                prediction = torch.topk(pred, k=1, dim=-1).indices.view(-1)
-                valid_idx = target.view(-1) != 0
+                prediction = torch.topk(loc_pred, k=1, dim=-1).indices.view(-1)
+                valid_idx = y.view(-1) != 0
 
-                correct += torch.sum(torch.eq(prediction[valid_idx], target.view(-1)[valid_idx]))
-                total += len(target.view(-1)[valid_idx])
+                correct += torch.sum(torch.eq(prediction[valid_idx], y.view(-1)[valid_idx]))
+                total += len(y.view(-1)[valid_idx])
 
             total_val_loss += loss.item()
 
