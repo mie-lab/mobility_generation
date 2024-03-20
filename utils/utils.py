@@ -69,7 +69,6 @@ def load_config(path):
     return config
 
 
-
 def init_save_path(config, time_now):
     """define the path to save, and save the configuration file."""
     if config.networkName == "rnn" and config.attention:
