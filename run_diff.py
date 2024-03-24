@@ -84,7 +84,7 @@ def main():
         wandb.init(
             project="DiffuSeq",
             dir=log_dir,
-            name=str(time_now),
+            name=f"{config.wandb_name}_{str(time_now)}",
         )
         wandb.config.update(config.__dict__, allow_val_change=True)
 
@@ -99,16 +99,17 @@ def main():
         lr=config.lr,
         ema_rate=config.ema_rate,
         log_interval=config.log_interval,
-        # save_interval=config.save_interval,
         use_fp16=config.use_fp16,
         fp16_scale_growth=config.fp16_scale_growth,
         schedule_sampler=schedule_sampler,
         weight_decay=config.weight_decay,
-        # learning_steps=config.learning_steps,
+        early_stop_gamma=config.early_stop_gamma,
+        early_stop_patience=config.early_stop_patience,
+        max_epoch=config.max_epoch,
+        warmup_epochs=config.warmup_epochs,
         checkpoint_path=log_dir,
         gradient_clipping=config.gradient_clipping,
         eval_data=data_valid,
-        # eval_interval=config.eval_interval,
     ).run_loop()
 
 

@@ -2,9 +2,10 @@ from transformers import AutoConfig
 
 # from transformers import BertEncoder
 from transformers.models.bert.modeling_bert import BertEncoder
+from transformers import GPT2Config, GPT2Model
+
 import torch
 
-import numpy as np
 import torch.nn as nn
 
 import math
@@ -34,7 +35,12 @@ class TransformerNetModel(nn.Module):
         super().__init__()
 
         model_config = AutoConfig.from_pretrained(model_name)
+
         model_config.hidden_dropout_prob = dropout
+        model_config.num_hidden_layers = 2
+        model_config.hidden_size = 64
+        model_config.intermediate_size = 256
+        model_config.num_attention_heads = 4
 
         self.input_dims = input_dims
         self.hidden_t_dim = hidden_t_dim
@@ -47,11 +53,10 @@ class TransformerNetModel(nn.Module):
         with torch.no_grad():
             self.lm_head.weight = self.word_embedding.weight
 
-        time_embed_dim = hidden_t_dim * 4
         self.time_embed = nn.Sequential(
-            nn.Linear(hidden_t_dim, time_embed_dim),
+            nn.Linear(hidden_t_dim, hidden_t_dim * 4),
             torch.nn.SiLU(),
-            nn.Linear(time_embed_dim, model_config.hidden_size),
+            nn.Linear(hidden_t_dim * 4, model_config.hidden_size),
         )
 
         if self.input_dims != model_config.hidden_size:

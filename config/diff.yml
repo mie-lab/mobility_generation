@@ -1,6 +1,8 @@
 misc:
   dataset: mobis
 
+  wandb_name: test
+  dataset_variation: tiny
   level: "10_13"
   src_min_days: 14
   tgt_min_days: 7
@@ -14,23 +16,20 @@ misc:
   if_embed_user: False
   if_embed_poi: False
   if_embed_duration: False
-
-  verbose: True
-  debug: False
-  use_fp16: False
-  fp16_scale_growth: 0.001
-  batch_size: 128
-  microbatch: 16
-  log_interval: 10
+  
+  batch_size: 512
+  microbatch: 128
+  log_interval: 20
   num_workers: 0
   
+fp16:
+  use_fp16: False
+  fp16_scale_growth: 0.001
+
 
 embedding:
   hidden_dim: 128
   hidden_t_dim: 128
-
-  base_emb_size: 64
-  poi_original_size: 16
 
 diffusion:
   networkName: diffseq
@@ -53,35 +52,20 @@ model:
 
 
 optimiser:
-  max_epoch: 100
   lr: 0.001
   weight_decay: 0.000001
   ema_rate: 0.9999
   gradient_clipping: -1.0
   # for loss
-  loss_weight: 0.1
+  # loss_weight: 0.1
 
   # for warmup
-  num_warmup_epochs: 2
-  num_training_epochs: 50
-  # for decay
-  patience: 3
-  lr_step_size: 1
-  lr_gamma: 0.1
+  warmup_epochs: 2
+  max_epoch: 200
+  # for early stop
+  early_stop_patience: 3
+  early_stop_gamma: 0.1
 
 dataset:
   data_dir: ./data/diff
   save_root: ./runs
-
-
-# {
-#   "vocab": "bert",
-#   "vocab_size": 0,
-#   ,
-#   "notes": "folder-notes",
-#   "checkpoint_path": "diffusion_models",
-#   "seq_len": 128,
-#   "seed": 101,
-#   "use_kl": false,
-#   "emb_scale_factor": 1.0
-# }

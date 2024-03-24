@@ -10,9 +10,10 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import StepLR
 
 from utils import logger
-from utils.dist_util import get_device
+from utils.dist_util import get_device, load_state_dict
 
 from generative.diff.fp16_util import (
     make_master_params,
@@ -25,15 +26,11 @@ from generative.diff.fp16_util import (
 import pickle as pickle
 
 
-from generative.dataloader import get_discriminator_dataloaders, get_pretrain_loaders, generate_samples
-from generative.rollout import Rollout
-from generative.gan_loss import GANLoss, periodLoss, distanceLoss
-
 from metrics.evaluations import Metric
 from utils.earlystopping import EarlyStopping
 
 from generative.diff.step_sample import LossAwareSampler, UniformSampler
-
+from transformers import get_linear_schedule_with_warmup
 
 # For ImageNet experiments, this was a good default value.
 # We found that the lg_loss_scale quickly climbed to
@@ -53,16 +50,17 @@ class TrainLoop:
         lr,
         ema_rate,
         log_interval,
-        # save_interval,
+        max_epoch=100,
+        warmup_epochs=2,
+        early_stop_gamma,
+        early_stop_patience,
         use_fp16=False,
         fp16_scale_growth=1e-3,
         schedule_sampler=None,
         weight_decay=0.0,
-        learning_steps=0,
         checkpoint_path="",
         gradient_clipping=-1.0,
         eval_data=None,
-        # eval_interval=-1,
     ):
         self.model = model
         self.diffusion = diffusion
@@ -73,13 +71,10 @@ class TrainLoop:
         self.lr = lr
         self.ema_rate = [ema_rate] if isinstance(ema_rate, float) else [float(x) for x in ema_rate.split(",")]
         self.log_interval = log_interval
-        # self.eval_interval = eval_interval
-        # self.save_interval = save_interval
+        self.max_epoch = max_epoch
         self.use_fp16 = use_fp16
         self.fp16_scale_growth = fp16_scale_growth
         self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
-        self.weight_decay = weight_decay
-        self.learning_steps = learning_steps
         self.gradient_clipping = gradient_clipping
 
         self.step = 0
@@ -89,12 +84,26 @@ class TrainLoop:
         self.master_params = self.model_params
         self.lg_loss_scale = INITIAL_LOG_LOSS_SCALE
 
-        self.checkpoint_path = checkpoint_path  # DEBUG **
+        self.checkpoint_path = checkpoint_path
 
-        # if self.use_fp16:
-        #     self._setup_fp16()
+        self.early_stop_patience = early_stop_patience
 
-        self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=self.weight_decay)
+        if self.use_fp16:
+            self._setup_fp16()
+
+        self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=weight_decay)
+        # define learning rate schedule
+        self.scheduler = get_linear_schedule_with_warmup(
+            self.opt,
+            num_warmup_steps=len(self.data) * warmup_epochs,
+            num_training_steps=len(self.data) * self.max_epoch,
+        )
+        # early stopping
+        self.scheduler_ES = StepLR(self.opt, step_size=1, gamma=early_stop_gamma)
+        self.ES = EarlyStopping(
+            checkpoint_path, patience=early_stop_patience, verbose=True, monitor="loss", delta=0.0001
+        )
+
         self.ema_params = [copy.deepcopy(self.master_params) for _ in range(len(self.ema_rate))]
 
         if torch.cuda.is_available():  # DEBUG **
@@ -119,39 +128,79 @@ class TrainLoop:
         self.model.convert_to_fp16()
 
     def run_loop(self):
-        for epoch in range(100):
+        early_stop_count = 0
+        for epoch in range(self.max_epoch):
             self.data.sampler.set_epoch(epoch)
             self.eval_data.sampler.set_epoch(epoch)
 
             # train
-            n_batches = len(self.data)
-            start_time = time.time()
-            self.opt.zero_grad()
-            for i, (batch, cond) in enumerate(self.data):
-                self.run_step(batch, cond)
+            self.train_epoch(epoch, early_stop_count)
 
-                # log
-                if (self.step) % self.log_interval == 0:
-                    logger.dumpkvs()
+            # evaluate
+            current_loss = self.evaluate_epoch()
+
+            # early stop
+            self.ES(
+                {"loss": current_loss},
+                self._master_params_to_state_dict(self.master_params),
+                save_name=f"model_{epoch}",
+            )
+            if self.ES.early_stop:
+                if dist.get_rank() == 0:
+                    print("=" * 50)
+                    print("Early stopping")
+                    print("Current lr: {:.6f}".format(self.opt.param_groups[0]["lr"]))
+                    if early_stop_count == 2:
+                        if dist.get_rank() == 0:
+                            print("Training finished.")
+                        break
+
+                    logger.log(f"loading model from checkpoint: {self.ES.save_name}...")
+
+                dist.barrier()
+                map_location = {"cuda:0": f"{get_device()}"}
+                self.model.load_state_dict(
+                    load_state_dict(bf.join(self.checkpoint_path, self.ES.save_name + ".pt"), map_location=map_location)
+                )
+                #
+                early_stop_count += 1
+                self.ES.early_stop = False
+                self.ES.counter = 0
+                self.scheduler_ES.step()
+
+    def train_epoch(self, epoch, early_stop_count):
+        # train
+        n_batches = len(self.data)
+        start_time = time.time()
+        self.opt.zero_grad()
+        for i, (batch, cond) in enumerate(self.data):
+            self.run_step(batch, cond)
+
+            if not early_stop_count:
+                self.scheduler.step()
+
+            # log
+            if (self.step) % self.log_interval == 0:
+                logger.dumpkvs()
+                if dist.get_rank() == 0:
                     print(
                         "Epoch {}, {:.1f}% took: {:.2f}s".format(
                             epoch + 1, 100 * i / n_batches, time.time() - start_time
                         )
                     )
-                    start_time = time.time()
+                start_time = time.time()
 
-                self.step += 1
+            self.step += 1
 
-            # evaluate
-            self.ddp_model.eval()
-            for batch_eval, cond_eval in self.eval_data:
-                self.forward_only(batch_eval, cond_eval)
-            print("eval on validation set")
-            logger.dumpkvs()
+    def evaluate_epoch(self):
+        self.ddp_model.eval()
 
-            # save
-            # if self.step > 0 and self.step % self.save_interval == 0:
-            #     self.save()
+        return_loss = 0
+        for batch_eval, cond_eval in self.eval_data:
+            return_loss += self.forward_only(batch_eval, cond_eval)
+        print("eval on validation set")
+        logger.dumpkvs()
+        return return_loss
 
     def run_step(self, batch, cond):
         self.forward_backward(batch, cond)
@@ -162,6 +211,7 @@ class TrainLoop:
         self.log_step()
 
     def forward_only(self, batch, cond):
+        return_loss = []
         with torch.no_grad():
             zero_grad(self.model_params)
             for i in range(0, batch.shape[0], self.microbatch):
@@ -185,6 +235,9 @@ class TrainLoop:
                         losses = compute_losses()
 
                 log_loss_dict(self.diffusion, t, {f"eval_{k}": v * weights for k, v in losses.items()})
+                return_loss.extend(losses["loss"].detach().cpu().numpy().tolist())
+
+        return np.mean(return_loss)
 
     def forward_backward(self, batch, cond):
         zero_grad(self.model_params)
@@ -229,7 +282,6 @@ class TrainLoop:
         model_grads_to_master_grads(self.model_params, self.master_params)
         self.master_params[0].grad.mul_(1.0 / (2**self.lg_loss_scale))
         self._log_grad_norm()
-        self._anneal_lr()
         self.opt.step()
         for rate, params in zip(self.ema_rate, self.ema_params):
             update_ema(params, self.master_params, rate=rate)
@@ -258,7 +310,6 @@ class TrainLoop:
         if self.gradient_clipping > 0:
             self.grad_clip()
         self._log_grad_norm()
-        self._anneal_lr()
         self.opt.step()
         for rate, params in zip(self.ema_rate, self.ema_params):
             update_ema(params, self.master_params, rate=rate)
@@ -274,17 +325,10 @@ class TrainLoop:
                 sqsum += (p.grad**2).sum().item()
         logger.logkv_mean("grad_norm", np.sqrt(sqsum))
 
-    def _anneal_lr(self):
-        if not self.learning_steps:
-            return
-        frac_done = (self.step) / self.learning_steps
-        lr = self.lr * (1 - frac_done)
-        for param_group in self.opt.param_groups:
-            param_group["lr"] = lr
-
     def log_step(self):
         logger.logkv("step", self.step)
         logger.logkv("samples", (self.step + 1) * self.global_batch)
+        logger.logkv("learning_rate", self.opt.param_groups[0]["lr"])
         if self.use_fp16:
             logger.logkv("lg_loss_scale", self.lg_loss_scale)
 
@@ -302,7 +346,7 @@ class TrainLoop:
                 with bf.BlobFile(bf.join(self.checkpoint_path, filename), "wb") as f:  # DEBUG **
                     torch.save(state_dict, f)  # save locally
 
-        # save_checkpoint(0, self.master_params)
+        save_checkpoint(0, self.master_params)
         for rate, params in zip(self.ema_rate, self.ema_params):
             save_checkpoint(rate, params)
 

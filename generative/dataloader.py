@@ -384,7 +384,9 @@ def get_sequence(args, seq_len, split="train"):
     print("#" * 30, "\nLoading dataset {} from {}...".format(args.dataset, args.data_dir))
 
     print(f"### Loading form the {split} set...")
-    path = f"{args.data_dir}/{split}_level{args.level}_{args.src_min_days}_{args.tgt_min_days}.pk"
+    path = (
+        f"{args.data_dir}/{split}_level{args.level}_{args.src_min_days}_{args.tgt_min_days}_{args.dataset_variation}.pk"
+    )
 
     sequence_ls = pickle.load(open(path, "rb"))
 
