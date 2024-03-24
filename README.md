@@ -125,4 +125,3 @@ Use 4 weeks as input (TODO: Tune weeks)
 ## TODO:
 - Generation with predictive models, implement beam search
 - Implement classical generation model 
-- ensure evaluation is on the same test dataset/sequence

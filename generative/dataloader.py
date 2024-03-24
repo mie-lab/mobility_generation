@@ -7,6 +7,12 @@ import torch
 from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as dist
 
+
+import psutil
+import datasets
+from datasets import Dataset as Dataset2
+
+
 import trackintel as ti
 
 
@@ -268,6 +274,160 @@ def get_discriminator_dataloaders(train_data, train_idx, fake_data, world_size, 
     )
 
     return d_train_data, d_train_loader
+
+
+def load_data_text(
+    batch_size,
+    seq_len,
+    deterministic=False,
+    data_args=None,
+    split="train",
+    loop=True,
+):
+    """
+    For a dataset, create a generator over (seqs, kwargs) pairs.
+
+    Each seq is an (bsz, len, h) float tensor, and the kwargs dict contains zero or
+    more keys, each of which map to a batched Tensor of their own.
+    The kwargs dict can be used for some meta information.
+
+    :param batch_size: the batch size of each returned pair.
+    :param seq_len: the max sequence length (one-side).
+    :param deterministic: if True, yield results in a deterministic order.
+    :param data_args: including dataset directory, num of dataset, basic settings, etc.
+    :param loaded_vocab: loaded word vocabs.
+    :param loop: loop to get batch data or not.
+    """
+
+    print("#" * 30, "\nLoading location data...")
+
+    training_data = get_sequence(data_args, seq_len, split=split)
+
+    dataset = DiffSeqDataset(training_data, data_args)
+
+    if split != "test":
+        sampler = DistributedSampler(dataset)
+        data_loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch_size,  # 20,
+            # drop_last=True,
+            sampler=sampler,
+            # shuffle=not deterministic,
+            num_workers=0,
+        )
+    else:
+        data_loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch_size,  # 20,
+            # drop_last=True,
+            # sampler=sampler,
+            shuffle=not deterministic,
+            num_workers=0,
+        )
+
+    return data_loader
+
+
+def process_helper_fnc(seq_ls, seq_len):
+    # Process.memory_info is expressed in bytes, so convert to megabytes
+    # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+    seq_dataset = Dataset2.from_dict(seq_ls)
+    # print(seq_dataset)
+    # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+
+    def merge_and_mask(ls):
+        lst = []
+        mask = []
+        for i in range(len(ls["src"])):
+            src = ls["src"][i]
+            tgt = ls["tgt"][i]
+
+            lst.append(src + tgt)
+            mask.append([0] * len(src))
+        ls["input_ids"] = lst
+        ls["input_mask"] = mask
+        return ls
+
+    seq_dataset = seq_dataset.map(
+        merge_and_mask,
+        batched=True,
+        num_proc=1,
+        desc="merge and mask",
+    )
+
+    def pad_function(ls):
+        max_length = seq_len
+        ls["input_ids"] = _collate_batch_helper(ls["input_ids"], 0, max_length)
+        ls["input_mask"] = _collate_batch_helper(ls["input_mask"], 1, max_length)
+        return ls
+
+    # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+
+    seq_dataset = seq_dataset.map(
+        pad_function,
+        batched=True,
+        num_proc=4,
+        desc="padding",
+        remove_columns=["src", "tgt"],
+    )
+
+    # print(seq_dataset, "padded dataset")
+    # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+
+    raw_datasets = datasets.DatasetDict()
+    raw_datasets["train"] = seq_dataset
+    # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+    return raw_datasets
+
+
+def get_sequence(args, seq_len, split="train"):
+    print("#" * 30, "\nLoading dataset {} from {}...".format(args.dataset, args.data_dir))
+
+    print(f"### Loading form the {split} set...")
+    path = f"{args.data_dir}/{split}_level{args.level}_{args.src_min_days}_{args.tgt_min_days}.pk"
+
+    sequence_ls = pickle.load(open(path, "rb"))
+
+    processed_dict = {"src": [], "tgt": []}
+    for record in sequence_ls:
+        processed_dict["src"].append(record["src"])
+        processed_dict["tgt"].append(record["tgt"])
+
+    print("### Data samples...\n", processed_dict["src"][:1], processed_dict["tgt"][:1])
+
+    train_dataset = process_helper_fnc(processed_dict, seq_len)
+    return train_dataset
+
+
+class DiffSeqDataset(torch.utils.data.Dataset):
+    def __init__(self, text_datasets, data_args):
+        super().__init__()
+        self.text_datasets = text_datasets
+        self.length = len(self.text_datasets["train"])
+        self.data_args = data_args
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        input_ids = np.array(self.text_datasets["train"][idx]["input_ids"])
+        out_kwargs = {}
+        out_kwargs["input_ids"] = np.array(self.text_datasets["train"][idx]["input_ids"])
+        out_kwargs["input_mask"] = np.array(self.text_datasets["train"][idx]["input_mask"])
+
+        return input_ids, out_kwargs
+
+
+def _collate_batch_helper(examples, pad_token_id, max_length, return_mask=False):
+    result = torch.full([len(examples), max_length], pad_token_id, dtype=torch.int64).tolist()
+    mask_ = torch.full([len(examples), max_length], pad_token_id, dtype=torch.int64).tolist()
+    for i, example in enumerate(examples):
+        curr_len = min(len(example), max_length)
+        result[i][:curr_len] = example[:curr_len]
+        mask_[i][:curr_len] = [1] * curr_len
+    if return_mask:
+        return result, mask_
+    return result
 
 
 def is_dist_avail_and_initialized():

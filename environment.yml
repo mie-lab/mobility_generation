@@ -16,3 +16,6 @@ dependencies:
   - transformers
   - cudatoolkit=11.3
   - trackintel
+  - blobfile
+  - wandb
+  - datasets
