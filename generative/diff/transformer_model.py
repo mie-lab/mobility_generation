@@ -108,6 +108,7 @@ class TransformerNetModel(nn.Module):
         emb_inputs = self.position_embeddings(position_ids) + emb_x + emb_t.unsqueeze(1).expand(-1, seq_length, -1)
         emb_inputs = self.dropout(self.LayerNorm(emb_inputs))
 
+        # TODO: Padding masks?
         input_trans_hidden_states = self.input_transformers(emb_inputs).last_hidden_state
 
         if self.output_dims != self.hidden_size:

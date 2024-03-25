@@ -150,6 +150,8 @@ class TrainLoop:
                     print("=" * 50)
                     print("Early stopping")
                     print("Current lr: {:.6f}".format(self.opt.param_groups[0]["lr"]))
+
+                    # only es for 2 times
                     if early_stop_count == 2:
                         if dist.get_rank() == 0:
                             print("Training finished.")
@@ -158,12 +160,14 @@ class TrainLoop:
                     logger.log(f"loading model from checkpoint: {self.ES.save_name}...")
 
                 dist.barrier()
+                # load best model for retraining
                 map_location = {"cuda:0": f"{get_device()}"}
                 self.model.load_state_dict(
                     load_state_dict(bf.join(self.checkpoint_path, self.ES.save_name + ".pt"), map_location=map_location)
                 )
                 #
                 early_stop_count += 1
+                # reset
                 self.ES.early_stop = False
                 self.ES.counter = 0
                 self.scheduler_ES.step()

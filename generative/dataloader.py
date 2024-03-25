@@ -282,7 +282,7 @@ def load_data_text(
     deterministic=False,
     data_args=None,
     split="train",
-    loop=True,
+    model_emb=None,
 ):
     """
     For a dataset, create a generator over (seqs, kwargs) pairs.
@@ -303,7 +303,7 @@ def load_data_text(
 
     training_data = get_sequence(data_args, seq_len, split=split)
 
-    dataset = DiffSeqDataset(training_data, data_args)
+    dataset = DiffSeqDataset(training_data, data_args, model_emb=model_emb)
 
     if split != "test":
         sampler = DistributedSampler(dataset)
@@ -402,22 +402,29 @@ def get_sequence(args, seq_len, split="train"):
 
 
 class DiffSeqDataset(torch.utils.data.Dataset):
-    def __init__(self, text_datasets, data_args):
+    def __init__(self, text_datasets, data_args, model_emb=None):
         super().__init__()
         self.text_datasets = text_datasets
         self.length = len(self.text_datasets["train"])
         self.data_args = data_args
+        self.model_emb = model_emb
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
-        input_ids = np.array(self.text_datasets["train"][idx]["input_ids"])
+        arr = self.text_datasets["train"][idx]["input_ids"]
+
+        if self.model_emb is not None:
+            with torch.no_grad():
+                arr = self.model_emb(torch.tensor(arr))
+
+        arr = np.array(arr, dtype=np.float32)
         out_kwargs = {}
         out_kwargs["input_ids"] = np.array(self.text_datasets["train"][idx]["input_ids"])
         out_kwargs["input_mask"] = np.array(self.text_datasets["train"][idx]["input_mask"])
 
-        return input_ids, out_kwargs
+        return arr, out_kwargs
 
 
 def _collate_batch_helper(examples, pad_token_id, max_length, return_mask=False):

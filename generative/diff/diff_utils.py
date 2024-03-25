@@ -88,3 +88,35 @@ def space_timesteps(num_timesteps, section_counts):
         all_steps += taken_steps
         start_idx += size
     return set(all_steps)
+
+
+def get_efficient_knn(model_emb, text_emb):
+    emb_norm = (model_emb**2).sum(-1).view(-1, 1)  # vocab
+    text_emb_t = torch.transpose(text_emb.view(-1, text_emb.size(-1)), 0, 1)  # d, bsz*seqlen
+    arr_norm = (text_emb**2).sum(-1).view(-1, 1)  # bsz*seqlen, 1
+    # print(emb_norm.shape, arr_norm.shape)
+    dist = emb_norm + arr_norm.transpose(0, 1) - 2.0 * torch.mm(model_emb, text_emb_t)  # (vocab, d) x (d, bsz*seqlen)
+    dist = torch.clamp(dist, 0.0, np.inf)
+    # print(dist.shape)
+    topk_out = torch.topk(-dist, k=1, dim=0)
+    return topk_out.values, topk_out.indices
+
+
+def denoised_fn_round(args, model, old_embed, t):
+    # print(text_emb.shape) # bsz, seqlen, dim
+    model_emb = model.weight  # input_embs
+    # print(t)
+    old_shape = old_embed.shape
+    old_device = old_embed.device
+
+    if len(old_embed.shape) > 2:
+        old_embed = old_embed.reshape(-1, old_embed.size(-1))
+    else:
+        old_embed = old_embed
+    # val, indices = get_knn(model_emb, text_emb.to(model_emb.device), dist=dist)
+    val, indices = get_efficient_knn(model_emb, old_embed.to(model_emb.device))
+    rounded_tokens = indices[0]
+    # print(rounded_tokens.shape)
+    new_embeds = model(rounded_tokens).view(old_shape).to(old_device)
+
+    return new_embeds

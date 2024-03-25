@@ -75,6 +75,8 @@ def init_save_path(config, time_now):
         networkName = f"{config.dataset}_{config.networkName}_Attn"
     else:
         networkName = f"{config.dataset}_{config.networkName}"
+    if config.split == "test":
+        networkName += "_evaluate"
 
     log_dir = os.path.join(config.save_root, f"{networkName}_{str(time_now)}")
 
