@@ -2,25 +2,25 @@ misc:
   dataset: mobis
 
 
-  dataset_variation: small
+  dataset_variation: tiny
   level: "10_13"
   src_min_days: 14
   tgt_min_days: 7
 
   clip_denoised: False
-  clamp_step: 0
+  clamp_step: 500
   step: 2000
   split: test
   top_p: -1
-  model_path: ./runs/mobis_diffseq_1711387801
-  trained_model_name: model_17.pt
+  model_path: ./runs/mobis_diffseq_1711447084
+  trained_model_name: ema_0.9999_19.pt
 
   # seq_len: 512
   max_location: 14882
 
   seed: 101
   
-  batch_size: 2
+  batch_size: 16
   num_workers: 0
   
   networkName: diffseq

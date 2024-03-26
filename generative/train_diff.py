@@ -50,8 +50,8 @@ class TrainLoop:
         lr,
         ema_rate,
         log_interval,
-        max_epoch=100,
         warmup_epochs=2,
+        decay_epochs=100,
         early_stop_gamma,
         early_stop_patience,
         use_fp16=False,
@@ -71,7 +71,7 @@ class TrainLoop:
         self.lr = lr
         self.ema_rate = [ema_rate] if isinstance(ema_rate, float) else [float(x) for x in ema_rate.split(",")]
         self.log_interval = log_interval
-        self.max_epoch = max_epoch
+        self.decay_epochs = decay_epochs
         self.use_fp16 = use_fp16
         self.fp16_scale_growth = fp16_scale_growth
         self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
@@ -96,7 +96,7 @@ class TrainLoop:
         self.scheduler = get_linear_schedule_with_warmup(
             self.opt,
             num_warmup_steps=len(self.data) * warmup_epochs,
-            num_training_steps=len(self.data) * self.max_epoch,
+            num_training_steps=len(self.data) * self.decay_epochs,
         )
         # early stopping
         self.scheduler_ES = StepLR(self.opt, step_size=1, gamma=early_stop_gamma)
@@ -129,7 +129,7 @@ class TrainLoop:
 
     def run_loop(self):
         early_stop_count = 0
-        for epoch in range(self.max_epoch):
+        for epoch in range(1000):  # stop managed by ES
             self.data.sampler.set_epoch(epoch)
             self.eval_data.sampler.set_epoch(epoch)
 
@@ -179,15 +179,17 @@ class TrainLoop:
         start_time = time.time()
         all_start_time = start_time
         self.opt.zero_grad()
+        current_step = 0
         for i, (batch, cond) in enumerate(self.data):
+            self.step += 1
+            current_step += 1
             self.run_step(batch, cond)
 
             if not early_stop_count:
                 self.scheduler.step()
 
-            self.step += 1
             # log
-            if (self.step) % self.log_interval == 0:
+            if current_step % self.log_interval == 0:
                 logger.dumpkvs()
                 if dist.get_rank() == 0:
                     print(
@@ -196,10 +198,9 @@ class TrainLoop:
                         )
                     )
                 start_time = time.time()
-
+        logger.dumpkvs()
         if dist.get_rank() == 0:
             print("Epoch {} took: {:.2f}s".format(epoch + 1, time.time() - all_start_time))
-        logger.dumpkvs()
 
     def evaluate_epoch(self):
         self.ddp_model.eval()

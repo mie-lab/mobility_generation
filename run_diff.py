@@ -43,6 +43,7 @@ def main():
         help="Path to the config file.",
         default="./config/diff.yml",
     )
+    parser.add_argument("--local-rank", type=int)
     args = parser.parse_args()
 
     # initialization
@@ -103,7 +104,7 @@ def main():
         weight_decay=config.weight_decay,
         early_stop_gamma=config.early_stop_gamma,
         early_stop_patience=config.early_stop_patience,
-        max_epoch=config.max_epoch,
+        decay_epochs=config.decay_epochs,
         warmup_epochs=config.warmup_epochs,
         checkpoint_path=log_dir,
         gradient_clipping=config.gradient_clipping,

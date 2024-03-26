@@ -36,6 +36,7 @@ def main():
     )
     args = parser.parse_args()
     config = load_config(args.config)
+
     config = edict(config)
 
     setup_seed(config.seed)
@@ -53,6 +54,7 @@ def main():
     with open(config_path, "rb") as f:
         training_args = json.load(f)
     training_args["batch_size"] = config.batch_size
+    training_args["dataset_variation"] = config.dataset_variation
     config.__dict__.update(training_args)
 
     logger.log("### Creating model and diffusion...")
@@ -131,7 +133,7 @@ def main():
             model_kwargs=model_kwargs,
             top_p=config.top_p,
             clamp_step=config.clamp_step,
-            clamp_first=True,
+            clamp_first=False,
             mask=input_ids_mask,
             padding_mask=padding_mask,
             x_start=x_start,

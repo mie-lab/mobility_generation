@@ -19,7 +19,7 @@ def create_model_and_diffusion(config):
         input_dims=config.hidden_dim,
         hidden_t_dim=config.hidden_t_dim,
         dropout=config.dropout,
-        model_name=config.model_name,
+        num_encoder_layers=config.num_encoder_layers,
         max_location=config.max_location,
     )
 

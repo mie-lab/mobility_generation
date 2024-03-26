@@ -2,7 +2,6 @@ from transformers import AutoConfig
 
 # from transformers import BertEncoder
 from transformers.models.bert.modeling_bert import BertEncoder
-from transformers import GPT2Config, GPT2Model
 
 import torch
 
@@ -19,7 +18,6 @@ class TransformerNetModel(nn.Module):
     :param output_dims: dims of the output Tensor.
     :param hidden_t_dim: dims of time embedding.
     :param dropout: the dropout probability.
-    :param config/model_name: the config of PLMs.
     :param init_pretrained: bool, init whole network params with PLMs.
     :param vocab_size: the size of vocabulary
     """
@@ -28,20 +26,17 @@ class TransformerNetModel(nn.Module):
         self,
         input_dims,
         hidden_t_dim,
+        num_encoder_layers,
         dropout=0,
-        model_name="bert-base-uncased",
         max_location=None,
     ):
         super().__init__()
 
-        model_config = AutoConfig.from_pretrained(model_name)
+        model_config = AutoConfig.from_pretrained("bert-base-uncased")
 
         model_config.hidden_dropout_prob = dropout
-        model_config.num_hidden_layers = 4
-        model_config.hidden_size = 256
-        model_config.intermediate_size = 256 * 4
-        model_config.num_attention_heads = 8
-        model_config.max_position_embeddings = 512
+        model_config.num_hidden_layers = num_encoder_layers
+        model_config.max_position_embeddings = 768  # full dataset requires > 512
 
         self.input_dims = input_dims
         self.hidden_t_dim = hidden_t_dim
@@ -62,9 +57,9 @@ class TransformerNetModel(nn.Module):
 
         if self.input_dims != model_config.hidden_size:
             self.input_up_proj = nn.Sequential(
-                nn.Linear(input_dims, model_config.hidden_size),
+                nn.Linear(input_dims, input_dims),
                 nn.Tanh(),
-                nn.Linear(model_config.hidden_size, model_config.hidden_size),
+                nn.Linear(input_dims, model_config.hidden_size),
             )
 
         self.input_transformers = BertEncoder(model_config)
@@ -77,9 +72,9 @@ class TransformerNetModel(nn.Module):
 
         if self.output_dims != model_config.hidden_size:
             self.output_down_proj = nn.Sequential(
-                nn.Linear(model_config.hidden_size, model_config.hidden_size),
-                nn.Tanh(),
                 nn.Linear(model_config.hidden_size, self.output_dims),
+                nn.Tanh(),
+                nn.Linear(self.output_dims, self.output_dims),
             )
 
     def get_embeds(self, input_ids):
