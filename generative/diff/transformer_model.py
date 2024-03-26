@@ -57,9 +57,9 @@ class TransformerNetModel(nn.Module):
 
         if self.input_dims != model_config.hidden_size:
             self.input_up_proj = nn.Sequential(
-                nn.Linear(input_dims, input_dims),
-                nn.Tanh(),
                 nn.Linear(input_dims, model_config.hidden_size),
+                nn.Tanh(),
+                nn.Linear(model_config.hidden_size, model_config.hidden_size),
             )
 
         self.input_transformers = BertEncoder(model_config)
@@ -72,9 +72,9 @@ class TransformerNetModel(nn.Module):
 
         if self.output_dims != model_config.hidden_size:
             self.output_down_proj = nn.Sequential(
-                nn.Linear(model_config.hidden_size, self.output_dims),
+                nn.Linear(model_config.hidden_size, model_config.hidden_size),
                 nn.Tanh(),
-                nn.Linear(self.output_dims, self.output_dims),
+                nn.Linear(model_config.hidden_size, self.output_dims),
             )
 
     def get_embeds(self, input_ids):
