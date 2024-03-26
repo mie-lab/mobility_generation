@@ -146,16 +146,19 @@ class TrainLoop:
                 save_name=f"ema_{self.ema_rate[0]}_{epoch}",
             )
             if self.ES.early_stop:
-                logger.log("=" * 50)
-                logger.log("Early stopping")
-                logger.log("Current lr: {:.6f}".format(self.opt.param_groups[0]["lr"]))
+                if is_main_process():
+                    logger.log("=" * 50)
+                    logger.log("Early stopping")
+                    logger.log("Current lr: {:.6f}".format(self.opt.param_groups[0]["lr"]))
 
                 # only es for 2 times
                 if early_stop_count == 2:
-                    logger.log("Training finished.")
+                    if is_main_process():
+                        logger.log("Training finished.")
                     break
 
-                logger.log(f"loading model from checkpoint: {self.ES.save_name}...")
+                if is_main_process():
+                    logger.log(f"loading model from checkpoint: {self.ES.save_name}...")
 
                 dist.barrier()
                 # load best model for retraining
@@ -189,15 +192,18 @@ class TrainLoop:
             # log
             if current_step % self.log_interval == 0:
                 logger.dumpkvs()
+
+                if is_main_process():
                 
-                logger.log(
-                    "Epoch {}, {:.1f}% took: {:.2f}s".format(
-                        epoch + 1, 100 * i / n_batches, time.time() - start_time
+                    logger.log(
+                        "Epoch {}, {:.1f}% took: {:.2f}s".format(
+                            epoch + 1, 100 * i / n_batches, time.time() - start_time
+                        )
                     )
-                )
                 start_time = time.time()
         logger.dumpkvs()
-        logger.log("Epoch {} took: {:.2f}s".format(epoch + 1, time.time() - all_start_time))
+        if is_main_process():
+            logger.log("Epoch {} took: {:.2f}s".format(epoch + 1, time.time() - all_start_time))
 
     def evaluate_epoch(self):
         self.ddp_model.eval()
@@ -206,7 +212,8 @@ class TrainLoop:
         for batch_eval, cond_eval in self.eval_data:
             return_loss += self.forward_only(batch_eval, cond_eval)
 
-        logger.log("eval on validation set")
+        if is_main_process():
+            logger.log("eval on validation set")
         logger.dumpkvs()
         return return_loss / len(self.eval_data)
 
