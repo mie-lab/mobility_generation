@@ -1,7 +1,7 @@
 from transformers import AutoConfig
 
 # from transformers import BertEncoder
-from transformers.models.bert.modeling_bert import BertEncoder
+from transformers.models.bert.modeling_bert import BertEncoder, BertConfig
 
 import torch
 
@@ -32,7 +32,7 @@ class TransformerNetModel(nn.Module):
     ):
         super().__init__()
 
-        model_config = AutoConfig.from_pretrained("bert-base-uncased")
+        model_config = BertConfig()
 
         model_config.hidden_dropout_prob = dropout
         model_config.num_hidden_layers = num_encoder_layers

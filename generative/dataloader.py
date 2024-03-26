@@ -11,7 +11,8 @@ import torch.distributed as dist
 import psutil
 import datasets
 from datasets import Dataset as Dataset2
-
+from datasets.utils.logging import disable_progress_bar
+disable_progress_bar()
 
 import trackintel as ti
 
@@ -363,7 +364,7 @@ def process_helper_fnc(seq_ls, split):
     seq_dataset = seq_dataset.map(
         merge_and_mask,
         batched=True,
-        num_proc=1,
+        num_proc=4,
         desc="merge and mask",
         remove_columns=["src", "tgt"],
     )

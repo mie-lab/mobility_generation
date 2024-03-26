@@ -101,7 +101,7 @@ class TrainLoop:
         # early stopping
         self.scheduler_ES = StepLR(self.opt, step_size=1, gamma=early_stop_gamma)
         self.ES = EarlyStopping(
-            checkpoint_path, patience=early_stop_patience, verbose=True, monitor="loss", delta=0.0001
+            checkpoint_path, patience=early_stop_patience, main_process= is_main_process(), verbose=True, monitor="loss", delta=0.0001
         )
 
         self.ema_params = [copy.deepcopy(self.master_params) for _ in range(len(self.ema_rate))]
@@ -146,18 +146,16 @@ class TrainLoop:
                 save_name=f"ema_{self.ema_rate[0]}_{epoch}",
             )
             if self.ES.early_stop:
-                if dist.get_rank() == 0:
-                    print("=" * 50)
-                    print("Early stopping")
-                    print("Current lr: {:.6f}".format(self.opt.param_groups[0]["lr"]))
+                logger.log("=" * 50)
+                logger.log("Early stopping")
+                logger.log("Current lr: {:.6f}".format(self.opt.param_groups[0]["lr"]))
 
-                    # only es for 2 times
-                    if early_stop_count == 2:
-                        if dist.get_rank() == 0:
-                            print("Training finished.")
-                        break
+                # only es for 2 times
+                if early_stop_count == 2:
+                    logger.log("Training finished.")
+                    break
 
-                    logger.log(f"loading model from checkpoint: {self.ES.save_name}...")
+                logger.log(f"loading model from checkpoint: {self.ES.save_name}...")
 
                 dist.barrier()
                 # load best model for retraining
@@ -191,16 +189,15 @@ class TrainLoop:
             # log
             if current_step % self.log_interval == 0:
                 logger.dumpkvs()
-                if dist.get_rank() == 0:
-                    print(
-                        "Epoch {}, {:.1f}% took: {:.2f}s".format(
-                            epoch + 1, 100 * i / n_batches, time.time() - start_time
-                        )
+                
+                logger.log(
+                    "Epoch {}, {:.1f}% took: {:.2f}s".format(
+                        epoch + 1, 100 * i / n_batches, time.time() - start_time
                     )
+                )
                 start_time = time.time()
         logger.dumpkvs()
-        if dist.get_rank() == 0:
-            print("Epoch {} took: {:.2f}s".format(epoch + 1, time.time() - all_start_time))
+        logger.log("Epoch {} took: {:.2f}s".format(epoch + 1, time.time() - all_start_time))
 
     def evaluate_epoch(self):
         self.ddp_model.eval()
@@ -208,7 +205,8 @@ class TrainLoop:
         return_loss = 0
         for batch_eval, cond_eval in self.eval_data:
             return_loss += self.forward_only(batch_eval, cond_eval)
-        print("eval on validation set")
+
+        logger.log("eval on validation set")
         logger.dumpkvs()
         return return_loss / len(self.eval_data)
 
@@ -345,7 +343,7 @@ class TrainLoop:
     def save(self):
         def save_checkpoint(rate, params):
             state_dict = self._master_params_to_state_dict(params)
-            if dist.get_rank() == 0:
+            if is_main_process():
                 logger.log(f"saving model {rate}...")
                 if not rate:
                     filename = f"model{(self.step):06d}.pt"
@@ -399,3 +397,6 @@ def log_loss_dict(diffusion, ts, losses):
         for sub_t, sub_loss in zip(ts.cpu().numpy(), values.detach().cpu().numpy()):
             quartile = int(4 * sub_t / diffusion.num_timesteps)
             logger.logkv_mean(f"{key}_q{quartile}", sub_loss)
+
+def is_main_process():
+    return dist.get_rank() == 0

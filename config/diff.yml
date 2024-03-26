@@ -1,7 +1,7 @@
 misc:
   dataset: mobis
 
-  wandb_name: all_test
+  wandb_name: all_full_run
   split: train
   dataset_variation: all
   level: "10_13"
@@ -20,7 +20,7 @@ misc:
   
   batch_size: 128
   microbatch: 32
-  log_interval: 200
+  log_interval: 100
   num_workers: 0
   
 fp16:
@@ -65,8 +65,8 @@ optimiser:
   early_stop_gamma: 0.1
 
 dataset:
-  data_dir: ./data/diff
-  save_root: ./runs
+  # data_dir: ./data/diff
+  # save_root: ./runs
 
-  # data_dir: /cluster/scratch/hongy/generation/data
-  # save_root: /cluster/scratch/hongy/generation/runs
+  data_dir: /cluster/scratch/hongy/generation/data/diff
+  save_root: /cluster/scratch/hongy/generation/runs
