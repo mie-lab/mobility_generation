@@ -82,7 +82,6 @@ def main():
     ## load data
     data_valid = load_data_text(
         batch_size=config.batch_size,
-        seq_len=config.seq_len,
         deterministic=True,
         data_args=config,
         split=config.split,
@@ -93,20 +92,19 @@ def main():
 
     out_path = os.path.join(log_dir, f"seed{config.seed}_step{config.clamp_step}.json")
 
-    all_test_data = []
-    for batch, cond in data_valid:
-        all_test_data.append(cond)
-
     model_emb.to(dist_util.get_device())
 
-    for cond in tqdm(all_test_data):
+    for _, cond in tqdm(data_valid):
         input_ids_x = cond.pop("input_ids").to(dist_util.get_device())
         x_start = model.get_embeds(input_ids_x)
-        input_ids_mask = cond.pop("input_mask")
+        padding_mask = (input_ids_x != 0) * 1
+
+        input_ids_mask = cond.pop("input_mask").to(dist_util.get_device())
         input_ids_mask_ori = input_ids_mask
 
         noise = torch.randn_like(x_start)
-        input_ids_mask = torch.broadcast_to(input_ids_mask.unsqueeze(dim=-1), x_start.shape).to(dist_util.get_device())
+        input_ids_mask = torch.broadcast_to(input_ids_mask.unsqueeze(dim=-1), x_start.shape)
+        # real_y applied with noice
         x_noised = torch.where(input_ids_mask == 0, x_start, noise)
 
         model_kwargs = {}
@@ -120,7 +118,9 @@ def main():
 
         sample_fn = diffusion.p_sample_loop if not config.use_ddim else diffusion.ddim_sample_loop
 
-        sample_shape = (x_start.shape[0], config.seq_len, config.hidden_dim)
+        # [batch, seq_len, hidden_dim]
+        curr_seq_len = x_start.shape[1]
+        sample_shape = (x_start.shape[0], curr_seq_len, config.hidden_dim)
 
         samples = sample_fn(
             model,
@@ -133,12 +133,11 @@ def main():
             clamp_step=config.clamp_step,
             clamp_first=True,
             mask=input_ids_mask,
+            padding_mask=padding_mask,
             x_start=x_start,
             gap=step_gap,
         )
-
-        # print(samples[0].shape) # samples for each step
-
+        # only get the latest timestep ()
         sample = samples[-1]
 
         logits = model.get_logits(sample)  # bsz, seqlen, vocab
@@ -149,7 +148,7 @@ def main():
         loc_ls_input = []
 
         for seq_pred, seq_ref, input_mask in zip(cands, input_ids_x, input_ids_mask_ori):
-            len_x = config.seq_len - sum(input_mask).tolist()
+            len_x = int(curr_seq_len - sum(input_mask).tolist())
             loc_ls_pred.append(seq_pred[len_x:].detach().cpu().numpy())
 
             loc_ls_true.append(seq_ref[len_x:].detach().cpu().numpy())

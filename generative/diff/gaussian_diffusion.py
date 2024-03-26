@@ -241,7 +241,7 @@ class GaussianDiffusion:
         )
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def p_mean_variance(self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None):
+    def p_mean_variance(self, model, x, t, padding_mask=None, clip_denoised=True, denoised_fn=None, model_kwargs=None):
         """
         Apply the model to get p(x_{t-1} | x_t), as well as a prediction of
         the initial x, x_0.
@@ -267,8 +267,8 @@ class GaussianDiffusion:
 
         B, _ = x.size(0), x.size(-1)
         assert t.shape == (B,)
-        # print(x.shape)
-        model_output = model(x, self._scale_timesteps(t), **model_kwargs)
+        # predict x_0 knowing x_t and t
+        model_output = model(x, self._scale_timesteps(t), padding_mask, **model_kwargs)
 
         # for fixedlarge, we set the initial (log-)variance like so
         # to get a better decoder log likelihood.
@@ -311,6 +311,7 @@ class GaussianDiffusion:
         denoised_fn=None,
         model_kwargs=None,
         top_p=None,
+        padding_mask=None,
         mask=None,
         x_start=None,
     ):
@@ -336,6 +337,7 @@ class GaussianDiffusion:
             t,
             clip_denoised=clip_denoised,
             denoised_fn=denoised_fn,
+            padding_mask=padding_mask,
             model_kwargs=model_kwargs,
         )
         if top_p is not None and top_p > 0:
@@ -372,6 +374,7 @@ class GaussianDiffusion:
         top_p=None,
         clamp_step=None,
         clamp_first=None,
+        padding_mask=None,
         mask=None,
         x_start=None,
         gap=1,
@@ -409,6 +412,7 @@ class GaussianDiffusion:
             top_p=top_p,
             clamp_step=clamp_step,
             clamp_first=clamp_first,
+            padding_mask=padding_mask,
             mask=mask,
             x_start=x_start,
         ):
@@ -428,6 +432,7 @@ class GaussianDiffusion:
         top_p=None,
         clamp_step=None,
         clamp_first=None,
+        padding_mask=None,
         mask=None,
         x_start=None,
     ):
@@ -476,6 +481,7 @@ class GaussianDiffusion:
                     model_kwargs=model_kwargs,
                     top_p=top_p,
                     mask=mask,
+                    padding_mask=padding_mask,
                     x_start=x_start,
                 )
                 yield out
@@ -541,6 +547,8 @@ class GaussianDiffusion:
         # x_start_fix = x_start  # save the orignal x_0
         assert "input_ids" in model_kwargs
         input_ids_x = model_kwargs.pop("input_ids").to(t.device).long()
+        padding_mask = (input_ids_x != 0) * 1
+
         input_ids_mask = model_kwargs.pop("input_mask").to(t.device)
         # embedded
         x_start_mean = model.model.module.get_embeds(input_ids_x)
@@ -560,7 +568,7 @@ class GaussianDiffusion:
         terms = {}
 
         target = x_start
-        model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
+        model_output = model(x_t, self._scale_timesteps(t), padding_mask, **model_kwargs)
         assert model_output.shape == target.shape == x_start.shape
 
         # Lt-1
@@ -833,7 +841,7 @@ class _WrappedModel:
         self.rescale_timesteps = rescale_timesteps
         self.original_num_steps = original_num_steps
 
-    def __call__(self, x, ts, **kwargs):
+    def __call__(self, x, ts, padding_mask, **kwargs):
         # print(ts)
         map_tensor = th.tensor(self.timestep_map, device=ts.device, dtype=ts.dtype)
         new_ts = map_tensor[ts]
@@ -843,7 +851,7 @@ class _WrappedModel:
         # temp = self.model(x, new_ts, **kwargs)
         # print(temp.shape)
         # return temp
-        return self.model(x, new_ts, **kwargs)
+        return self.model(x, new_ts, padding_mask, **kwargs)
 
 
 def mean_flat(tensor):

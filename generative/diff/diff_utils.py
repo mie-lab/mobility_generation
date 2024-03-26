@@ -113,10 +113,10 @@ def denoised_fn_round(args, model, old_embed, t):
         old_embed = old_embed.reshape(-1, old_embed.size(-1))
     else:
         old_embed = old_embed
-    # val, indices = get_knn(model_emb, text_emb.to(model_emb.device), dist=dist)
+    # clamp to the nearest word embedding
     val, indices = get_efficient_knn(model_emb, old_embed.to(model_emb.device))
     rounded_tokens = indices[0]
-    # print(rounded_tokens.shape)
+    # get the new (mapped) word embedding
     new_embeds = model(rounded_tokens).view(old_shape).to(old_device)
 
     return new_embeds

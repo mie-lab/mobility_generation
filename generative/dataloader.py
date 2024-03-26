@@ -278,7 +278,6 @@ def get_discriminator_dataloaders(train_data, train_idx, fake_data, world_size, 
 
 def load_data_text(
     batch_size,
-    seq_len,
     deterministic=False,
     data_args=None,
     split="train",
@@ -292,7 +291,6 @@ def load_data_text(
     The kwargs dict can be used for some meta information.
 
     :param batch_size: the batch size of each returned pair.
-    :param seq_len: the max sequence length (one-side).
     :param deterministic: if True, yield results in a deterministic order.
     :param data_args: including dataset directory, num of dataset, basic settings, etc.
     :param loaded_vocab: loaded word vocabs.
@@ -301,7 +299,7 @@ def load_data_text(
 
     print("#" * 30, "\nLoading location data...")
 
-    training_data = get_sequence(data_args, seq_len, split=split)
+    training_data = get_sequence(data_args, split=split)
 
     dataset = DiffSeqDataset(training_data, data_args, model_emb=model_emb)
 
@@ -314,6 +312,7 @@ def load_data_text(
             sampler=sampler,
             # shuffle=not deterministic,
             num_workers=0,
+            collate_fn=collate_fn,
         )
     else:
         data_loader = torch.utils.data.DataLoader(
@@ -323,12 +322,13 @@ def load_data_text(
             # sampler=sampler,
             shuffle=not deterministic,
             num_workers=0,
+            collate_fn=collate_fn,
         )
 
     return data_loader
 
 
-def process_helper_fnc(seq_ls, seq_len):
+def process_helper_fnc(seq_ls, split):
     # Process.memory_info is expressed in bytes, so convert to megabytes
     # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
     seq_dataset = Dataset2.from_dict(seq_ls)
@@ -338,12 +338,24 @@ def process_helper_fnc(seq_ls, seq_len):
     def merge_and_mask(ls):
         lst = []
         mask = []
+
         for i in range(len(ls["src"])):
             src = ls["src"][i]
             tgt = ls["tgt"][i]
 
+            if split == "test":
+                if len(tgt) < 50:
+                    tgt = tgt + [0] * (50 - len(tgt))
+                else:
+                    tgt = tgt[:50]
+
             lst.append(src + tgt)
-            mask.append([0] * len(src))
+
+            current_mask = np.ones(len(src + tgt))
+            current_mask[: len(src)] = 0
+            if split == "test":
+                assert current_mask.sum() == 50
+            mask.append(current_mask)
         ls["input_ids"] = lst
         ls["input_mask"] = mask
         return ls
@@ -353,23 +365,24 @@ def process_helper_fnc(seq_ls, seq_len):
         batched=True,
         num_proc=1,
         desc="merge and mask",
+        remove_columns=["src", "tgt"],
     )
 
-    def pad_function(ls):
-        max_length = seq_len
-        ls["input_ids"] = _collate_batch_helper(ls["input_ids"], 0, max_length)
-        ls["input_mask"] = _collate_batch_helper(ls["input_mask"], 1, max_length)
-        return ls
+    # def pad_function(ls):
+    #     max_length = seq_len
+    #     ls["input_ids"] = _collate_batch_helper(ls["input_ids"], 0, max_length)
+    #     ls["input_mask"] = _collate_batch_helper(ls["input_mask"], 1, max_length)
+    #     return ls
 
     # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
 
-    seq_dataset = seq_dataset.map(
-        pad_function,
-        batched=True,
-        num_proc=4,
-        desc="padding",
-        remove_columns=["src", "tgt"],
-    )
+    # seq_dataset = seq_dataset.map(
+    #     pad_function,
+    #     batched=True,
+    #     num_proc=4,
+    #     desc="padding",
+
+    # )
 
     # print(seq_dataset, "padded dataset")
     # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
@@ -380,7 +393,7 @@ def process_helper_fnc(seq_ls, seq_len):
     return raw_datasets
 
 
-def get_sequence(args, seq_len, split="train"):
+def get_sequence(args, split="train"):
     print("#" * 30, "\nLoading dataset {} from {}...".format(args.dataset, args.data_dir))
 
     print(f"### Loading form the {split} set...")
@@ -397,7 +410,7 @@ def get_sequence(args, seq_len, split="train"):
 
     print("### Data samples...\n", processed_dict["src"][:1], processed_dict["tgt"][:1])
 
-    train_dataset = process_helper_fnc(processed_dict, seq_len)
+    train_dataset = process_helper_fnc(processed_dict, split)
     return train_dataset
 
 
@@ -413,29 +426,58 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         return self.length
 
     def __getitem__(self, idx):
-        arr = self.text_datasets["train"][idx]["input_ids"]
+        arr = torch.tensor(self.text_datasets["train"][idx]["input_ids"])
 
-        if self.model_emb is not None:
-            with torch.no_grad():
-                arr = self.model_emb(torch.tensor(arr))
+        # if self.model_emb is not None:
+        #     with torch.no_grad():
+        #         arr = self.model_emb(arr)
 
-        arr = np.array(arr, dtype=np.float32)
+        # arr = np.array(arr, dtype=np.float32)
         out_kwargs = {}
-        out_kwargs["input_ids"] = np.array(self.text_datasets["train"][idx]["input_ids"])
-        out_kwargs["input_mask"] = np.array(self.text_datasets["train"][idx]["input_mask"])
+        out_kwargs["input_ids"] = torch.tensor(self.text_datasets["train"][idx]["input_ids"])
+        out_kwargs["input_mask"] = torch.tensor(self.text_datasets["train"][idx]["input_mask"])
 
         return arr, out_kwargs
 
 
-def _collate_batch_helper(examples, pad_token_id, max_length, return_mask=False):
+def collate_fn(batch):
+    """function to collate data samples into batch tensors."""
+    src_batch = []
+
+    # get one sample batch
+    # dict_batch = {"len": []}
+    dict_batch = {}
+    for key in batch[0][-1]:
+        dict_batch[key] = []
+
+    for arr_sample, out_kwargs_dict in batch:
+        src_batch.append(arr_sample)
+
+        # dict_batch["len"].append(len(arr_sample))
+        for key in out_kwargs_dict:
+            dict_batch[key].append(out_kwargs_dict[key])
+
+    src_batch = pad_sequence(src_batch, padding_value=0, batch_first=True)
+    # dict_batch["len"] = torch.tensor(dict_batch["len"], dtype=torch.int64)
+
+    dict_batch["input_ids"] = pad_sequence(dict_batch["input_ids"], padding_value=0, batch_first=True)
+    dict_batch["input_mask"] = pad_sequence(dict_batch["input_mask"], padding_value=1, batch_first=True)
+
+    for key in dict_batch:
+        if key in ["len", "input_ids", "input_mask"]:
+            continue
+        dict_batch[key] = pad_sequence(dict_batch[key], padding_value=0, batch_first=True)
+
+    return src_batch, dict_batch
+
+
+def _collate_batch_helper(examples, pad_token_id, max_length):
     result = torch.full([len(examples), max_length], pad_token_id, dtype=torch.int64).tolist()
-    mask_ = torch.full([len(examples), max_length], pad_token_id, dtype=torch.int64).tolist()
+
     for i, example in enumerate(examples):
         curr_len = min(len(example), max_length)
         result[i][:curr_len] = example[:curr_len]
-        mask_[i][:curr_len] = [1] * curr_len
-    if return_mask:
-        return result, mask_
+
     return result
 
 

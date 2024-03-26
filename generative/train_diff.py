@@ -142,8 +142,8 @@ class TrainLoop:
             # early stop
             self.ES(
                 {"loss": current_loss},
-                self._master_params_to_state_dict(self.master_params),
-                save_name=f"model_{epoch}",
+                self._master_params_to_state_dict(self.ema_params[0]),
+                save_name=f"ema_{self.ema_rate[0]}_{epoch}",
             )
             if self.ES.early_stop:
                 if dist.get_rank() == 0:
@@ -173,9 +173,11 @@ class TrainLoop:
                 self.scheduler_ES.step()
 
     def train_epoch(self, epoch, early_stop_count):
+        self.ddp_model.train()
         # train
         n_batches = len(self.data)
         start_time = time.time()
+        all_start_time = start_time
         self.opt.zero_grad()
         for i, (batch, cond) in enumerate(self.data):
             self.run_step(batch, cond)
@@ -183,6 +185,7 @@ class TrainLoop:
             if not early_stop_count:
                 self.scheduler.step()
 
+            self.step += 1
             # log
             if (self.step) % self.log_interval == 0:
                 logger.dumpkvs()
@@ -194,7 +197,9 @@ class TrainLoop:
                     )
                 start_time = time.time()
 
-            self.step += 1
+        if dist.get_rank() == 0:
+            print("Epoch {} took: {:.2f}s".format(epoch + 1, time.time() - all_start_time))
+        logger.dumpkvs()
 
     def evaluate_epoch(self):
         self.ddp_model.eval()
@@ -204,7 +209,7 @@ class TrainLoop:
             return_loss += self.forward_only(batch_eval, cond_eval)
         print("eval on validation set")
         logger.dumpkvs()
-        return return_loss
+        return return_loss / len(self.eval_data)
 
     def run_step(self, batch, cond):
         self.forward_backward(batch, cond)
@@ -239,7 +244,7 @@ class TrainLoop:
                         losses = compute_losses()
 
                 log_loss_dict(self.diffusion, t, {f"eval_{k}": v * weights for k, v in losses.items()})
-                return_loss.extend(losses["loss"].detach().cpu().numpy().tolist())
+                return_loss.extend((losses["loss"] * weights).detach().cpu().numpy().tolist())
 
         return np.mean(return_loss)
 

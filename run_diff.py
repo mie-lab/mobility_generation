@@ -58,10 +58,8 @@ def main():
     logger.configure(dir=log_dir)
     logger.log("### Creating data loader...")
 
-    data_train = load_data_text(batch_size=config.batch_size, seq_len=config.seq_len, data_args=config)
-    data_valid = load_data_text(
-        batch_size=config.batch_size, seq_len=config.seq_len, data_args=config, split="valid", deterministic=True
-    )
+    data_train = load_data_text(batch_size=config.batch_size, data_args=config)
+    data_valid = load_data_text(batch_size=config.batch_size, data_args=config, split="valid", deterministic=True)
 
     print("#" * 30, "size of location", config.max_location)
 

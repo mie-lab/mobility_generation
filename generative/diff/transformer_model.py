@@ -37,10 +37,11 @@ class TransformerNetModel(nn.Module):
         model_config = AutoConfig.from_pretrained(model_name)
 
         model_config.hidden_dropout_prob = dropout
-        model_config.num_hidden_layers = 2
-        model_config.hidden_size = 64
-        model_config.intermediate_size = 256
-        model_config.num_attention_heads = 4
+        model_config.num_hidden_layers = 4
+        model_config.hidden_size = 256
+        model_config.intermediate_size = 256 * 4
+        model_config.num_attention_heads = 8
+        model_config.max_position_embeddings = 512
 
         self.input_dims = input_dims
         self.hidden_t_dim = hidden_t_dim
@@ -87,7 +88,7 @@ class TransformerNetModel(nn.Module):
     def get_logits(self, hidden_repr):
         return self.lm_head(hidden_repr)
 
-    def forward(self, x, timesteps):
+    def forward(self, x, timesteps, padding_mask):
         """
         Apply the model to an input batch.
 
@@ -108,8 +109,10 @@ class TransformerNetModel(nn.Module):
         emb_inputs = self.position_embeddings(position_ids) + emb_x + emb_t.unsqueeze(1).expand(-1, seq_length, -1)
         emb_inputs = self.dropout(self.LayerNorm(emb_inputs))
 
-        # TODO: Padding masks?
-        input_trans_hidden_states = self.input_transformers(emb_inputs).last_hidden_state
+        # the model
+        input_trans_hidden_states = self.input_transformers(
+            emb_inputs, attention_mask=padding_mask[:, None, None, :]
+        ).last_hidden_state
 
         if self.output_dims != self.hidden_size:
             h = self.output_down_proj(input_trans_hidden_states)
