@@ -562,7 +562,7 @@ class GaussianDiffusion:
         if noise is None:
             noise = th.randn_like(x_start)
         # reparametrization trick -> noise only on y
-        x_t = self.q_sample(x_start, t, noise=noise, mask=input_ids_mask)  
+        x_t = self.q_sample(x_start, t, noise=noise, mask=input_ids_mask)
 
         terms = {}
 
@@ -572,23 +572,24 @@ class GaussianDiffusion:
         assert model_output.shape == target.shape == x_start.shape
 
         # Lt-1
-        terms["mse"] = mean_flat((target - model_output) ** 2)
+        terms["mse"] = mean_flat((target - model_output) ** 2, padding_mask)
         # L0
         model_out_x_start = self._x0_helper(model_output, x_t, t)["pred_xstart"]  # predicted_xstart = model_output
         t0_mask = t == 0
-        t0_loss = mean_flat((x_start_mean - model_out_x_start) ** 2)
+        t0_loss = mean_flat((x_start_mean - model_out_x_start) ** 2, padding_mask)
         # L0 combined Lt-1
         terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
 
         # LT
         # tT_mask = (t == self.num_timesteps - 1)
         out_mean, _, _ = self.q_mean_variance(x_start, th.LongTensor([self.num_timesteps - 1]).to(x_start.device))
-        tT_loss = mean_flat(out_mean**2)
+        tT_loss = mean_flat(out_mean**2, padding_mask)
 
         # Rounding error: embedding regularization
         get_logits = model.model.module.get_logits
         decoder_nll = self._token_discrete_loss(x_start, get_logits, input_ids_x)
         # x_0->model_out_x_start
+        input_ids_mask[padding_mask == 0] = 0
         terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_x, mask=input_ids_mask)
         assert (model.model.module.lm_head.weight == model.model.module.word_embedding.weight).all()
 
@@ -853,8 +854,15 @@ class _WrappedModel:
         return self.model(x, new_ts, padding_mask, **kwargs)
 
 
-def mean_flat(tensor):
+def mean_flat(tensor, padding_mask=None):
     """
     Take the mean over all non-batch dimensions.
     """
-    return tensor.mean(dim=list(range(1, len(tensor.shape))))
+    if padding_mask is None:
+        return tensor.mean(dim=list(range(1, len(tensor.shape))))
+    else:
+        padding_mask = th.broadcast_to(padding_mask.unsqueeze(dim=-1), tensor.shape)
+        tensor *= padding_mask
+        return tensor.sum(dim=list(range(1, len(tensor.shape)))) / padding_mask.sum(
+            dim=list(range(1, len(tensor.shape)))
+        )
