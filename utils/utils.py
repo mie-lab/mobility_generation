@@ -81,7 +81,7 @@ def init_save_path(config, time_now):
     log_dir = os.path.join(config.save_root, f"{networkName}_{str(time_now)}")
 
     if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
+        os.makedirs(log_dir, exist_ok=True)
     with open(os.path.join(log_dir, "conf.json"), "w") as fp:
         json.dump(config, fp, indent=4, sort_keys=True)
 
