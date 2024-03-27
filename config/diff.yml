@@ -9,7 +9,8 @@ misc:
   tgt_min_days: 7
 
   # seq_len: 512
-  max_location: 14882
+  # 14882 + 1 for seperation
+  max_location: 14883
 
   seed: 101
   # 

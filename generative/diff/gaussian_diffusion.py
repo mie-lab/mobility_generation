@@ -498,14 +498,13 @@ class GaussianDiffusion:
         # print(x_start_mean.device, noise.device)
         return x_start_mean + std * noise
 
-    def _token_discrete_loss(self, x_0, get_logits, input_ids, mask=None, truncate=False, t=None):
+    def _token_discrete_loss(self, x_0, get_logits, input_ids, mask=None):
         """
         the loss of -log p(w|z_0)
         :param x_start_mean: word embedding
         :return: x_0
         """
-        reshaped_x_0 = x_0
-        logits = get_logits(reshaped_x_0)  # bsz, seqlen, vocab
+        logits = get_logits(x_0)  # bsz, seqlen, vocab
         # print(logits.shape)
         loss_fct = th.nn.CrossEntropyLoss(reduction="none")
         decoder_nll = loss_fct(logits.view(-1, logits.size(-1)), input_ids.view(-1)).view(input_ids.shape)
@@ -562,12 +561,13 @@ class GaussianDiffusion:
         # print(x_start_mean.shape, x_start.shape)]
         if noise is None:
             noise = th.randn_like(x_start)
-
-        x_t = self.q_sample(x_start, t, noise=noise, mask=input_ids_mask)  # reparametrization trick.
+        # reparametrization trick -> noise only on y
+        x_t = self.q_sample(x_start, t, noise=noise, mask=input_ids_mask)  
 
         terms = {}
 
         target = x_start
+        # model use x_t (partially noised) to predict x_start
         model_output = model(x_t, self._scale_timesteps(t), padding_mask, **model_kwargs)
         assert model_output.shape == target.shape == x_start.shape
 
@@ -588,9 +588,8 @@ class GaussianDiffusion:
         # Rounding error: embedding regularization
         get_logits = model.model.module.get_logits
         decoder_nll = self._token_discrete_loss(x_start, get_logits, input_ids_x)
-        terms["nll"] = self._token_discrete_loss(
-            model_out_x_start, get_logits, input_ids_x, mask=input_ids_mask, truncate=True, t=t
-        )  # x_0->model_out_x_start
+        # x_0->model_out_x_start
+        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_x, mask=input_ids_mask)
         assert (model.model.module.lm_head.weight == model.model.module.word_embedding.weight).all()
 
         terms["loss"] = terms["mse"] + decoder_nll + tT_loss

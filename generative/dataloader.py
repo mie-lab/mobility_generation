@@ -12,6 +12,7 @@ import psutil
 import datasets
 from datasets import Dataset as Dataset2
 from datasets.utils.logging import disable_progress_bar
+
 disable_progress_bar()
 
 import trackintel as ti
@@ -350,10 +351,11 @@ def process_helper_fnc(seq_ls, split):
                 else:
                     tgt = tgt[:50]
 
-            lst.append(src + tgt)
+            # 1 is reserved for seperation
+            lst.append(src + [1] + tgt)
 
-            current_mask = np.ones(len(src + tgt))
-            current_mask[: len(src)] = 0
+            current_mask = np.ones(len(src + tgt) + 1)
+            current_mask[: (len(src) + 1)] = 0
             if split == "test":
                 assert current_mask.sum() == 50
             mask.append(current_mask)
@@ -368,22 +370,6 @@ def process_helper_fnc(seq_ls, split):
         desc="merge and mask",
         remove_columns=["src", "tgt"],
     )
-
-    # def pad_function(ls):
-    #     max_length = seq_len
-    #     ls["input_ids"] = _collate_batch_helper(ls["input_ids"], 0, max_length)
-    #     ls["input_mask"] = _collate_batch_helper(ls["input_mask"], 1, max_length)
-    #     return ls
-
-    # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
-
-    # seq_dataset = seq_dataset.map(
-    #     pad_function,
-    #     batched=True,
-    #     num_proc=4,
-    #     desc="padding",
-
-    # )
 
     # print(seq_dataset, "padded dataset")
     # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
