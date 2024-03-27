@@ -15,27 +15,12 @@ from torch.optim.lr_scheduler import StepLR
 from utils import logger
 from utils.dist_util import get_device, load_state_dict
 
-from generative.diff.fp16_util import (
-    make_master_params,
-    master_params_to_model_params,
-    model_grads_to_master_grads,
-    unflatten_master_params,
-    zero_grad,
-)
-
 import pickle as pickle
 
-
-from metrics.evaluations import Metric
 from utils.earlystopping import EarlyStopping
 
 from generative.diff.step_sample import LossAwareSampler, UniformSampler
 from transformers import get_linear_schedule_with_warmup
-
-# For ImageNet experiments, this was a good default value.
-# We found that the lg_loss_scale quickly climbed to
-# 20-21 within the first ~1K steps of training.
-INITIAL_LOG_LOSS_SCALE = 20.0
 
 
 class TrainLoop:
@@ -55,7 +40,6 @@ class TrainLoop:
         early_stop_gamma,
         early_stop_patience,
         use_fp16=False,
-        fp16_scale_growth=1e-3,
         schedule_sampler=None,
         weight_decay=0.0,
         checkpoint_path="",
@@ -73,7 +57,6 @@ class TrainLoop:
         self.log_interval = log_interval
         self.decay_epochs = decay_epochs
         self.use_fp16 = use_fp16
-        self.fp16_scale_growth = fp16_scale_growth
         self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
         self.gradient_clipping = gradient_clipping
 
@@ -82,16 +65,13 @@ class TrainLoop:
 
         self.model_params = list(self.model.parameters())
         self.master_params = self.model_params
-        self.lg_loss_scale = INITIAL_LOG_LOSS_SCALE
 
         self.checkpoint_path = checkpoint_path
 
         self.early_stop_patience = early_stop_patience
 
-        if self.use_fp16:
-            self._setup_fp16()
-
         self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=weight_decay)
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_fp16)
         # define learning rate schedule
         self.scheduler = get_linear_schedule_with_warmup(
             self.opt,
@@ -101,7 +81,12 @@ class TrainLoop:
         # early stopping
         self.scheduler_ES = StepLR(self.opt, step_size=1, gamma=early_stop_gamma)
         self.ES = EarlyStopping(
-            checkpoint_path, patience=early_stop_patience, main_process= is_main_process(), verbose=True, monitor="loss", delta=0.0001
+            checkpoint_path,
+            patience=early_stop_patience,
+            main_process=is_main_process(),
+            verbose=True,
+            monitor="loss",
+            delta=0.0001,
         )
 
         self.ema_params = [copy.deepcopy(self.master_params) for _ in range(len(self.ema_rate))]
@@ -123,10 +108,6 @@ class TrainLoop:
             self.use_ddp = False
             self.ddp_model = self.model
 
-    def _setup_fp16(self):
-        self.master_params = make_master_params(self.model_params)
-        self.model.convert_to_fp16()
-
     def run_loop(self):
         early_stop_count = 0
         for epoch in range(1000):  # stop managed by ES
@@ -140,9 +121,15 @@ class TrainLoop:
             current_loss = self.evaluate_epoch()
 
             # early stop
+            checkpoint = {
+                "model": self._master_params_to_state_dict(self.ema_params[0]),
+                "optimizer": self.opt.state_dict(),
+                "scaler": self.scaler.state_dict(),
+            }
+
             self.ES(
                 {"loss": current_loss},
-                self._master_params_to_state_dict(self.ema_params[0]),
+                state_dict=checkpoint,
                 save_name=f"ema_{self.ema_rate[0]}_{epoch}",
             )
             if self.ES.early_stop:
@@ -163,9 +150,12 @@ class TrainLoop:
                 dist.barrier()
                 # load best model for retraining
                 map_location = {"cuda:0": f"{get_device()}"}
-                self.model.load_state_dict(
-                    load_state_dict(bf.join(self.checkpoint_path, self.ES.save_name + ".pt"), map_location=map_location)
+                checkpoint = load_state_dict(
+                    bf.join(self.checkpoint_path, self.ES.save_name + ".pt"), map_location=map_location
                 )
+                self.model.load_state_dict(checkpoint["model"])
+                self.opt.load_state_dict(checkpoint["optimizer"])
+                self.scaler.load_state_dict(checkpoint["scaler"])
                 #
                 early_stop_count += 1
                 # reset
@@ -194,7 +184,6 @@ class TrainLoop:
                 logger.dumpkvs()
 
                 if is_main_process():
-                
                     logger.log(
                         "Epoch {}, {:.1f}% took: {:.2f}s".format(
                             epoch + 1, 100 * i / n_batches, time.time() - start_time
@@ -219,16 +208,12 @@ class TrainLoop:
 
     def run_step(self, batch, cond):
         self.forward_backward(batch, cond)
-        if self.use_fp16:
-            self.optimize_fp16()
-        else:
-            self.optimize_normal()
+        self.optimize_normal()
         self.log_step()
 
     def forward_only(self, batch, cond):
         return_loss = []
         with torch.no_grad():
-            zero_grad(self.model_params)
             for i in range(0, batch.shape[0], self.microbatch):
                 micro = batch[i : i + self.microbatch].to(get_device())
                 micro_cond = {k: v[i : i + self.microbatch].to(get_device()) for k, v in cond.items()}
@@ -255,65 +240,42 @@ class TrainLoop:
         return np.mean(return_loss)
 
     def forward_backward(self, batch, cond):
-        zero_grad(self.model_params)
+        current_device = get_device()
         for i in range(0, batch.shape[0], self.microbatch):
-            micro = batch[i : i + self.microbatch].to(get_device())
-            micro_cond = {k: v[i : i + self.microbatch].to(get_device()) for k, v in cond.items()}
+            micro = batch[i : i + self.microbatch].to(current_device)
+            micro_cond = {k: v[i : i + self.microbatch].to(current_device) for k, v in cond.items()}
             last_batch = (i + self.microbatch) >= batch.shape[0]
-            t, weights = self.schedule_sampler.sample(micro.shape[0], get_device())
+            t, weights = self.schedule_sampler.sample(micro.shape[0], current_device)
             # print(micro_cond.keys())
-            compute_losses = functools.partial(
-                self.diffusion.training_losses,
-                self.ddp_model,
-                micro,
-                t,
-                model_kwargs=micro_cond,
-            )
 
-            if last_batch or not self.use_ddp:
-                losses = compute_losses()
-            else:
-                with self.ddp_model.no_sync():
+            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=self.use_fp16):
+                compute_losses = functools.partial(
+                    self.diffusion.training_losses,
+                    self.ddp_model,
+                    micro,
+                    t,
+                    model_kwargs=micro_cond,
+                )
+
+                if last_batch or not self.use_ddp:
                     losses = compute_losses()
+                else:
+                    with self.ddp_model.no_sync():
+                        losses = compute_losses()
 
             if isinstance(self.schedule_sampler, LossAwareSampler):
                 self.schedule_sampler.update_with_local_losses(t, losses["loss"].detach())
 
             loss = (losses["loss"] * weights).mean()
-            self.opt.zero_grad()
             log_loss_dict(self.diffusion, t, {k: v * weights for k, v in losses.items()})
-            if self.use_fp16:
-                loss_scale = 2**self.lg_loss_scale
-                (loss * loss_scale).backward()
-            else:
-                loss.backward()
 
-    def optimize_fp16(self):
-        if any(not torch.isfinite(p.grad).all() for p in self.model_params):
-            self.lg_loss_scale -= 1
-            logger.log(f"Found NaN, decreased lg_loss_scale to {self.lg_loss_scale}")
-            return
-
-        model_grads_to_master_grads(self.model_params, self.master_params)
-        self.master_params[0].grad.mul_(1.0 / (2**self.lg_loss_scale))
-        self._log_grad_norm()
-        self.opt.step()
-        for rate, params in zip(self.ema_rate, self.ema_params):
-            update_ema(params, self.master_params, rate=rate)
-        master_params_to_model_params(self.model_params, self.master_params)
-        self.lg_loss_scale += self.fp16_scale_growth
+            self.scaler.scale(loss).backward()
 
     def grad_clip(self):
-        # print('doing gradient clipping')
         max_grad_norm = self.gradient_clipping  # 3.0
         if hasattr(self.opt, "clip_grad_norm"):
             # Some optimizers (like the sharded optimizer) have a specific way to do gradient clipping
             self.opt.clip_grad_norm(max_grad_norm)
-        # else:
-        #     assert False
-        # elif hasattr(self.model, "clip_grad_norm_"):
-        #     # Some models (like FullyShardedDDP) have a specific way to do gradient clipping
-        #     self.model.clip_grad_norm_(args.max_grad_norm)
         else:
             # Revert to normal clipping otherwise, handling Apex or full precision
             torch.nn.utils.clip_grad_norm_(
@@ -323,9 +285,12 @@ class TrainLoop:
 
     def optimize_normal(self):
         if self.gradient_clipping > 0:
+            self.scaler.unscale_(self.opt)
             self.grad_clip()
         self._log_grad_norm()
-        self.opt.step()
+        self.scaler.step(self.opt)
+        self.scaler.update()
+        self.opt.zero_grad()
         for rate, params in zip(self.ema_rate, self.ema_params):
             update_ema(params, self.master_params, rate=rate)
 
@@ -344,8 +309,6 @@ class TrainLoop:
         logger.logkv("step", self.step)
         logger.logkv("samples", (self.step + 1) * self.global_batch)
         logger.logkv("learning_rate", self.opt.param_groups[0]["lr"])
-        if self.use_fp16:
-            logger.logkv("lg_loss_scale", self.lg_loss_scale)
 
     def save(self):
         def save_checkpoint(rate, params):
@@ -368,20 +331,14 @@ class TrainLoop:
         dist.barrier()
 
     def _master_params_to_state_dict(self, master_params):
-        if self.use_fp16:
-            master_params = unflatten_master_params(list(self.model.parameters()), master_params)  # DEBUG **
         state_dict = self.model.state_dict()
-        for i, (name, _value) in enumerate(self.model.named_parameters()):
+        for i, (name, _) in enumerate(self.model.named_parameters()):
             assert name in state_dict
             state_dict[name] = master_params[i]
         return state_dict
 
     def _state_dict_to_master_params(self, state_dict):
-        params = [state_dict[name] for name, _ in self.model.named_parameters()]
-        if self.use_fp16:
-            return make_master_params(params)
-        else:
-            return params
+        return [state_dict[name] for name, _ in self.model.named_parameters()]
 
 
 def update_ema(target_params, source_params, rate=0.99):
@@ -404,6 +361,7 @@ def log_loss_dict(diffusion, ts, losses):
         for sub_t, sub_loss in zip(ts.cpu().numpy(), values.detach().cpu().numpy()):
             quartile = int(4 * sub_t / diffusion.num_timesteps)
             logger.logkv_mean(f"{key}_q{quartile}", sub_loss)
+
 
 def is_main_process():
     return dist.get_rank() == 0

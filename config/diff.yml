@@ -1,9 +1,9 @@
 misc:
   dataset: mobis
 
-  wandb_name: all_full_run
+  wandb_name: test
   split: train
-  dataset_variation: all
+  dataset_variation: tiny
   level: "10_13"
   src_min_days: 14
   tgt_min_days: 7
@@ -18,14 +18,13 @@ misc:
   if_embed_poi: False
   if_embed_duration: False
   
-  batch_size: 128
-  microbatch: 32
+  batch_size: 256
+  microbatch: 16
   log_interval: 100
   num_workers: 0
   
 fp16:
-  use_fp16: False
-  fp16_scale_growth: 0.001
+  use_fp16: True
 
 
 embedding:
@@ -44,29 +43,29 @@ diffusion:
 
 model:
   # 
-  num_encoder_layers: 2
+  num_encoder_layers: 6
   dropout: 0.1
 
 
 
 optimiser:
-  lr: 0.001
-  weight_decay: 0.000001
+  lr: 0.0001
+  weight_decay: 0
   ema_rate: 0.9999
   gradient_clipping: 1
   # for loss
   # loss_weight: 0.1
 
   # for warmup
-  warmup_epochs: 1
+  warmup_epochs: 2
   decay_epochs: 100
   # for early stop
   early_stop_patience: 3
-  early_stop_gamma: 0.1
+  early_stop_gamma: 0.15
 
 dataset:
-  # data_dir: ./data/diff
-  # save_root: ./runs
+  data_dir: ./data/diff
+  save_root: ./runs
 
-  data_dir: /cluster/scratch/hongy/generation/data/diff
-  save_root: /cluster/scratch/hongy/generation/runs
+  # data_dir: /cluster/scratch/hongy/generation/data/diff
+  # save_root: /cluster/scratch/hongy/generation/runs

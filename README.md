@@ -110,6 +110,8 @@ Use 4 weeks as input (TODO: Tune weeks)
     - implement
 - DiffSeq (TODO:)
     - implement
+    - 89,404,322
+    - 46877090
 
 ## Metrics (TODO: verify)
 

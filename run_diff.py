@@ -8,14 +8,6 @@ import os
 import numpy as np
 import datetime
 
-# from basic_utils import (
-#     load_defaults_config,
-#     create_model_and_diffusion,
-#     args_to_dict,
-#     add_dict_to_argparser,
-#     load_model_emb,
-# )
-# from train_util import TrainLoop
 import wandb
 
 from easydict import EasyDict as edict
@@ -98,7 +90,6 @@ def main():
         ema_rate=config.ema_rate,
         log_interval=config.log_interval,
         use_fp16=config.use_fp16,
-        fp16_scale_growth=config.fp16_scale_growth,
         schedule_sampler=schedule_sampler,
         weight_decay=config.weight_decay,
         early_stop_gamma=config.early_stop_gamma,

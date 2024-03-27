@@ -591,7 +591,7 @@ class GaussianDiffusion:
         terms["nll"] = self._token_discrete_loss(
             model_out_x_start, get_logits, input_ids_x, mask=input_ids_mask, truncate=True, t=t
         )  # x_0->model_out_x_start
-        # assert (model.lm_head.weight == model.word_embedding.weight).all()
+        assert (model.model.module.lm_head.weight == model.model.module.word_embedding.weight).all()
 
         terms["loss"] = terms["mse"] + decoder_nll + tT_loss
 
