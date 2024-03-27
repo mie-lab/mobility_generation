@@ -62,8 +62,6 @@ def main():
     data_train = load_data_text(batch_size=config.batch_size, data_args=config)
     data_valid = load_data_text(batch_size=config.batch_size, data_args=config, split="valid", deterministic=True)
 
-    
-
     logger.log("### Creating model and diffusion...")
     # print('#'*30, 'CUDA_VISIBLE_DEVICES', os.environ['CUDA_VISIBLE_DEVICES'])
     model, diffusion = create_model_and_diffusion(config)
@@ -71,11 +69,8 @@ def main():
     model.to(get_device())  # DEBUG **
 
     pytorch_total_params = sum(p.numel() for p in model.parameters())
-    
 
     schedule_sampler = create_named_schedule_sampler(config.schedule_sampler, diffusion)
-
-    
 
     if ("LOCAL_RANK" not in os.environ) or (int(os.environ["LOCAL_RANK"]) == 0):
         logger.log("#" * 30, "size of location", config.max_location)
@@ -83,7 +78,7 @@ def main():
         logger.log("### Saving the hyperparameters")
         with open(f"{log_dir}/training_args.json", "w") as f:
             json.dump(config.__dict__, f, indent=2)
-            
+
         wandb.init(
             project="DiffuSeq",
             dir=log_dir,
