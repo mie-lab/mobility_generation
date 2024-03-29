@@ -20,7 +20,7 @@ import pickle as pickle
 from utils.earlystopping import EarlyStopping
 
 from generative.diff.step_sample import LossAwareSampler, UniformSampler
-from transformers import get_linear_schedule_with_warmup
+from transformers import get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 
 
 class TrainLoop:
@@ -73,11 +73,16 @@ class TrainLoop:
         self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=weight_decay)
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_fp16)
         # define learning rate schedule
-        self.scheduler = get_linear_schedule_with_warmup(
-            self.opt,
-            num_warmup_steps=len(self.data) * warmup_epochs,
-            num_training_steps=len(self.data) * self.decay_epochs,
-        )
+        if self.decay_epochs == 0:
+            self.scheduler = get_constant_schedule_with_warmup(
+                self.opt, num_warmup_steps=len(self.data) * warmup_epochs
+            )
+        else:
+            self.scheduler = get_linear_schedule_with_warmup(
+                self.opt,
+                num_warmup_steps=len(self.data) * warmup_epochs,
+                num_training_steps=len(self.data) * self.decay_epochs,
+            )
         # early stopping
         self.scheduler_ES = StepLR(self.opt, step_size=1, gamma=early_stop_gamma)
         self.ES = EarlyStopping(
