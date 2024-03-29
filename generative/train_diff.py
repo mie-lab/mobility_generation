@@ -132,11 +132,12 @@ class TrainLoop:
                 state_dict=checkpoint,
                 save_name=f"ema_{self.ema_rate[0]}_{epoch}",
             )
+            dist.barrier()
             if self.ES.early_stop:
                 if is_main_process():
                     logger.log("=" * 50)
                     logger.log("Early stopping")
-                    logger.log("Current lr: {:.6f}".format(self.opt.param_groups[0]["lr"]))
+                    
 
                 # only es for 2 times
                 if early_stop_count == 2:
@@ -147,7 +148,7 @@ class TrainLoop:
                 if is_main_process():
                     logger.log(f"loading model from checkpoint: {self.ES.save_name}...")
 
-                dist.barrier()
+                
                 # load best model for retraining
                 map_location = {"cuda:0": f"{get_device()}"}
                 checkpoint = load_state_dict(
@@ -162,6 +163,8 @@ class TrainLoop:
                 self.ES.early_stop = False
                 self.ES.counter = 0
                 self.scheduler_ES.step()
+                if is_main_process():
+                    logger.log("Current lr: {:.6f}".format(self.opt.param_groups[0]["lr"]))
 
     def train_epoch(self, epoch, early_stop_count):
         self.ddp_model.train()
@@ -186,7 +189,7 @@ class TrainLoop:
                 if is_main_process():
                     logger.log(
                         "Epoch {}, {:.1f}% took: {:.2f}s".format(
-                            epoch + 1, 100 * i / n_batches, time.time() - start_time
+                            epoch, 100 * i / n_batches, time.time() - start_time
                         )
                     )
                 start_time = time.time()
