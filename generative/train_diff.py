@@ -202,14 +202,18 @@ class TrainLoop:
     def evaluate_epoch(self):
         self.ddp_model.eval()
 
-        return_loss = 0
+        return_loss = []
         for batch_eval, cond_eval in self.eval_data:
-            return_loss += self.forward_only(batch_eval, cond_eval)
+            return_loss.extend(self.forward_only(batch_eval, cond_eval))
 
         if is_main_process():
             logger.log("eval on validation set")
         logger.dumpkvs()
-        return return_loss / len(self.eval_data)
+
+        gathered_loss = [None for _ in range(dist.get_world_size())]
+        dist.all_gather_object(gathered_loss, return_loss)
+
+        return torch.stack([torch.stack(loss) for loss in gathered_loss]).mean().numpy()
 
     def run_step(self, batch, cond):
         self.forward_backward(batch, cond)
@@ -240,9 +244,9 @@ class TrainLoop:
                         losses = compute_losses()
 
                 log_loss_dict(self.diffusion, t, {f"eval_{k}": v * weights for k, v in losses.items()})
-                return_loss.extend((losses["loss"] * weights).detach().cpu().numpy().tolist())
+                return_loss.extend((losses["loss"] * weights).detach().cpu())
 
-        return np.mean(return_loss)
+        return return_loss
 
     def forward_backward(self, batch, cond):
         current_device = get_device()

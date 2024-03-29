@@ -46,6 +46,9 @@ class EarlyStopping:
             self.counter += 1
             if self.verbose and self.main_process:
                 print(f"EarlyStopping counter: {self.counter} out of {self.patience}")
+                print(
+                    f"{self.monitor} does not decrease: best {self.best_return_dict[self.monitor]:.6f} <--> now {return_dict[self.monitor]:.6f}."
+                )
             if self.counter >= self.patience:
                 self.early_stop = True
 
