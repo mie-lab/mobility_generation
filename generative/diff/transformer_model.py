@@ -29,6 +29,7 @@ class TransformerNetModel(nn.Module):
         num_encoder_layers,
         dropout=0,
         max_location=None,
+        learned_mean_embed=False,
     ):
         super().__init__()
 
@@ -76,6 +77,12 @@ class TransformerNetModel(nn.Module):
                 nn.Tanh(),
                 nn.Linear(model_config.hidden_size, self.output_dims),
             )
+
+        if learned_mean_embed:
+            self.mean_embed = nn.Parameter(torch.randn(input_dims))
+            nn.init.normal_(self.mean_embed, mean=0, std=input_dims**-0.5)
+        else:
+            self.mean_embed = None
 
     def get_embeds(self, input_ids):
         return self.word_embedding(input_ids)

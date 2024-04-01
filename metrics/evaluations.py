@@ -15,15 +15,22 @@ from math import radians, cos, sin, asin, sqrt
 
 
 class Metric(object):
-    def __init__(self, config, locations, input_data, valid_start_end_idx):
-        self.config = config
-        self.max_locs = config.total_loc_num - 1  # for padding
+    def __init__(
+        self,
+        max_locs,
+        locations,
+        reference_data,
+        # input_data,
+        # valid_start_end_idx,
+    ):
+        self.max_locs = max_locs - 1  # for padding
         self.max_distance = 400
 
         self.geo_x = locations.sort_values(by="loc_id")["geometry"].x.values
         self.geo_y = locations.sort_values(by="loc_id")["geometry"].y.values
 
-        self.reference_data = self.extract_reference_dataset(input_data, valid_start_end_idx)
+        # self.reference_data = self.extract_reference_dataset(input_data, valid_start_end_idx)
+        self.reference_data = reference_data
 
         # metrics to calculate
         self.ref_dist_p = None
@@ -144,7 +151,8 @@ class Metric(object):
         :return:
         """
         # gene_data = gene_data.detach().cpu().numpy()
-        loc_seq = gene_data["locs"]
+        # loc_seq = gene_data["locs"]
+        loc_seq = gene_data
 
         gene_dist = self.get_distances(loc_seq) / self.max_distance
         gene_rg = self.get_rg(loc_seq) / self.max_distance

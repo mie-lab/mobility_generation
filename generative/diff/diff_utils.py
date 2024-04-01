@@ -21,6 +21,7 @@ def create_model_and_diffusion(config):
         dropout=config.dropout,
         num_encoder_layers=config.num_encoder_layers,
         max_location=config.max_location,
+        learned_mean_embed=config.learned_mean_embed,
     )
 
     betas = gaussian_diffusion.get_named_beta_schedule(config.noise_schedule, config.diffusion_steps)
@@ -33,6 +34,11 @@ def create_model_and_diffusion(config):
         betas=betas,
         rescale_timesteps=config.rescale_timesteps,
         predict_xstart=config.predict_xstart,
+        rejection_rate=config.rejection_rate,
+        denoise=config.denoise,
+        denoise_rate=config.denoise_rate,
+        device=config.device,
+        max_T=config.diffusion_steps,
     )
 
     return model, diffusion
@@ -114,9 +120,8 @@ def denoised_fn_round(args, model, old_embed, t):
     else:
         old_embed = old_embed
     # clamp to the nearest word embedding
-    val, indices = get_efficient_knn(model_emb, old_embed.to(model_emb.device))
-    rounded_tokens = indices[0]
-    # get the new (mapped) word embedding
-    new_embeds = model(rounded_tokens).view(old_shape).to(old_device)
+    _, indices = get_efficient_knn(model_emb, old_embed.to(model_emb.device))
+    rounded_tokens = indices[0].view(old_shape[:-1]).to(old_device)
+    new_embeds = model(rounded_tokens)
 
-    return new_embeds
+    return new_embeds, rounded_tokens

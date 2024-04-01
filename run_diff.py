@@ -56,18 +56,20 @@ def main():
 
     logger.log("### Creating model and diffusion...")
     # print('#'*30, 'CUDA_VISIBLE_DEVICES', os.environ['CUDA_VISIBLE_DEVICES'])
+    config.device = get_device()
     model, diffusion = create_model_and_diffusion(config)
-    # print('#'*30, 'cuda', dist_util.dev())
     model.to(get_device())  # DEBUG **
 
     pytorch_total_params = sum(p.numel() for p in model.parameters())
 
     schedule_sampler = create_named_schedule_sampler(config.schedule_sampler, diffusion)
 
+    config.device = ""
     if ("LOCAL_RANK" not in os.environ) or (int(os.environ["LOCAL_RANK"]) == 0):
         logger.log("#" * 30, "size of location", config.max_location)
         logger.log(f"### The parameter count is {pytorch_total_params}")
         logger.log("### Saving the hyperparameters")
+
         with open(f"{log_dir}/training_args.json", "w") as f:
             json.dump(config.__dict__, f, indent=2)
 

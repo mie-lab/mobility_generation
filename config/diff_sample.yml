@@ -12,8 +12,8 @@ misc:
   step: 2000
   split: test
   top_p: -1
-  model_path: ./runs/mobis_diffseq_1711447084
-  trained_model_name: ema_0.9999_19.pt
+  model_path: ./runs/mobis_diffseq_1711620345_6_sep_mask
+  trained_model_name: ema_0.9999_26.pt
 
   # seq_len: 512
   max_location: 14882

@@ -11,6 +11,7 @@ import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import StepLR
+torch.autograd.set_detect_anomaly(True)
 
 from utils import logger
 from utils.dist_util import get_device, load_state_dict
@@ -275,11 +276,11 @@ class TrainLoop:
                     with self.ddp_model.no_sync():
                         losses = compute_losses()
 
-            if isinstance(self.schedule_sampler, LossAwareSampler):
-                self.schedule_sampler.update_with_local_losses(t, losses["loss"].detach())
+                if isinstance(self.schedule_sampler, LossAwareSampler):
+                    self.schedule_sampler.update_with_local_losses(t, losses["loss"].detach())
 
-            loss = (losses["loss"] * weights).mean()
-            log_loss_dict(self.diffusion, t, {k: v * weights for k, v in losses.items()})
+                loss = (losses["loss"] * weights).mean()
+                log_loss_dict(self.diffusion, t, {k: v * weights for k, v in losses.items()})
 
             self.scaler.scale(loss).backward()
 

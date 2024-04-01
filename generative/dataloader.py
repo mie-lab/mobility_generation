@@ -350,6 +350,9 @@ def process_helper_fnc(seq_ls, split):
                     tgt = tgt + [0] * (50 - len(tgt))
                 else:
                     tgt = tgt[:50]
+            else:
+                if len(tgt) > 128:
+                    tgt = tgt[:128]
 
             # 1 is reserved for seperation
             lst.append(src + [1] + tgt)
@@ -456,16 +459,6 @@ def collate_fn(batch):
         dict_batch[key] = pad_sequence(dict_batch[key], padding_value=0, batch_first=True)
 
     return src_batch, dict_batch
-
-
-def _collate_batch_helper(examples, pad_token_id, max_length):
-    result = torch.full([len(examples), max_length], pad_token_id, dtype=torch.int64).tolist()
-
-    for i, example in enumerate(examples):
-        curr_len = min(len(example), max_length)
-        result[i][:curr_len] = example[:curr_len]
-
-    return result
 
 
 def is_dist_avail_and_initialized():

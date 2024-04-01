@@ -3,7 +3,7 @@ misc:
 
   wandb_name: test
   split: train
-  dataset_variation: tiny
+  dataset_variation: all
   level: "10_13"
   src_min_days: 14
   tgt_min_days: 7
@@ -20,7 +20,7 @@ misc:
   if_embed_duration: False
   
   batch_size: 256
-  microbatch: 16
+  microbatch: 32
   log_interval: 100
   num_workers: 0
   
@@ -40,6 +40,15 @@ diffusion:
   noise_schedule: sqrt
   schedule_sampler: lossaware
 
+  learned_mean_embed: True
+  emb_scale_factor: 1.0
+  denoise: True
+  denoise_rate: 0.5
+  rejection_rate: 0.0
+  reg_rate: 0.0
+  device: ""
+  data_split_num: 0
+
   timestep_respacing: ""
 
 model:
@@ -50,16 +59,16 @@ model:
 
 
 optimiser:
-  lr: 0.0001
+  lr: 0.0005
   weight_decay: 0
   ema_rate: 0.9999
-  gradient_clipping: 1
+  gradient_clipping: 3
   # for loss
   # loss_weight: 0.1
 
   # for warmup
-  warmup_epochs: 2
-  decay_epochs: 100
+  warmup_epochs: 3
+  decay_epochs: 0
   # for early stop
   early_stop_patience: 3
   early_stop_gamma: 0.15

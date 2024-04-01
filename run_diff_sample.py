@@ -55,14 +55,20 @@ def main():
         training_args = json.load(f)
     training_args["batch_size"] = config.batch_size
     training_args["dataset_variation"] = config.dataset_variation
+    training_args["data_dir"] = config.data_dir
+    training_args["save_root"] = config.save_root
     config.__dict__.update(training_args)
 
     logger.log("### Creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(config)
 
-    model.load_state_dict(
-        dist_util.load_state_dict(os.path.join(config.model_path, config.trained_model_name), map_location="cpu")
+    # model.load_state_dict(
+    #     dist_util.load_state_dict(os.path.join(config.model_path, config.trained_model_name), map_location="cpu")
+    # )
+    checkpoint = dist_util.load_state_dict(
+        os.path.join(config.model_path, config.trained_model_name), map_location="cpu"
     )
+    model.load_state_dict(checkpoint["model"])
 
     pytorch_total_params = sum(p.numel() for p in model.parameters())
     logger.log(f"### The parameter count is {pytorch_total_params}")
