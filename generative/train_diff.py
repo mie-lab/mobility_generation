@@ -128,15 +128,17 @@ class TrainLoop:
 
             # early stop
             checkpoint = {
-                "model": self._master_params_to_state_dict(self.ema_params[0]),
+                "model": self._master_params_to_state_dict(self.master_params),
+                "ema": self._master_params_to_state_dict(self.ema_params[0]),
                 "optimizer": self.opt.state_dict(),
                 "scaler": self.scaler.state_dict(),
+                "lr_schedule": self.scheduler_ES.state_dict(),
             }
 
             self.ES(
                 {"loss": current_loss},
                 state_dict=checkpoint,
-                save_name=f"ema_{self.ema_rate[0]}_{epoch}",
+                save_name=f"model_ema_{epoch}",
             )
             dist.barrier()
             if self.ES.early_stop:
@@ -163,6 +165,7 @@ class TrainLoop:
                 self.model.load_state_dict(checkpoint["model"])
                 self.opt.load_state_dict(checkpoint["optimizer"])
                 self.scaler.load_state_dict(checkpoint["scaler"])
+                self.scheduler_ES.load_state_dict(checkpoint["lr_schedule"])
                 #
                 early_stop_count += 1
                 # reset
@@ -201,7 +204,7 @@ class TrainLoop:
                 start_time = time.time()
         logger.dumpkvs()
         if is_main_process():
-            logger.log("Epoch {} took: {:.2f}s".format(epoch + 1, time.time() - all_start_time))
+            logger.log("Epoch {} took: {:.2f}s".format(epoch, time.time() - all_start_time))
 
     def evaluate_epoch(self):
         self.ddp_model.eval()
