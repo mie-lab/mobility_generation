@@ -125,3 +125,22 @@ def denoised_fn_round(args, model, old_embed, t):
     new_embeds = model(rounded_tokens)
 
     return new_embeds, rounded_tokens
+
+
+def get_weights(model, args):
+    if hasattr(model, "transformer"):
+        input_embs = model.transformer.wte  # input_embs
+        down_proj = model.down_proj
+        model_emb = down_proj(input_embs.weight)
+        print(model_emb.shape)
+        model = torch.nn.Embedding(model_emb.size(0), model_emb.size(1))
+        print(args.emb_scale_factor)
+        model.weight.data = model_emb * args.emb_scale_factor
+
+    elif hasattr(model, "weight"):
+        pass
+    else:
+        assert NotImplementedError
+
+    model.weight.requires_grad = False
+    return model
