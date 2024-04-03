@@ -27,6 +27,7 @@ class TransformerNetModel(nn.Module):
         input_dims,
         hidden_t_dim,
         num_encoder_layers,
+        hidden_size=768,
         dropout=0,
         max_location=None,
         learned_mean_embed=False,
@@ -37,6 +38,8 @@ class TransformerNetModel(nn.Module):
 
         model_config.hidden_dropout_prob = dropout
         model_config.num_hidden_layers = num_encoder_layers
+        model_config.hidden_size = hidden_size
+        model_config.intermediate_size = hidden_size*4
         model_config.max_position_embeddings = 768  # full dataset requires > 512
 
         self.input_dims = input_dims
