@@ -7,20 +7,27 @@ misc:
   src_min_days: 14
   tgt_min_days: 7
 
+  # normal
+  # clip_denoised: False
+  # clamp_step: 500
+  # step: 2000
+  # DPM
   clip_denoised: False
-  clamp_step: 500
-  step: 2000
+  clamp_step: 0
+  step: 10
+  start_n: 0
+  # 
   split: test
-  top_p: -1
-  model_path: ./runs/mobis_diffseq_1711620345_6_sep_mask
-  trained_model_name: ema_0.9999_26.pt
+  top_p: 0
+  model_path: ./runs/mobis_diffseq_v2
+  trained_model_name: ema_0.9999_13.pt
 
   # seq_len: 512
   max_location: 14882
 
   seed: 101
   
-  batch_size: 16
+  batch_size: 32
   num_workers: 0
   
   networkName: diffseq
