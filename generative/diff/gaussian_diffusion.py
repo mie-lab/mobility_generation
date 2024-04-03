@@ -587,8 +587,6 @@ class GaussianDiffusion:
         decoder_nll = loss_fct(logits.view(-1, logits.size(-1)), input_ids.view(-1)).view(input_ids.shape)
         if mask is not None:
             decoder_nll *= mask
-        # print(decoder_nll.shape)
-        if mask is not None:
             decoder_nll = decoder_nll.sum(dim=-1) / mask.sum(dim=-1)
         else:
             decoder_nll = decoder_nll.mean(dim=-1)

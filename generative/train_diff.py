@@ -72,7 +72,7 @@ class TrainLoop:
         self.early_stop_patience = early_stop_patience
 
         self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=weight_decay)
-        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_fp16)
+        self.scaler = torch.cuda.amp.GradScaler(growth_interval=100, enabled=self.use_fp16)
         # define learning rate schedule
         if self.decay_epochs == 0:
             self.scheduler = get_constant_schedule_with_warmup(
@@ -294,10 +294,12 @@ class TrainLoop:
             self.opt.clip_grad_norm(max_grad_norm)
         else:
             # Revert to normal clipping otherwise, handling Apex or full precision
-            torch.nn.utils.clip_grad_norm_(
+            total_norm = torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(),  # amp.master_params(self.opt) if self.use_apex else
                 max_grad_norm,
             )
+            if torch.logical_or(total_norm.isnan(), total_norm.isinf()):
+                logger.log("nan encountered")
 
     def optimize_normal(self):
         if self.gradient_clipping > 0:
@@ -306,6 +308,9 @@ class TrainLoop:
         self._log_grad_norm()
         self.scaler.step(self.opt)
         self.scaler.update()
+        if self.scaler._scale < 128:
+            self.scaler._scale = torch.tensor(128).to(self.scaler._scale)
+
         self.opt.zero_grad()
         for rate, params in zip(self.ema_rate, self.ema_params):
             update_ema(params, self.master_params, rate=rate)
