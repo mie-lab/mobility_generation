@@ -11,6 +11,7 @@ import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import StepLR
+
 torch.autograd.set_detect_anomaly(True)
 
 from utils import logger
@@ -145,7 +146,6 @@ class TrainLoop:
                 if is_main_process():
                     logger.log("=" * 50)
                     logger.log("Early stopping")
-                    
 
                 # only es for 2 times
                 if early_stop_count == 2:
@@ -156,7 +156,6 @@ class TrainLoop:
                 if is_main_process():
                     logger.log(f"loading model from checkpoint: {self.ES.save_name}...")
 
-                
                 # load best model for retraining
                 map_location = {"cuda:0": f"{get_device()}"}
                 checkpoint = load_state_dict(
@@ -197,9 +196,7 @@ class TrainLoop:
 
                 if is_main_process():
                     logger.log(
-                        "Epoch {}, {:.1f}% took: {:.2f}s".format(
-                            epoch, 100 * i / n_batches, time.time() - start_time
-                        )
+                        "Epoch {}, {:.1f}% took: {:.2f}s".format(epoch, 100 * i / n_batches, time.time() - start_time)
                     )
                 start_time = time.time()
         logger.dumpkvs()
