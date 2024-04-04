@@ -71,8 +71,8 @@ class TrainLoop:
 
         self.early_stop_patience = early_stop_patience
 
-        self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=weight_decay)
-        self.scaler = torch.cuda.amp.GradScaler(growth_interval=100, enabled=self.use_fp16)
+        self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=weight_decay, eps=1e-5)
+        self.scaler = torch.cuda.amp.GradScaler(growth_interval=3000, init_scale=8192, enabled=self.use_fp16)
         # define learning rate schedule
         if self.decay_epochs == 0:
             self.scheduler = get_constant_schedule_with_warmup(
@@ -319,12 +319,10 @@ class TrainLoop:
         sqsum = 0.0
         # cnt = 0
         for p in self.master_params:
-            # print(cnt, p) ## DEBUG
-            # print(cnt, p.grad)
-            # cnt += 1
             if p.grad is not None:
                 sqsum += (p.grad**2).sum().item()
         logger.logkv_mean("grad_norm", np.sqrt(sqsum))
+        logger.logkv("scaler scale", self.scaler._scale)
 
     def log_step(self):
         logger.logkv("step", self.step)
