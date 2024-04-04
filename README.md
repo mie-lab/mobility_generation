@@ -109,7 +109,7 @@ Use 4 weeks as input (TODO: Tune weeks)
 - VOLUNTEER (TODO:)
     - implement
 - DiffSeq
-    - loss shall be <0.01
+    - loss shall be < 0.01
 
 ## Metrics (TODO: verify)
 

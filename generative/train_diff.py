@@ -55,7 +55,7 @@ class TrainLoop:
         self.batch_size = batch_size
         self.microbatch = microbatch if microbatch > 0 else batch_size
         self.lr = lr
-        self.ema_rate = [ema_rate] if isinstance(ema_rate, float) else [float(x) for x in ema_rate.split(",")]
+        self.ema_rate = ema_rate
         self.log_interval = log_interval
         self.decay_epochs = decay_epochs
         self.use_fp16 = use_fp16
@@ -96,7 +96,7 @@ class TrainLoop:
             delta=0.0001,
         )
 
-        self.ema_params = [copy.deepcopy(self.master_params) for _ in range(len(self.ema_rate))]
+        self.ema_params = copy.deepcopy(self.master_params)
 
         if torch.cuda.is_available():  # DEBUG **
             self.use_ddp = True
@@ -130,7 +130,7 @@ class TrainLoop:
             # early stop
             checkpoint = {
                 "model": self._master_params_to_state_dict(self.master_params),
-                "ema": self._master_params_to_state_dict(self.ema_params[0]),
+                "ema": self._master_params_to_state_dict(self.ema_params),
                 "optimizer": self.opt.state_dict(),
                 "scaler": self.scaler.state_dict(),
                 "lr_schedule": self.scheduler_ES.state_dict(),
@@ -157,10 +157,10 @@ class TrainLoop:
                     logger.log(f"loading model from checkpoint: {self.ES.save_name}...")
 
                 # load best model for retraining
-                map_location = {"cuda:0": f"{get_device()}"}
                 checkpoint = load_state_dict(
-                    bf.join(self.checkpoint_path, self.ES.save_name + ".pt"), map_location=map_location
+                    bf.join(self.checkpoint_path, self.ES.save_name + ".pt"), map_location={"cuda:0": f"{get_device()}"}
                 )
+                self.ema_params = self._state_dict_to_master_params(checkpoint["ema"])
                 self.model.load_state_dict(checkpoint["model"])
                 self.opt.load_state_dict(checkpoint["optimizer"])
                 self.scaler.load_state_dict(checkpoint["scaler"])
@@ -309,8 +309,7 @@ class TrainLoop:
             self.scaler._scale = torch.tensor(128).to(self.scaler._scale)
 
         self.opt.zero_grad()
-        for rate, params in zip(self.ema_rate, self.ema_params):
-            update_ema(params, self.master_params, rate=rate)
+        update_ema(self.ema_params, self.master_params, rate=self.ema_rate)
 
     def _log_grad_norm(self):
         sqsum = 0.0
@@ -341,8 +340,7 @@ class TrainLoop:
                     torch.save(state_dict, f)  # save locally
 
         save_checkpoint(0, self.master_params)
-        for rate, params in zip(self.ema_rate, self.ema_params):
-            save_checkpoint(rate, params)
+        save_checkpoint(self.ema_rate, self.ema_params)
 
         dist.barrier()
 
