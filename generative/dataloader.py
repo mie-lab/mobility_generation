@@ -1,17 +1,15 @@
-import numpy as np
 import pickle as pickle
-from tqdm import tqdm
 
-from torch.nn.utils.rnn import pad_sequence
-import torch
-from torch.utils.data.distributed import DistributedSampler
-import torch.distributed as dist
-
-
-import psutil
 import datasets
+import numpy as np
+import psutil
+import torch
+import torch.distributed as dist
 from datasets import Dataset as Dataset2
 from datasets.utils.logging import disable_progress_bar
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data.distributed import DistributedSampler
+from tqdm import tqdm
 
 disable_progress_bar()
 
@@ -278,9 +276,9 @@ def get_discriminator_dataloaders(train_data, train_idx, fake_data, world_size, 
     return d_train_data, d_train_loader
 
 
-def load_data_text(
+def load_data_diffusion(
     batch_size,
-    deterministic=False,
+    shuffle=True,
     data_args=None,
     split="train",
     model_emb=None,
@@ -305,24 +303,21 @@ def load_data_text(
 
     dataset = DiffSeqDataset(training_data, data_args, model_emb=model_emb)
 
-    if split != "test":
-        sampler = DistributedSampler(dataset)
+    if split == "test":
         data_loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch_size,  # 20,
-            # drop_last=True,
-            sampler=sampler,
-            # shuffle=not deterministic,
+            shuffle=False,
             num_workers=0,
             collate_fn=collate_fn,
         )
     else:
+        sampler = DistributedSampler(dataset)
         data_loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch_size,  # 20,
-            # drop_last=True,
-            # sampler=sampler,
-            shuffle=not deterministic,
+            sampler=sampler,
+            shuffle=shuffle,
             num_workers=0,
             collate_fn=collate_fn,
         )
@@ -331,11 +326,7 @@ def load_data_text(
 
 
 def process_helper_fnc(seq_ls, split):
-    # Process.memory_info is expressed in bytes, so convert to megabytes
-    # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
     seq_dataset = Dataset2.from_dict(seq_ls)
-    # print(seq_dataset)
-    # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
 
     def merge_and_mask(ls):
         lst = []
@@ -374,12 +365,9 @@ def process_helper_fnc(seq_ls, split):
         remove_columns=["src", "tgt"],
     )
 
-    # print(seq_dataset, "padded dataset")
-    # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
-
     raw_datasets = datasets.DatasetDict()
     raw_datasets["train"] = seq_dataset
-    # print(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+
     return raw_datasets
 
 

@@ -21,7 +21,7 @@ import torch
 from torch.cuda.amp import autocast
 import torch.distributed as dist
 
-from generative.dataloader import load_data_text
+from generative.dataloader import load_data_diffusion
 from generative.diff.diff_utils import create_model_and_diffusion
 from generative.diff.dpm_solver import NoiseScheduleVP, model_wrapper, DPM_Solver
 
@@ -77,7 +77,7 @@ def main():
     checkpoint = dist_util.load_state_dict(
         os.path.join(config.model_path, config.trained_model_name), map_location="cpu"
     )
-    model.load_state_dict(checkpoint["model"])
+    model.load_state_dict(checkpoint["ema"])
 
     pytorch_total_params = sum(p.numel() for p in model.parameters())
     logger.log(f"### The parameter count is {pytorch_total_params}")
@@ -91,9 +91,9 @@ def main():
     print("### Sampling...on", config.split)
 
     ## load data
-    data_valid = load_data_text(
+    data_valid = load_data_diffusion(
         batch_size=config.batch_size,
-        deterministic=True,
+        shuffle=False,
         data_args=config,
         split=config.split,
         model_emb=model_emb.cpu(),  # using the same embedding wight with training data

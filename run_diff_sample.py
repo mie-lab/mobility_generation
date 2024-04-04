@@ -22,7 +22,7 @@ from tqdm import tqdm
 
 
 from generative.diff.diff_utils import create_model_and_diffusion, denoised_fn_round
-from generative.dataloader import load_data_text
+from generative.dataloader import load_data_diffusion
 from utils import dist_util, logger
 from utils.utils import setup_seed, load_config, init_save_path
 
@@ -97,9 +97,9 @@ def main():
     print("### Sampling...on", config.split)
 
     ## load data
-    data_valid = load_data_text(
+    data_valid = load_data_diffusion(
         batch_size=config.batch_size,
-        deterministic=True,
+        shuffle=False,
         data_args=config,
         split=config.split,
         model_emb=model_emb.cpu(),  # using the same embedding wight with training data

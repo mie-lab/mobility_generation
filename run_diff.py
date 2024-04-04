@@ -3,22 +3,21 @@ Train a diffusion model on images.
 """
 
 import argparse
+import datetime
 import json
 import os
+
 import numpy as np
-import datetime
-
 import wandb
-
 from easydict import EasyDict as edict
-from utils.utils import setup_seed, load_config, init_save_path
-from utils.dist_util import setup_dist, get_device
-from utils import logger
 
-from generative.train_diff import TrainLoop
-from generative.dataloader import load_data_text
+from generative.dataloader import load_data_diffusion
 from generative.diff.diff_utils import create_model_and_diffusion
 from generative.diff.step_sample import create_named_schedule_sampler
+from generative.train_diff import TrainLoop
+from utils import logger
+from utils.dist_util import get_device, setup_dist
+from utils.utils import init_save_path, load_config, setup_seed
 
 ### custom your wandb setting here ###
 os.environ["WANDB_API_KEY"] = "7c18d47ede09b76c8d8e7d861b930edc81c2b0e8"
@@ -51,8 +50,8 @@ def main():
     logger.configure(dir=log_dir)
     logger.log("### Creating data loader...")
 
-    data_train = load_data_text(batch_size=config.batch_size, data_args=config)
-    data_valid = load_data_text(batch_size=config.batch_size, data_args=config, split="valid", deterministic=True)
+    data_train = load_data_diffusion(batch_size=config.batch_size, data_args=config, shuffle=True)
+    data_valid = load_data_diffusion(batch_size=config.batch_size, data_args=config, split="valid", shuffle=False)
 
     logger.log("### Creating model and diffusion...")
     # print('#'*30, 'CUDA_VISIBLE_DEVICES', os.environ['CUDA_VISIBLE_DEVICES'])

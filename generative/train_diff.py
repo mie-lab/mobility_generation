@@ -1,11 +1,10 @@
 import copy
 import functools
 import os
+import time
 
 import blobfile as bf
 import numpy as np
-import time
-
 import torch
 import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
@@ -14,15 +13,14 @@ from torch.optim.lr_scheduler import StepLR
 
 torch.autograd.set_detect_anomaly(True)
 
-from utils import logger
-from utils.dist_util import get_device, load_state_dict
-
 import pickle as pickle
 
+from transformers import get_constant_schedule_with_warmup, get_linear_schedule_with_warmup
+from utils import logger
+from utils.dist_util import get_device, load_state_dict
 from utils.earlystopping import EarlyStopping
 
 from generative.diff.step_sample import LossAwareSampler, UniformSampler
-from transformers import get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 
 
 class TrainLoop:
