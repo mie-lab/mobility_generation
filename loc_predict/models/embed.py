@@ -16,11 +16,10 @@ class PositionalEncoding(nn.Module):
         pos_embedding[:, 1::2] = torch.cos(pos * den)
         pos_embedding = pos_embedding.unsqueeze(-2)
 
-        self.dropout = nn.Dropout(dropout)
         self.register_buffer("pos_embedding", pos_embedding)
 
     def forward(self, token_embedding: Tensor):
-        return self.dropout(token_embedding + self.pos_embedding[: token_embedding.size(0), :])
+        return token_embedding + self.pos_embedding[: token_embedding.size(0), :]
 
 
 class TemporalEmbedding(nn.Module):
@@ -88,7 +87,7 @@ class AllEmbedding(nn.Module):
         self.d_input = d_input
 
         # location embedding
-        self.emb_loc = nn.Embedding(config.total_loc_num, d_input)
+        self.emb_loc = nn.Embedding(config.max_location, d_input)
 
         # time is in minutes, possible time for each day is 60 * 24 // 15
         self.if_include_time = config.if_embed_time
@@ -110,8 +109,6 @@ class AllEmbedding(nn.Module):
         self.if_pos_encoder = if_pos_encoder
         if self.if_pos_encoder:
             self.pos_encoder = PositionalEncoding(d_input, dropout=0.1)
-        else:
-            self.dropout = nn.Dropout(0.1)
 
     def forward(self, src, context_dict) -> Tensor:
         emb = self.emb_loc(src)
@@ -128,4 +125,4 @@ class AllEmbedding(nn.Module):
         if self.if_pos_encoder:
             return self.pos_encoder(emb * math.sqrt(self.d_input))
         else:
-            return self.dropout(emb)
+            return emb

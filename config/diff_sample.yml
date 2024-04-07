@@ -2,7 +2,7 @@ misc:
   dataset: mobis
 
 
-  dataset_variation: tiny
+  dataset_variation: small
   level: "10_13"
   src_min_days: 14
   tgt_min_days: 7
@@ -14,20 +14,20 @@ misc:
   # DPM
   clip_denoised: False
   clamp_step: 0
-  step: 10
+  step: 20
   start_n: 0
   # 
   split: test
   top_p: 0
-  model_path: ./runs/mobis_diffseq_v2
-  trained_model_name: ema_0.9999_13.pt
+  model_path: ./runs/mobis_diffseq
+  trained_model_name: model_ema_21.pt
 
   # seq_len: 512
   max_location: 14882
 
   seed: 101
   
-  batch_size: 32
+  batch_size: 128
   num_workers: 0
   
   networkName: diffseq

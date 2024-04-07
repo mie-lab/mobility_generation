@@ -20,7 +20,7 @@ def markov_transition_prob(df, n=1):
     return locSequence.groupby(by=COLUMNS).size().to_frame("size").reset_index()
 
 
-def get_next_loc(transition_df, curr_loc, n=1):
+def get_next_loc(transition_df, curr_loc, n=1, top_k=3):
     numb_considered_history = n
 
     # loop until finds a match
@@ -32,14 +32,14 @@ def get_next_loc(transition_df, curr_loc, n=1):
 
         if len(res_df):  # if the dataframe contains entry, stop finding
             # choose the location which are visited most often for the matches
-            pred = res_df.head(3).sample(n=1, weights="size")["toLoc"].values[0]
+            pred = res_df.head(top_k).sample(n=1, weights="size")["toLoc"].values[0]
             break
         # decrese the number of location history considered
         numb_considered_history -= 1
         if numb_considered_history == 0:
             pred = (
                 transition_df.sort_values(by="size", ascending=False)
-                .head(3)
+                .head(top_k)
                 .sample(n=1, weights="size")["toLoc"]
                 .values[0]
             )
@@ -48,11 +48,11 @@ def get_next_loc(transition_df, curr_loc, n=1):
 
 
 def generate_markov(config, groupby_transition, data_loader):
-    generated_ls = []
+    generated_dict = {"pred": []}
     user_ls = []
     count = 0
     for inputs in tqdm(data_loader):
-        x, _, x_dict = inputs
+        x, _, x_dict, _ = inputs
 
         next_loc = x[-1].cpu().numpy()[0]
         generated_locs_arr = np.zeros(config.generate_len)
@@ -60,11 +60,13 @@ def generate_markov(config, groupby_transition, data_loader):
         curr_transition = groupby_transition.get_group(x_dict["user"].cpu().numpy()[0])
 
         for i in range(config.generate_len):
-            next_loc = get_next_loc(transition_df=curr_transition, curr_loc=next_loc, n=config.n_dependence)
+            next_loc = get_next_loc(
+                transition_df=curr_transition, curr_loc=next_loc, n=config.n_dependence, top_k=config.top_k
+            )
 
             generated_locs_arr[i] = next_loc
 
-        generated_ls.append(generated_locs_arr)
+        generated_dict["pred"].append(generated_locs_arr.astype(int))
         user_ls.append(x_dict["user"].cpu().numpy()[0])
         count = count + 1
         if config.debug and count == 20:
@@ -73,9 +75,9 @@ def generate_markov(config, groupby_transition, data_loader):
     user_arr = np.array(user_ls)
 
     if config.verbose:
-        print(len(generated_ls), user_arr.shape)
+        print(len(generated_dict["pred"]), user_arr.shape)
 
-    return generated_ls, user_arr
+    return generated_dict, user_arr
 
 
 def get_performance_measure(true_ls, pred_ls):

@@ -15,7 +15,7 @@ class FullyConnected(nn.Module):
         if self.if_embed_user:
             self.emb_user = nn.Embedding(config.total_user_num, fc_dim)
 
-        self.fc_loc = nn.Linear(fc_dim, config.total_loc_num)
+        self.fc_loc = nn.Linear(fc_dim, config.max_location)
         self.fc_dur = nn.Linear(fc_dim, 1)
         self.emb_dropout = nn.Dropout(p=0.1)
 

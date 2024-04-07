@@ -1,8 +1,15 @@
 misc:
   dataset: mobis
 
-  use_pretrain: False
-  pretrain_filepath: mobis_mhsa_1698746890
+  dataset_variation: small
+  level: "10_13"
+  src_min_days: 14
+  tgt_min_days: 7
+
+  split: test
+  use_pretrain: True
+  pretrain_filepath: mobis_mhsa_1712332379
+  model_name: model_14.pt
   generate_len: 50
   # 
   if_embed_time: False
@@ -10,47 +17,44 @@ misc:
   if_embed_poi: False
   if_embed_duration: False
 
+  # 14882 + 1 for seperation
+  max_location: 14883
+
   verbose: True
   debug: False
-  batch_size: 256
+  batch_size: 64
   print_step: 50
   num_workers: 0
+
+  use_fp16: True
+  seed: 101
   
 
 embedding:
-  base_emb_size: 64
+  base_emb_size: 128
   poi_original_size: 16
+  
 
 model:
   networkName: mhsa
   # only for mhsa
   num_encoder_layers: 2
-  nhead: 4
-  dim_feedforward: 128
-  dropout: 0.1
+  nhead: 8
+
   fc_dropout: 0.1
 
 optimiser:
-  optimizer: Adam
-  max_epoch: 100
   lr: 0.001
-  weight_decay: 0.000001
+  weight_decay: 0.01
   # for loss
   loss_weight: 0.1
-  # lr: 0.01
-  # for Adam
-  beta1: 0.9
-  beta2: 0.999
-  # for SGD
-  momentum: 0.98
   # for warmup
-  num_warmup_epochs: 2
-  num_training_epochs: 50
+  warmup_epochs: 3
+  decay_epochs: 0
   # for decay
   patience: 3
-  lr_step_size: 1
   lr_gamma: 0.1
 
 dataset:
-  temp_save_root: ./data
+  data_dir: ./data/diff
   save_root: ./runs

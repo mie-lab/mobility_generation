@@ -1,17 +1,24 @@
 misc:
   dataset: mobis
 
-  verbose: True
+  dataset_variation: small
+  level: "10_13"
+  src_min_days: 14
+  tgt_min_days: 7
+
   batch_size: 1
   num_workers: 0
   generate_len: 50
+  top_k: 3
   debug: False
   verbose: True
+
+  seed: 101
 
 model:
   networkName: markov
   n_dependence: 1
 
 dataset:
-  temp_save_root: ./data
+  data_dir: ./data/diff
   save_root: ./runs

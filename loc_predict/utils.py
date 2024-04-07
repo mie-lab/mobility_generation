@@ -39,15 +39,15 @@ def get_models(config, device):
 
 def get_generated_sequences(config, model, test_loader, device=None):
     if config.networkName == "mhsa":
-        generated_ls, user_arr = generate(config, model, test_loader, device)
+        generated_dict, user_arr = generate(config, model, test_loader, device)
     else:
-        generated_ls, user_arr = generate_markov(config, model, test_loader)
+        generated_dict, user_arr = generate_markov(config, model, test_loader)
 
-    generated_df = pd.DataFrame([user_arr, generated_ls])
-    generated_df = generated_df.transpose()
-    generated_df.columns = ["user_id", "generated_ls"]
+    # generated_df = pd.DataFrame([user_arr, generated_ls])
+    # generated_df = generated_df.transpose()
+    # generated_df.columns = ["user_id", "generated_ls"]
 
-    generated_df = generated_df.explode(column=["generated_ls"])
-    generated_df.index.name = "seq_id"
+    # generated_df = generated_df.explode(column=["generated_ls"])
+    # generated_df.index.name = "seq_id"
 
-    return generated_df
+    return generated_dict

@@ -2,14 +2,17 @@ import numpy as np
 
 import torch
 from torch.optim.lr_scheduler import StepLR
+import torch.nn.functional as F
 from sklearn.metrics import f1_score
 from tqdm import tqdm
 
 import time
+import blobfile as bf
 
-from transformers import get_linear_schedule_with_warmup
+from transformers import get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 
 from utils.earlystopping import EarlyStopping
+from utils.dist_util import load_state_dict
 
 
 def send_to_device(inputs, device, config):
@@ -97,21 +100,8 @@ def get_mrr(prediction, targets):
 
 def get_optimizer(config, model):
     # define the optimizer & learning rate
-    if config.optimizer == "SGD":
-        optim = torch.optim.SGD(
-            model.parameters(),
-            lr=config.lr,
-            weight_decay=config.weight_decay,
-            momentum=config.momentum,
-            nesterov=True,
-        )
-    elif config.optimizer == "Adam":
-        optim = torch.optim.Adam(
-            model.parameters(),
-            lr=config.lr,
-            betas=(config.beta1, config.beta2),
-            weight_decay=config.weight_decay,
-        )
+
+    optim = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay, eps=1e-5)
 
     return optim
 
@@ -122,12 +112,16 @@ def train_net(config, model, train_loader, val_loader, device, log_dir):
     optim = get_optimizer(config, model)
 
     # define learning rate schedule
-    scheduler = get_linear_schedule_with_warmup(
-        optim,
-        num_warmup_steps=len(train_loader) * config.num_warmup_epochs,
-        num_training_steps=len(train_loader) * config.num_training_epochs,
-    )
-    scheduler_ES = StepLR(optim, step_size=config.lr_step_size, gamma=config.lr_gamma)
+    if config.decay_epochs == 0:
+        scheduler = get_constant_schedule_with_warmup(optim, num_warmup_steps=len(train_loader) * config.warmup_epochs)
+    else:
+        scheduler = get_linear_schedule_with_warmup(
+            optim,
+            num_warmup_steps=len(train_loader) * config.warmup_epochs,
+            num_training_steps=len(train_loader) * config.decay_epochs,
+        )
+
+    scheduler_ES = StepLR(optim, step_size=1, gamma=config.lr_gamma)
     if config.verbose:
         print("Current learning rate: ", scheduler.get_last_lr()[0])
 
@@ -137,10 +131,18 @@ def train_net(config, model, train_loader, val_loader, device, log_dir):
     scheduler_count = 0
 
     # initialize the early_stopping object
-    early_stopping = EarlyStopping(log_dir, patience=config["patience"], verbose=config.verbose, delta=0.001)
+    early_stopping = EarlyStopping(
+        log_dir,
+        patience=config["patience"],
+        main_process=True,
+        verbose=config.verbose,
+        monitor="val_loss",
+        delta=0.0001,
+    )
+    scaler = torch.cuda.amp.GradScaler(enabled=config.use_fp16)
 
     # Loop for n_epochs
-    for epoch in range(config.max_epoch):
+    for epoch in range(1000):
         # train for one epoch
         globaliter = single_train(
             config,
@@ -151,6 +153,7 @@ def train_net(config, model, train_loader, val_loader, device, log_dir):
             epoch,
             scheduler,
             scheduler_count,
+            scaler,
             globaliter,
         )
 
@@ -159,7 +162,14 @@ def train_net(config, model, train_loader, val_loader, device, log_dir):
 
         # early_stopping needs the validation loss to check if it has decresed,
         # and if it has, it will make a checkpoint of the current model
-        early_stopping(return_dict, model)
+        checkpoint = {
+            "model": model.state_dict(),
+            "optimizer": optim.state_dict(),
+            "scaler": scaler.state_dict(),
+            "lr_schedule": scheduler_ES.state_dict(),
+        }
+
+        early_stopping(return_dict, checkpoint, save_name=f"model_{epoch}")
 
         if early_stopping.early_stop:
             if config.verbose:
@@ -177,14 +187,17 @@ def train_net(config, model, train_loader, val_loader, device, log_dir):
                 break
 
             scheduler_count += 1
-            model.load_state_dict(torch.load(log_dir + "/checkpoint.pt"))
+            checkpoint = load_state_dict(bf.join(log_dir, early_stopping.save_name + ".pt"))
+            model.load_state_dict(checkpoint["model"])
+            optim.load_state_dict(checkpoint["optimizer"])
+            scaler.load_state_dict(checkpoint["scaler"])
+            scheduler_ES.load_state_dict(checkpoint["lr_schedule"])
+
             early_stopping.early_stop = False
             early_stopping.counter = 0
             scheduler_ES.step()
 
         if config.verbose:
-            # print("Current learning rate: {:.5f}".format(scheduler.get_last_lr()[0]))
-            # print("Current learning rate: {:.5f}".format(scheduler_ES.get_last_lr()[0]))
             print("Current learning rate: {:.5f}".format(optim.param_groups[0]["lr"]))
             print("=" * 50)
 
@@ -203,6 +216,7 @@ def single_train(
     epoch,
     scheduler,
     scheduler_count,
+    scaler,
     globaliter,
 ):
     model.train()
@@ -217,23 +231,26 @@ def single_train(
 
     # define start time
     start_time = time.time()
-    optim.zero_grad()
     for i, inputs in enumerate(train_loader):
+        optim.zero_grad()
         globaliter += 1
 
         x, y, x_dict, y_dict = send_to_device(inputs, device, config)
 
-        logits, dur_pred = model(x, x_dict, device)
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=config.use_fp16):
+            logits, dur_pred = model(x, x_dict)
 
-        loc_loss_size = CEL(logits, y.reshape(-1))
-        dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
-        loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
+            loc_loss_size = CEL(logits, y.reshape(-1))
+            dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
+            loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
 
-        optim.zero_grad()
-        loss.backward()
+        scaler.scale(loss).backward()
 
+        scaler.unscale_(optim)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
-        optim.step()
+        scaler.step(optim)
+        scaler.update()
+
         if scheduler_count == 0:
             scheduler.step()
 
@@ -283,7 +300,7 @@ def single_validate(config, model, data_loader, device):
         for inputs in data_loader:
             x, y, x_dict, y_dict = send_to_device(inputs, device, config)
 
-            logits, dur_pred = model(x, x_dict, device)
+            logits, dur_pred = model(x, x_dict)
 
             loc_loss_size = CEL(logits, y.reshape(-1))
             dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
@@ -338,7 +355,7 @@ def single_test(config, model, data_loader, device):
         for inputs in data_loader:
             x, y, x_dict, _ = send_to_device(inputs, device, config)
 
-            logits, _ = model(x, x_dict, device)
+            logits, _ = model(x, x_dict)
 
             batch_result_arr, batch_true, batch_top1 = calculate_correct_total_prediction(logits, y)
             result_arr += batch_result_arr
@@ -370,42 +387,33 @@ def single_test(config, model, data_loader, device):
 
 def generate(config, model, data_loader, device):
     model.eval()
+    generated_dict = {"pred": []}
     with torch.no_grad():
-        generated_ls = []
         user_ls = []
         count = 0
         for inputs in tqdm(data_loader):
-            x, _, x_dict = send_to_device(inputs, device, config)
+            x, _, x_dict, _ = send_to_device(inputs, device, config)
 
             len_before = x_dict["len"].detach().clone()
             for _ in range(config.generate_len):
-                logits = model(x, x_dict, device)
+                logits, dur_pred = model(x, x_dict)
 
-                # TODO: implement greedy, sample and beam search
-                top = torch.topk(logits, k=10, dim=-1)
-
-                p = torch.cumsum(top.values / top.values.sum(dim=-1, keepdim=True), dim=-1)
-
-                idx = torch.searchsorted(p, torch.rand([p.shape[0], 1]).to(device))
-                pred_loc = top.indices.gather(dim=1, index=idx)
+                pred_loc = top_k_top_p_filtering(logits, top_k=0, top_p=0.99, filter_value=-float("Inf"))
 
                 # append to the end of sequence for next prediction
                 x = torch.stack(
                     [
                         torch.cat([xi[:x_leni], pred_loci, xi[x_leni:]])
-                        for xi, x_leni, pred_loci in zip(x.transpose(1, 0), x_dict["len"], pred_loc)
+                        for xi, x_leni, pred_loci in zip(x, x_dict["len"], pred_loc)
                     ]
-                ).transpose(1, 0)
+                )
                 x_dict["len"] = x_dict["len"] + 1
 
             len_after = x_dict["len"].detach().clone()
             # collect the simulated sequences, first dim is the batch dim
-            generated_ls.append(
+            generated_dict["pred"].append(
                 torch.stack(
-                    [
-                        xi[len_beforei:len_afteri]
-                        for xi, len_beforei, len_afteri in zip(x.transpose(1, 0), len_before, len_after)
-                    ]
+                    [xi[len_beforei:len_afteri] for xi, len_beforei, len_afteri in zip(x, len_before, len_after)]
                 )
             )
 
@@ -415,10 +423,45 @@ def generate(config, model, data_loader, device):
             if config.debug and count == 20:
                 break
 
-    generated_ls = torch.cat(generated_ls, dim=0).cpu().numpy().tolist()
+    generated_dict["pred"] = torch.cat(generated_dict["pred"], dim=0).cpu().numpy().astype(int)
     user_arr = torch.cat(user_ls, dim=0).cpu().numpy()
 
     if config.verbose:
-        print(len(generated_ls), user_arr.shape)
+        print(len(generated_dict["pred"]), user_arr.shape)
 
-    return generated_ls, user_arr
+    return generated_dict, user_arr
+
+
+def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float("Inf")):
+    """Filter a distribution of logits using top-k and/or nucleus (top-p) filtering
+    Args:
+        logits: logits distribution shape (vocabulary size)
+        top_k >0: keep only top k tokens with highest probability (top-k filtering).
+        top_p >0.0: keep the top tokens with cumulative probability >= top_p (nucleus filtering).
+            Nucleus filtering is described in Holtzman et al. (http://arxiv.org/abs/1904.09751)
+
+    Basic outline taken from https://gist.github.com/thomwolf/1a5a29f6962089e871b94cbd09daf317
+    """
+    assert logits.dim() == 2  # [BATCH_SIZE, VOCAB_SIZE]
+    top_k = min(top_k, logits.size(-1))  # Safety check
+    if top_k > 0:
+        # Remove all tokens with a probability less than the last token of the top-k
+        indices_to_remove = logits < torch.topk(logits, top_k, dim=1)[0][..., -1, None]
+        logits[indices_to_remove] = filter_value
+
+    sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+
+    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+    # Remove tokens with cumulative probability above the threshold
+    sorted_indices_to_remove = cumulative_probs > top_p
+    # Shift the indices to the right to keep also the first token above the threshold
+    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+    sorted_indices_to_remove[..., 0] = 0
+
+    # Replace logits to be removed with -inf in the sorted_logits
+    sorted_logits[sorted_indices_to_remove] = filter_value
+    # Then reverse the sorting process by mapping back sorted_logits to their original position
+    logits = torch.gather(sorted_logits, 1, sorted_indices.argsort(-1))
+
+    pred_token = torch.multinomial(F.softmax(logits, -1), 1)  # [BATCH_SIZE, 1]
+    return pred_token

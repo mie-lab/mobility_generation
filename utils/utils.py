@@ -103,29 +103,17 @@ def get_train_test(sp, all_locs=None):
     train_data, vali_data, test_data = _split_dataset(sp)
 
     # encode unseen locations in validation and test into 0
-    if all_locs is None:
-        enc = OrdinalEncoder(dtype=np.int64, handle_unknown="use_encoded_value", unknown_value=-1).fit(
-            train_data["location_id"].values.reshape(-1, 1)
-        )
-        # add 2 to account for unseen locations (1) and to account for 0 padding
-        train_data["location_id"] = enc.transform(train_data["location_id"].values.reshape(-1, 1)) + 2
-        vali_data["location_id"] = enc.transform(vali_data["location_id"].values.reshape(-1, 1)) + 2
-        test_data["location_id"] = enc.transform(test_data["location_id"].values.reshape(-1, 1)) + 2
+    enc = OrdinalEncoder(dtype=np.int64, handle_unknown="use_encoded_value", unknown_value=-1).fit(
+        all_locs["loc_id"].values.reshape(-1, 1)
+    )
+    # add 1 to account for 0 padding
+    all_locs["loc_id"] = enc.transform(all_locs["loc_id"].values.reshape(-1, 1)) + 2
 
-        return train_data, vali_data, test_data
-    else:
-        # encode unseen locations in validation and test into 0
-        enc = OrdinalEncoder(dtype=np.int64, handle_unknown="use_encoded_value", unknown_value=-1).fit(
-            all_locs["loc_id"].values.reshape(-1, 1)
-        )
-        # add 1 to account for 0 padding
-        all_locs["loc_id"] = enc.transform(all_locs["loc_id"].values.reshape(-1, 1)) + 1
+    train_data["location_id"] = enc.transform(train_data["location_id"].values.reshape(-1, 1)) + 2
+    vali_data["location_id"] = enc.transform(vali_data["location_id"].values.reshape(-1, 1)) + 2
+    test_data["location_id"] = enc.transform(test_data["location_id"].values.reshape(-1, 1)) + 2
 
-        train_data["location_id"] = enc.transform(train_data["location_id"].values.reshape(-1, 1)) + 1
-        vali_data["location_id"] = enc.transform(vali_data["location_id"].values.reshape(-1, 1)) + 1
-        test_data["location_id"] = enc.transform(test_data["location_id"].values.reshape(-1, 1)) + 1
-
-        return train_data, vali_data, test_data, all_locs
+    return train_data, vali_data, test_data, all_locs
 
 
 def _split_dataset(totalData):
