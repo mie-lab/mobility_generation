@@ -34,8 +34,6 @@ Generating locations:
     - Preserve the self-transitions
     - Activity duration: activity duration + the transit duration to reach the location (finished_at - previous finished_at)
 
-- TODO: 
-    - POI generation check
 ## Generation
 
 ### Next location prediction. 
@@ -43,42 +41,21 @@ Generating locations:
 User split 6:2:2 according to time.
 
 - MHSA: 
+    - Use GPT2 implementation
     - Use previous 7 days, predict the next location. 
     - hyperparameter: 
-        - parameter 2065394: num_encoder_layers: 2; nhead: 4; dim_feedforward: 128; fc_dropout: 0.1 (TODO: tune)
-    - Test runs (small) for level 10-14 with features:
-        - None (1,418,280):
-            - validation acc@1: 42.89; Test acc@1 = 39.80 f1 = 31.51 mrr = 52.15
-            - validation acc@1: 42.57; Test acc@1 = 39.53 f1 = 31.75 mrr = 51.74
-        - User (1,450,344):  
-            - validation acc@1: 42.83; Test acc@1 = 39.71 f1 = 32.08 mrr = 52.19
-            - validation acc@1: 42.69; Test acc@1 = 39.72 f1 = 31.80 mrr = 52.17
-        - User + poi (1,453,592):
-            - validation acc@1: 43.34; Test acc@1 = 40.07 f1 = 31.59 mrr = 52.67
-            - validation acc@1: 43.37; Test acc@1 = 40.54 f1 = 32.56 mrr = 52.98
-        - User + Time (1,452,776):
-            - validation acc@1: 46.19; Test acc@1 = 43.08 f1 = 35.30 mrr = 54.47
-            - validation acc@1: 45.38; Test acc@1 = 42.29 f1 = 34.42 mrr = 53.95
-        - User + Duration (1,456,552):
-            - validation acc@1: 45.31; Test acc@1 = 42.18 f1 = 34.04 mrr = 53.81
-            - validation acc@1: 44.99; Test acc@1 = 41.92 f1 = 34.20 mrr = 53.73
-        - User + Duration + Time (1,458,984): 
-            - validation acc@1: 48.38; Test acc@1 = 45.03 f1 = 37.35 mrr = 55.60
-            - validation acc@1: 48.86; Test acc@1 = 45.20 f1 = 37.69 mrr = 55.59
-        - All (1,462,232)
-            - validation acc@1: 48.79; Test acc@1 = 45.50 f1 = 37.57 mrr = 55.81
-            - validation acc@1: 48.99; Test acc@1 = 45.38 f1 = 37.97 mrr = 55.79
+    - Test runs (small) for level 10-14 with features (checked that all features are useful):
 
 - Markov: 
     - Train user model with train and validation (6+2) sequences. 
-    - Each next location is sampled from the top3 most likely locations according to the markov transition matrix. If no prior knowledge, next location sampled from the top3 overall most visited locations.
+    - Top-k sampling: Each next location is sampled from the top3 most likely locations according to the markov transition matrix. 
+        - If no prior knowledge, next location sampled from the top3 overall most visited locations.
 
 
 Trained model autoregressively generate 50 locations for each test sequence. 
 
 TODO:
 - hyper-parameter search
-- implement beam search
 
 ### With mechanistic individual models. 
 
@@ -123,5 +100,4 @@ Use 4 weeks as input (TODO: Tune weeks)
 - TODO: motifs distribution
 
 ## TODO:
-- Generation with predictive models, implement beam search
 - Implement classical generation model 
