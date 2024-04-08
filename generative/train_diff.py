@@ -303,7 +303,7 @@ class TrainLoop:
         self._log_grad_norm()
         self.scaler.step(self.opt)
         self.scaler.update()
-        if self.scaler._scale < 128:
+        if self.use_fp16 and self.scaler._scale < 128:
             self.scaler._scale = torch.tensor(128).to(self.scaler._scale)
 
         self.opt.zero_grad()
@@ -316,7 +316,8 @@ class TrainLoop:
             if p.grad is not None:
                 sqsum += (p.grad**2).sum().item()
         logger.logkv_mean("grad_norm", np.sqrt(sqsum))
-        logger.logkv("scaler scale", self.scaler._scale)
+        if self.use_fp16:
+            logger.logkv("scaler scale", self.scaler._scale)
 
     def log_step(self):
         logger.logkv("step", self.step)

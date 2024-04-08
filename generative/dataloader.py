@@ -300,18 +300,17 @@ def load_data_diffusion(
     if split == "test":
         data_loader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=batch_size,  # 20,
+            batch_size=batch_size,
             shuffle=False,
             num_workers=0,
             collate_fn=collate_fn,
         )
     else:
-        sampler = DistributedSampler(dataset)
+        sampler = DistributedSampler(dataset, shuffle=shuffle)
         data_loader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=batch_size,  # 20,
+            batch_size=batch_size,
             sampler=sampler,
-            shuffle=shuffle,
             num_workers=0,
             collate_fn=collate_fn,
         )
@@ -324,23 +323,30 @@ def process_helper_fnc(seq_ls, split):
 
     def merge_and_mask(ls):
         lst = []
+        durations = []
         mask = []
 
         for i in range(len(ls["src"])):
             src = ls["src"][i]
+            src_duration = ls["src_duration"][i]
             tgt = ls["tgt"][i]
+            tgt_duration = ls["tgt_duration"][i]
 
             if split == "test":
                 if len(tgt) < 50:
                     tgt = tgt + [0] * (50 - len(tgt))
+                    tgt_duration = tgt_duration + [0] * (50 - len(tgt))
                 else:
                     tgt = tgt[:50]
+                    tgt_duration = tgt_duration[:50]
             else:
                 if len(tgt) > 128:
                     tgt = tgt[:128]
+                    tgt_duration = tgt_duration[:128]
 
             # 1 is reserved for seperation
             lst.append(src + [1] + tgt)
+            durations.append(src_duration + [1] + tgt_duration)
 
             current_mask = np.ones(len(src + tgt) + 1)
             current_mask[: (len(src) + 1)] = 0
@@ -348,6 +354,7 @@ def process_helper_fnc(seq_ls, split):
                 assert current_mask.sum() == 50
             mask.append(current_mask)
         ls["input_ids"] = lst
+        ls["input_durations"] = durations
         ls["input_mask"] = mask
         return ls
 
@@ -375,10 +382,14 @@ def get_sequence(args, split="train"):
 
     sequence_ls = pickle.load(open(path, "rb"))
 
-    processed_dict = {"src": [], "tgt": []}
+    processed_dict = {"src": [], "src_duration": [], "tgt": [], "tgt_duration": []}
     for record in sequence_ls:
         processed_dict["src"].append(record["src"])
+        # for padding and seperator, add normalization (max 2881 = 60 * 24 * 2 - 1 + 2)
+        processed_dict["src_duration"].append(record["src_duration"] + 2 / (60 * 24 * 2 + 1))
+
         processed_dict["tgt"].append(record["tgt"])
+        processed_dict["tgt_duration"].append(record["tgt_duration"] + 2 / (60 * 24 * 2 + 1))
 
     print("### Data samples...\n", processed_dict["src"][:1], processed_dict["tgt"][:1])
 
@@ -407,6 +418,7 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         # arr = np.array(arr, dtype=np.float32)
         out_kwargs = {}
         out_kwargs["input_ids"] = torch.tensor(self.text_datasets["train"][idx]["input_ids"])
+        out_kwargs["input_durations"] = torch.tensor(self.text_datasets["train"][idx]["input_durations"])
         out_kwargs["input_mask"] = torch.tensor(self.text_datasets["train"][idx]["input_mask"])
 
         return arr, out_kwargs
@@ -434,9 +446,10 @@ def collate_fn(batch):
 
     dict_batch["input_ids"] = pad_sequence(dict_batch["input_ids"], padding_value=0, batch_first=True)
     dict_batch["input_mask"] = pad_sequence(dict_batch["input_mask"], padding_value=1, batch_first=True)
+    dict_batch["input_durations"] = pad_sequence(dict_batch["input_durations"], padding_value=0, batch_first=True)
 
     for key in dict_batch:
-        if key in ["len", "input_ids", "input_mask"]:
+        if key in ["len", "input_ids", "input_durations", "input_mask"]:
             continue
         dict_batch[key] = pad_sequence(dict_batch[key], padding_value=0, batch_first=True)
 

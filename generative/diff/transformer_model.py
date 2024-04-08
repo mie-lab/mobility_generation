@@ -4,6 +4,7 @@ from transformers import AutoConfig
 from transformers.models.bert.modeling_bert import BertEncoder, BertConfig
 
 import torch
+import torch.nn.functional as F
 
 import torch.nn as nn
 
@@ -28,6 +29,7 @@ class TransformerNetModel(nn.Module):
         hidden_t_dim,
         num_encoder_layers,
         hidden_size=768,
+        num_attention_heads=12,
         dropout=0,
         max_location=None,
         learned_mean_embed=False,
@@ -41,17 +43,41 @@ class TransformerNetModel(nn.Module):
         model_config.hidden_size = hidden_size
         model_config.intermediate_size = hidden_size * 4
         model_config.max_position_embeddings = 768  # full dataset requires > 512
+        model_config.num_attention_heads = num_attention_heads
 
         self.input_dims = input_dims
         self.hidden_t_dim = hidden_t_dim
         self.output_dims = input_dims
         self.dropout = dropout
-        self.hidden_size = model_config.hidden_size
+        self.hidden_size = hidden_size
 
-        self.word_embedding = nn.Embedding(max_location, self.input_dims)
+        # embeds
+        self.token_embedding = nn.Embedding(max_location, self.input_dims)
+        self.dur_embedding = nn.Linear(1, self.input_dims)
+
+        # network for encoding
+        self.embed_linear = nn.Linear(self.input_dims * 2, self.input_dims)
+        self.embed_final = nn.Linear(self.input_dims, self.input_dims)
+        self.embed_norm = nn.LayerNorm(self.input_dims)
+        self.embed_norm2 = nn.LayerNorm(self.input_dims)
+        self.linear1 = torch.nn.Linear(self.input_dims, self.input_dims * 4)
+        self.linear2 = torch.nn.Linear(self.input_dims * 4, self.input_dims)
+        self.dropout1 = nn.Dropout(p=0.1)
+        self.dropout2 = nn.Dropout(p=0.1)
+
+        # network for decoding
+        self.out_norm = nn.LayerNorm(self.input_dims)
+        self.linear3 = torch.nn.Linear(self.input_dims, self.input_dims * 4)
+        self.linear4 = torch.nn.Linear(self.input_dims * 4, self.input_dims)
+        self.dropout3 = nn.Dropout(p=0.1)
+        self.dropout4 = nn.Dropout(p=0.1)
+
+        # heads
         self.lm_head = nn.Linear(self.input_dims, max_location)
+        self.dur_head = nn.Linear(self.input_dims, 1)
         with torch.no_grad():
-            self.lm_head.weight = self.word_embedding.weight
+            self.lm_head.weight = self.token_embedding.weight
+            # self.dur_head.weight = nn.Parameter(self.dur_embedding.weight.T)
 
         self.time_embed = nn.Sequential(
             nn.Linear(hidden_t_dim, hidden_t_dim * 4),
@@ -87,11 +113,27 @@ class TransformerNetModel(nn.Module):
         else:
             self.mean_embed = None
 
-    def get_embeds(self, input_ids):
-        return self.word_embedding(input_ids)
+    def _dense_block(self, x):
+        x = self.linear2(self.dropout1(F.relu(self.linear1(x))))
+        return self.dropout2(x)
+
+    def _out_block(self, x):
+        x = self.linear4(self.dropout3(F.relu(self.linear3(x))))
+        return self.dropout4(x)
+
+    def get_embeds(self, input_ids, input_durs):
+        out = torch.cat([self.token_embedding(input_ids), self.dur_embedding(input_durs.unsqueeze(-1))], dim=-1)
+        out = self.embed_norm(self.embed_linear(out))
+
+        out = self.embed_norm2(out + self._dense_block(out))
+        return self.embed_final(out)
 
     def get_logits(self, hidden_repr):
-        return self.lm_head(hidden_repr)
+        out = self.out_norm(hidden_repr + self._out_block(hidden_repr))
+        return self.lm_head(out)
+
+    def get_dur_predictions(self, hidden_repr):
+        return self.dur_head(hidden_repr)
 
     def forward(self, x, timesteps, padding_mask):
         """
