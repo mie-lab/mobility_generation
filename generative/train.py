@@ -22,6 +22,9 @@ from generative.gan_loss import GANLoss, periodLoss, distanceLoss
 from metrics.evaluations import Metric
 from utils.earlystopping import EarlyStopping
 
+from utils.dist_util import load_state_dict
+import blobfile as bf
+
 
 def send_to_device(inputs, device, model_type="discriminator"):
     if model_type == "discriminator":
@@ -44,16 +47,16 @@ def send_to_device(inputs, device, model_type="discriminator"):
         return x, y, x_dict, y_dict
 
 
-def pre_training(discriminator, generator, all_locs, config, world_size, device, log_dir, input_data):
+def pre_training(discriminator, generator, config, world_size, device, log_dir, input_data):
     d_train_loader, d_vali_loader, g_train_loader, g_vali_loader = get_pretrain_loaders(
-        input_data, all_locs, world_size, config, device
+        input_data, world_size, config, device
     )
 
     # loss and optimizer
     d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
-    d_optimizer = optim.Adam(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
+    d_optimizer = optim.AdamW(discriminator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay, eps=1e-5)
     g_criterion = nn.CrossEntropyLoss(reduction="mean", ignore_index=0).to(device)  # ignore_index for padding
-    g_optimizer = optim.Adam(generator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay)
+    g_optimizer = optim.AdamW(generator.parameters(), lr=config.pre_lr, weight_decay=config.weight_decay, eps=1e-5)
 
     # pretrain generator
     if is_main_process():
@@ -110,13 +113,15 @@ def training(
         patience=config.patience,
         verbose=config.verbose,
         main_process=is_main_process(),
-        delta=0.001,
-        save_name=model_type + "_pretrain",
+        delta=0.0001,
+        monitor="val_loss",
     )
 
     # Time for printing
     training_start_time = time.time()
     scheduler_count = 0
+
+    scaler = torch.cuda.amp.GradScaler(enabled=config.use_fp16)
 
     # Loop for n_epochs
     for epoch in range(config.max_epoch):
@@ -124,20 +129,27 @@ def training(
         val_loader.sampler.set_epoch(epoch)
 
         # train for one epoch
-        train_epoch(config, model, train_loader, optimizer, criterion, device, epoch, model_type)
+        train_epoch(config, model, train_loader, optimizer, criterion, device, epoch, model_type, scaler)
 
         # At the end of the epoch, do a pass on the validation set
         return_dict = validate_epoch(config, model, val_loader, criterion, device, model_type)
 
         # early_stopping needs the validation loss to check if it has decresed,
         # and if it has, it will make a checkpoint of the current model
-        early_stopping(return_dict, model)
+        checkpoint = {
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scaler": scaler.state_dict(),
+            "lr_schedule": scheduler.state_dict(),
+        }
+
+        early_stopping(return_dict, checkpoint, save_name=f"{model_type}")
 
         if early_stopping.early_stop:
             if config.verbose and is_main_process():
                 print("=" * 50)
                 print("Early stopping")
-                print("Current learning rate: {:.6f}".format(optimizer.param_groups[0]["lr"]))
+
             if scheduler_count == 2:
                 # early_stopping.best_return_dict
                 if is_main_process():
@@ -146,13 +158,20 @@ def training(
 
             # for multigpu
             dist.barrier()
-            map_location = {"cuda:%d" % 0: "cuda:%d" % device}
-            model.load_state_dict(torch.load(log_dir + f"/{model_type}_pretrain.pt", map_location=map_location))
+
+            checkpoint = load_state_dict(bf.join(log_dir, early_stopping.save_name + ".pt"))
+            model.load_state_dict(checkpoint["model"])
+            optimizer.load_state_dict(checkpoint["optimizer"])
+            scaler.load_state_dict(checkpoint["scaler"])
+            scheduler.load_state_dict(checkpoint["lr_schedule"])
+
             #
             scheduler_count += 1
             early_stopping.early_stop = False
             early_stopping.counter = 0
             scheduler.step()
+            if config.verbose and is_main_process():
+                print("Current learning rate: {:.6f}".format(optimizer.param_groups[0]["lr"]))
 
         if config.verbose:
             print("=" * 50)
@@ -162,7 +181,7 @@ def training(
     return model
 
 
-def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch, model_type):
+def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch, model_type, scaler):
     n_batches = len(data_loader)
 
     model.train()
@@ -176,15 +195,17 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
     MSE = torch.nn.MSELoss(reduction="mean")
 
     start_time = time.time()
-    optimizer.zero_grad()
+
     for i, inputs in enumerate(data_loader):
+        optimizer.zero_grad()
+
         if model_type == "discriminator":
             x, y, x_dict = send_to_device(inputs, device, model_type=model_type)
             x = x.long()
 
-            pred = model(x, x_dict)
-
-            loss = criterion(pred.view((-1,)), y.float().view((-1,)))
+            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=config.use_fp16):
+                pred = model(x, x_dict)
+                loss = criterion(pred.view((-1,)), y.float().view((-1,)))
 
             # get the accuracy
             prob = torch.sigmoid(pred).view(-1)
@@ -201,11 +222,12 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
             x, y, x_dict, y_dict = send_to_device(inputs, device, config)
             x = x.long()
 
-            loc_pred, dur_pred = model(x, x_dict)
+            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=config.use_fp16):
+                loc_pred, dur_pred = model(x, x_dict)
 
-            loc_loss_size = criterion(loc_pred, y.long().view((-1,)))
-            dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
-            loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
+                loc_loss_size = criterion(loc_pred, y.long().view((-1,)))
+                dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
+                loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
 
             # get the accuracy
             prediction = torch.topk(loc_pred, k=1, dim=-1).indices.view(-1)
@@ -221,10 +243,11 @@ def train_epoch(config, model, data_loader, optimizer, criterion, device, epoch,
 
         if torch.isnan(loss):
             assert False
-        optimizer.zero_grad()
-        loss.backward()
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
 
         running_loss += loss.item()
         training_loss += loss.item()
@@ -314,23 +337,38 @@ def validate_epoch(config, model, data_loader, criterion, device, model_type):
 
 
 def adv_training(discriminator, generator, config, world_size, device, all_locs, log_dir, input_data):
-    train_data, train_idx, vali_data, vali_idx = input_data
+    train_data, vali_data = input_data
+
+    # get the data
+    true_seqs = {"locs": [], "durs": []}
+    for x, _, x_dict, _ in tqdm(train_data):
+        x = x.squeeze().numpy().copy()
+        duration = x_dict["duration"].squeeze().numpy().copy()
+        try:
+            np.arange(len(x))
+        except TypeError:
+            continue
+
+        true_seqs["locs"].append(x)
+        true_seqs["durs"].append(duration)
 
     rollout = Rollout(generator, 0.8)
 
+    scaler = torch.cuda.amp.GradScaler(enabled=config.use_fp16)
+
     # gan loss and optimizer
     gen_gan_loss = GANLoss().to(device)
-    gen_gan_optm = optim.Adam(generator.parameters(), lr=config.g_lr, weight_decay=config.weight_decay)
+    gen_gan_optm = optim.AdamW(generator.parameters(), lr=config.g_lr, weight_decay=config.weight_decay)
     # period loss
     period_crit = periodLoss(time_interval=24).to(device)
     # distance loss
     distance_crit = distanceLoss(locations=all_locs, device=device).to(device)
 
     # evaluation
-    metrics = Metric(config, locations=all_locs, input_data=vali_data, valid_start_end_idx=vali_idx)
+    # metrics = Metric(config, locations=all_locs, input_data=vali_data, valid_start_end_idx=vali_idx)
 
     d_criterion = nn.BCEWithLogitsLoss(reduction="mean").to(device)
-    d_optimizer = optim.Adam(discriminator.parameters(), lr=config.d_lr, weight_decay=config.weight_decay)
+    d_optimizer = optim.AdamW(discriminator.parameters(), lr=config.d_lr, weight_decay=config.weight_decay)
 
     for epoch in range(config.max_epoch):
         # Train the generator for one step
@@ -346,14 +384,14 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         for _ in range(config.g_step):
             # evaluate current generator performance
             samples = generate_samples(generator, config.generate_len + 1, single_len=64, num=128)
-            jsds = metrics.get_individual_jsds(gene_data=samples)
+            # jsds = metrics.get_individual_jsds(gene_data=samples)
 
-            if is_main_process():
-                print(
-                    "Metric: distance {:.4f}, rg {:.4f}, period {:.4f}, all_topk {:.4f}, topk {:.4f}".format(
-                        jsds[0], jsds[1], jsds[2], jsds[3], jsds[4]
-                    )
-                )
+            # if is_main_process():
+            #     print(
+            #         "Metric: distance {:.4f}, rg {:.4f}, period {:.4f}, all_topk {:.4f}, topk {:.4f}".format(
+            #             jsds[0], jsds[1], jsds[2], jsds[3], jsds[4]
+            #         )
+            #     )
 
             # train
             start_time = time.time()
@@ -390,13 +428,16 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
                 generator, config.generate_len, num=config.num_gen_samples, single_len=1024, print_progress=True
             )
             # sample approapriate amount of training data
-            curr_train_idx = train_idx
-            if len(train_idx) > config.num_gen_samples:
-                curr_train_idx = random.sample(train_idx, config.num_gen_samples)
+            curr_train_idx = np.arange(len(true_seqs["locs"]))
+            if len(curr_train_idx) > config.num_gen_samples:
+                curr_train_idx = np.array(random.sample(range(len(curr_train_idx)), config.num_gen_samples))
+                curr_train_idx = np.sort(curr_train_idx).astype(int)
 
             d_train_data, d_train_loader = get_discriminator_dataloaders(
-                train_data=train_data,
-                train_idx=curr_train_idx,
+                train_data={
+                    "locs": [true_seqs["locs"][i] for i in curr_train_idx],
+                    "durs": [true_seqs["durs"][i] for i in curr_train_idx],
+                },
                 fake_data=samples,
                 world_size=world_size,
                 config=config,
@@ -416,18 +457,23 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
                     device,
                     epoch=i,
                     model_type="discriminator",
+                    scaler=scaler,
                 )
 
-        # if epoch > 10:
-        #     samples = generate_samples(
-        #         generator, config.generate_len, num=config.num_gen_samples, single_len=1024, print_progress=False
-        #     )
-        #     save_path = os.path.join(config.temp_save_root, "temp", f"generated_samples_{epoch}.pk")
-        #     with open(save_path, "wb") as handle:
-        #         pickle.dump(samples, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        if epoch > 1:
+            samples = generate_samples(
+                generator,
+                config.generate_len + 1,
+                num=config.num_gen_samples,
+                single_len=1024,
+                print_progress=False,
+            )
+            save_path = os.path.join("runs", "temp", f"generated_samples_{epoch}.pk")
+            with open(save_path, "wb") as handle:
+                pickle.dump(samples, handle, protocol=pickle.HIGHEST_PROTOCOL)
         # save models
-        torch.save(generator.state_dict(), log_dir + "/generator.pt")
-        torch.save(discriminator.state_dict(), log_dir + "/discriminator.pt")
+        torch.save(generator.state_dict(), log_dir + "/generator_final.pt")
+        torch.save(discriminator.state_dict(), log_dir + "/discriminator_final.pt")
 
 
 def train_generator(generator, discriminator, samples, rollout, gen_gan_loss, gen_gan_optm, config, device, crit=None):

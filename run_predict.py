@@ -4,15 +4,21 @@ import torch
 import os
 
 import pandas as pd
+import geopandas as gpd
 import datetime
 import pickle
+from shapely import wkt
+import json
+import numpy as np
+from json import JSONEncoder
 
 from easydict import EasyDict as edict
 
-from loc_predict.dataloader import get_dataloaders
+from loc_predict.dataloader import load_data_predict
 from loc_predict.utils import get_models, get_trained_nets, get_test_result, get_generated_sequences
 from loc_predict.models.markov import markov_transition_prob
 from utils.utils import load_data, setup_seed, load_config, init_save_path, get_train_test
+from utils.dist_util import load_state_dict
 
 
 def single_run(train_loader, val_loader, test_loader, config, device, log_dir):
@@ -33,29 +39,35 @@ def single_run(train_loader, val_loader, test_loader, config, device, log_dir):
     return result_ls
 
 
-def preprocess_datasets(config):
-    # read and preprocess
-    sp = pd.read_csv(os.path.join(config.temp_save_root, "sp_small.csv"), index_col="id")
-    loc = pd.read_csv(os.path.join(config.temp_save_root, "loc_s2_level10_14.csv"))
-    if config.if_embed_poi:
-        loc_poi = pd.DataFrame(pickle.load(open(os.path.join(config.temp_save_root, "s2_loc_poi_level10_14.pk"), "rb")))
-        loc = loc.merge(loc_poi, left_on="s2_id", right_on="loc_id", how="left").drop(columns={"loc_id"})
+def get_data_for_markov(type):
+    sp = pd.read_csv(os.path.join(f"./data/sp_{type}.csv"), index_col="id")
+    loc = pd.read_csv(os.path.join("./data/loc_s2_level10_13.csv"), index_col="id")
+
     sp = load_data(sp, loc)
 
-    # get data
-    train_data, vali_data, test_data = get_train_test(sp)
-    print(
-        f"Max location id:{train_data.location_id.max()}, unique location id:{train_data.location_id.unique().shape[0]}"
-    )
-    config["total_loc_num"] = int(train_data.location_id.max() + 1)
-    config["total_user_num"] = int(train_data.user_id.max() + 1)
+    # get all possible locations
+    all_locs = pd.read_csv("./data/s2_loc_visited_level10_13.csv", index_col="id")
+    all_locs["geometry"] = all_locs["geometry"].apply(wkt.loads)
+    all_locs = gpd.GeoDataFrame(all_locs, geometry="geometry", crs="EPSG:4326")
+    # transform to projected coordinate systems
+    all_locs = all_locs.to_crs("EPSG:2056")
 
-    return train_data, vali_data, test_data
+    train_data, vali_data, test_data, all_locs = get_train_test(sp, all_locs=all_locs)
+    print(
+        f"Max loc id {all_locs.loc_id.max()}, min loc id {all_locs.loc_id.min()}, unique loc id:{all_locs.loc_id.unique().shape[0]}"
+    )
+
+    return train_data, vali_data, test_data, all_locs
+
+
+class NumpyArrayEncoder(JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return JSONEncoder.default(self, obj)
 
 
 if __name__ == "__main__":
-    setup_seed(1)
-
     # load configs
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -71,45 +83,56 @@ if __name__ == "__main__":
     config = load_config(args.config)
     config = edict(config)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # device = torch.device("cpu")
+    setup_seed(config.seed)
 
-    train_data, vali_data, test_data = preprocess_datasets(config)
-    train_loader, val_loader, test_loader = get_dataloaders(train_data, vali_data, test_data, config)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    data_test = load_data_predict(batch_size=config.batch_size, data_args=config, split="test", shuffle=False)
 
     timestamp_now = int(datetime.datetime.now().timestamp())
     if "mhsa" in args.config:  # neural networks
         if not config.use_pretrain:  # for training
+            data_train = load_data_predict(batch_size=config.batch_size, data_args=config, shuffle=True)
+            data_valid = load_data_predict(batch_size=config.batch_size, data_args=config, split="valid", shuffle=False)
+
             # possibility to enable multiple runs
             result_ls = []
-            for i in range(2):
+            for i in range(1):
                 # train, validate and test
                 log_dir = init_save_path(config, time_now=timestamp_now)
                 # res_single contains the performance of validation and test of the current run
-                res_single = single_run(train_loader, val_loader, test_loader, config, device, log_dir)
+                res_single = single_run(data_train, data_valid, data_test, config, device, log_dir)
                 result_ls.extend(res_single)
 
             # save results
             result_df = pd.DataFrame(result_ls)
-            train_type = "none"
+            train_type = "default"
             filename = os.path.join(
                 config.save_root, f"{config.dataset}_{config.networkName}_{train_type}_{str(timestamp_now)}.csv"
             )
             result_df.to_csv(filename, index=False)
         else:  # for generation
             model = get_models(config, device)
-            model.load_state_dict(torch.load(os.path.join(config.save_root, config.pretrain_filepath, "checkpoint.pt")))
+            checkpoint = load_state_dict(os.path.join(config.save_root, config.pretrain_filepath, config.model_name))
+            model.load_state_dict(checkpoint["model"])
 
-            generated_df = get_generated_sequences(config, model, test_loader, device)
+            generated_dict = get_generated_sequences(config, model, data_test, device)
 
             filename = os.path.join(
-                config.save_root, f"{config.dataset}_{config.networkName}_generation_{str(timestamp_now)}.csv"
+                config.save_root, f"{config.dataset}_{config.networkName}_generation_{str(timestamp_now)}.json"
             )
-            generated_df.to_csv(filename, index=True)
-
+            fout = open(filename, "a")
+            for recov in generated_dict["pred"]:
+                print(
+                    json.dumps({"recover": recov}, cls=NumpyArrayEncoder),
+                    file=fout,
+                )
+            fout.close()
     elif "markov" in args.config:  # markov model
+        train_df, vali_df, test_df, all_locs_df = get_data_for_markov(type=config.dataset_variation)
+
         # construct markov matrix based on train and validation dataset
-        train_vali_data = pd.concat([train_data, vali_data])
+        train_vali_data = pd.concat([train_df, vali_df])
 
         transition_df = (
             train_vali_data.groupby(["user_id"]).apply(markov_transition_prob, n=config.n_dependence).reset_index()
@@ -117,11 +140,18 @@ if __name__ == "__main__":
 
         groupby_transition = transition_df.groupby("user_id")
 
-        generated_df = get_generated_sequences(config, groupby_transition, test_loader)
+        generated_dict = get_generated_sequences(config, groupby_transition, data_test)
+
         filename = os.path.join(
-            config.save_root, f"{config.dataset}_{config.networkName}_generation_{str(timestamp_now)}.csv"
+            config.save_root, f"{config.dataset}_{config.networkName}_generation_{str(timestamp_now)}.json"
         )
-        generated_df.to_csv(filename, index=True)
+        fout = open(filename, "a")
+        for recov in generated_dict["pred"]:
+            print(
+                json.dumps({"recover": recov}, cls=NumpyArrayEncoder),
+                file=fout,
+            )
+        fout.close()
 
     else:
         raise AttributeError("Prediction method not implemented.")

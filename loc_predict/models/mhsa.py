@@ -24,6 +24,7 @@ class TransEncoder(nn.Module):
         configuration.n_head = config.nhead
 
         self.model = GPT2Model(configuration)
+        # we use our own embedding (AllEmbedding)
         self.model.set_input_embeddings(None)
 
         self.fc = FullyConnected(self.d_input, config, if_residual_layer=True)

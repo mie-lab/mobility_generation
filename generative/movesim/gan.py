@@ -13,7 +13,7 @@ class AllEmbedding(nn.Module):
         # emberdding layers
 
         # location embedding
-        self.emb_loc = nn.Embedding(config.total_loc_num, config.base_emb_size, padding_idx=0)
+        self.emb_loc = nn.Embedding(config.max_location, config.base_emb_size, padding_idx=0)
         # duration is in minutes, possible duration for two days is 60 * 24 * 2 // 30
         self.if_include_duration = config.if_embed_duration
         if self.if_include_duration:
@@ -36,12 +36,11 @@ class Discriminator(nn.Module):
 
     def __init__(self, config, dropout=0.5):
         super(Discriminator, self).__init__()
-        self.num_filters = [64, 128, 128, 128, 128, 64, 64, 64, 64, 64, 64, 64]
-        self.kernel_sizes = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+        self.num_filters = [64, 64, 64, 64, 64]
+        self.kernel_sizes = [3, 3, 3, 3, 3]
 
         self.embedding = AllEmbedding(config=config)
 
-        # changed it to account for the paddings of variable length
         self.convs = nn.ModuleList(
             [nn.Conv2d(1, n, (f, config.base_emb_size)) for (n, f) in zip(self.num_filters, self.kernel_sizes)]
         )
@@ -56,13 +55,13 @@ class Discriminator(nn.Module):
         Args:
             x: (batch_size * seq_len)
         """
-        padding_mask = x != 0  # batch_size * seq_len
+        # padding_mask = x != 0  # batch_size * seq_len
 
         emb = self.embedding(x, context_dict).unsqueeze(1)  # batch_size * 1 * seq_len * emb_dim
 
         convs = [
             F.relu(conv(emb)).squeeze(3)  # batch_size * num_filter * seq_len
-            * padding_mask.unsqueeze(1).repeat(1, n, 1)[..., (k // 2) : -(k // 2)]  # for padding
+            # * padding_mask.unsqueeze(1).repeat(1, n, 1)[..., (k // 2) : -(k // 2)]  # for padding
             for (conv, n, k) in zip(self.convs, self.num_filters, self.kernel_sizes)
         ]
 
@@ -99,7 +98,7 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
         self.base_emb_size = config.base_emb_size
         self.hidden_dim = config.hidden_dim
-        self.total_loc_num = config.total_loc_num
+        self.total_loc_num = config.max_location
 
         self.device = device
         self.starting_sample = starting_sample
@@ -138,9 +137,9 @@ class Generator(nn.Module):
         self.fc_dropout2 = nn.Dropout(p=0.1)
 
         # for distance, empirical, and function matrics
-        self.linear_mat1 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
-        self.linear_mat2 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
-        self.linear_mat3 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
+        # self.linear_mat1 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
+        # self.linear_mat2 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
+        # self.linear_mat3 = nn.Linear(self.total_loc_num - 1, self.hidden_dim)
 
         self.init_params()
 
@@ -200,8 +199,8 @@ class Generator(nn.Module):
         # for padding
         # out = out * (~src_padding_mask).unsqueeze(-1).repeat(1, 1, self.base_emb_size)
         x = x.reshape(-1, self.hidden_dim)
-        dist_vec, visit_vec, fct_vec = self.matrix_calculation(input)
-        x = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec) + torch.mul(x, fct_vec)
+        # dist_vec, visit_vec, fct_vec = self.matrix_calculation(input)
+        # x = x + torch.mul(x, dist_vec) + torch.mul(x, visit_vec) + torch.mul(x, fct_vec)
 
         return self.linear(x), self.fc_dur(self.norm1(x + self._res_block(x)))
 
@@ -232,7 +231,7 @@ class Generator(nn.Module):
         :param x: (batch_size, k), current generated sequence
         :return: (batch_size, seq_len), complete generated sequence
         """
-        duration_upper_limit = 60 * 24 * 2
+        duration_upper_limit = 60 * 24 * 2 // 30 + 1
         flag = False
 
         if x is None:
@@ -252,8 +251,7 @@ class Generator(nn.Module):
                 assert False  # for padding
             s = 1
             # random sample duration
-            duration = torch.randint(low=0, high=duration_upper_limit, size=(batch_size, 1)).long().to(self.device)
-            duration = duration // 30 + 1
+            duration = torch.randint(low=1, high=duration_upper_limit, size=(batch_size, 1)).long().to(self.device)
 
         samples = {"locs": [], "durs": []}
         if flag:
@@ -265,7 +263,9 @@ class Generator(nn.Module):
                 x, duration = self.step(x, {"duration": duration})
                 x = x.multinomial(1)
                 x[x == 0] += 1  # for padding
-                duration = torch.clamp(torch.round(duration), min=1, max=duration_upper_limit + 1).long()
+
+                duration += 1
+                duration = torch.clamp(torch.round(duration), min=1, max=duration_upper_limit).long()
 
                 samples["locs"].append(x)
                 samples["durs"].append(duration)
@@ -281,7 +281,9 @@ class Generator(nn.Module):
             x, dur_pred = self.step(lis_loc[-1], {"duration": lis_dur[-1]})
             x = x.multinomial(1)
             x[x == 0] += 1  # for padding
-            dur_pred = torch.clamp(torch.round(dur_pred), min=1, max=duration_upper_limit + 1).long()
+
+            dur_pred += 1
+            dur_pred = torch.clamp(torch.round(dur_pred), min=1, max=duration_upper_limit).long()
 
             for i in range(given_len, seq_len):
                 samples["locs"].append(x)
@@ -290,7 +292,9 @@ class Generator(nn.Module):
                 x, dur_pred = self.step(x, {"duration": dur_pred})
                 x = x.multinomial(1)
                 x[x == 0] += 1  # for padding
-                dur_pred = torch.clamp(torch.round(dur_pred), min=1, max=duration_upper_limit + 1).long()
+
+                dur_pred += 1
+                dur_pred = torch.clamp(torch.round(dur_pred), min=1, max=duration_upper_limit).long()
         samples["locs"] = torch.cat(samples["locs"], dim=1)
         samples["durs"] = torch.cat(samples["durs"], dim=1)
         return samples
