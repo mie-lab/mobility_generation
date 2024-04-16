@@ -232,7 +232,7 @@ def _construct_discriminator_pretrain_dataset(input_data, max_location):
         try:
             idx_arr = np.arange(len(loc_seq))
         except TypeError:
-            # print(loc_seq)
+            print(loc_seq)
             continue
         np.random.shuffle(idx_arr)
 

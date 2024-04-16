@@ -8,12 +8,12 @@ misc:
 
   split: train
   use_pretrain: False
-  pretrain_filepath: mobis_movesim_1712524688
+  pretrain_filepath: mobis_movesim_1712866718
 
   generate_len: 50
   previous_day: 7
 
-  num_gen_samples: 102400
+  num_gen_samples: 10240
   g_step: 1
   d_step: 4
   k_d: 2
@@ -28,7 +28,7 @@ misc:
 
   verbose: True
   debug: False
-  batch_size: 256
+  batch_size: 128
   print_step: 50
   num_workers: 0
   world_size: 1

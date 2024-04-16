@@ -36,8 +36,8 @@ class Discriminator(nn.Module):
 
     def __init__(self, config, dropout=0.5):
         super(Discriminator, self).__init__()
-        self.num_filters = [64, 64, 64, 64, 64]
-        self.kernel_sizes = [3, 3, 3, 3, 3]
+        self.num_filters = [32, 32, 64, 64, 32]
+        self.kernel_sizes = [3, 5, 7, 9, 3]
 
         self.embedding = AllEmbedding(config=config)
 
@@ -55,13 +55,13 @@ class Discriminator(nn.Module):
         Args:
             x: (batch_size * seq_len)
         """
-        # padding_mask = x != 0  # batch_size * seq_len
+        padding_mask = x != 0  # batch_size * seq_len
 
         emb = self.embedding(x, context_dict).unsqueeze(1)  # batch_size * 1 * seq_len * emb_dim
 
         convs = [
             F.relu(conv(emb)).squeeze(3)  # batch_size * num_filter * seq_len
-            # * padding_mask.unsqueeze(1).repeat(1, n, 1)[..., (k // 2) : -(k // 2)]  # for padding
+            * padding_mask.unsqueeze(1).repeat(1, n, 1)[..., (k // 2) : -(k // 2)]  # for padding
             for (conv, n, k) in zip(self.convs, self.num_filters, self.kernel_sizes)
         ]
 
