@@ -53,28 +53,28 @@ class TransformerNetModel(nn.Module):
 
         # embeds
         self.token_embedding = nn.Embedding(max_location, self.input_dims)
-        self.dur_embedding = nn.Linear(1, self.input_dims)
+        # self.dur_embedding = nn.Linear(1, self.input_dims)
 
         # network for encoding
-        self.embed_linear = nn.Linear(self.input_dims * 2, self.input_dims)
-        self.embed_final = nn.Linear(self.input_dims, self.input_dims)
-        self.embed_norm = nn.LayerNorm(self.input_dims)
-        self.embed_norm2 = nn.LayerNorm(self.input_dims)
-        self.linear1 = torch.nn.Linear(self.input_dims, self.input_dims * 4)
-        self.linear2 = torch.nn.Linear(self.input_dims * 4, self.input_dims)
-        self.dropout1 = nn.Dropout(p=0.1)
-        self.dropout2 = nn.Dropout(p=0.1)
+        # self.embed_linear = nn.Linear(self.input_dims * 2, self.input_dims)
+        # self.embed_final = nn.Linear(self.input_dims, self.input_dims)
+        # self.embed_norm = nn.LayerNorm(self.input_dims)
+        # self.embed_norm2 = nn.LayerNorm(self.input_dims)
+        # self.linear1 = torch.nn.Linear(self.input_dims, self.input_dims * 4)
+        # self.linear2 = torch.nn.Linear(self.input_dims * 4, self.input_dims)
+        # self.dropout1 = nn.Dropout(p=0.1)
+        # self.dropout2 = nn.Dropout(p=0.1)
 
         # network for decoding
-        self.out_norm = nn.LayerNorm(self.input_dims)
-        self.linear3 = torch.nn.Linear(self.input_dims, self.input_dims * 4)
-        self.linear4 = torch.nn.Linear(self.input_dims * 4, self.input_dims)
-        self.dropout3 = nn.Dropout(p=0.1)
-        self.dropout4 = nn.Dropout(p=0.1)
+        # self.out_norm = nn.LayerNorm(self.input_dims)
+        # self.linear3 = torch.nn.Linear(self.input_dims, self.input_dims * 4)
+        # self.linear4 = torch.nn.Linear(self.input_dims * 4, self.input_dims)
+        # self.dropout3 = nn.Dropout(p=0.1)
+        # self.dropout4 = nn.Dropout(p=0.1)
 
         # heads
         self.lm_head = nn.Linear(self.input_dims, max_location)
-        self.dur_head = nn.Linear(self.input_dims, 1)
+        # self.dur_head = nn.Linear(self.input_dims, 1)
         with torch.no_grad():
             self.lm_head.weight = self.token_embedding.weight
             # self.dur_head.weight = nn.Parameter(self.dur_embedding.weight.T)
@@ -121,19 +121,25 @@ class TransformerNetModel(nn.Module):
         x = self.linear4(self.dropout3(F.relu(self.linear3(x))))
         return self.dropout4(x)
 
-    def get_embeds(self, input_ids, input_durs):
-        out = torch.cat([self.token_embedding(input_ids), self.dur_embedding(input_durs.unsqueeze(-1))], dim=-1)
-        out = self.embed_norm(self.embed_linear(out))
+    def get_embeds(
+        self,
+        input_ids,
+        # input_durs,
+    ):
+        # out = torch.cat([self.token_embedding(input_ids), self.dur_embedding(input_durs.unsqueeze(-1))], dim=-1)
+        # out = self.embed_norm(self.embed_linear(out))
 
-        out = self.embed_norm2(out + self._dense_block(out))
-        return self.embed_final(out)
+        # out = self.embed_norm2(out + self._dense_block(out))
+        # return self.embed_final(out)
+        return self.token_embedding(input_ids)
 
     def get_logits(self, hidden_repr):
-        out = self.out_norm(hidden_repr + self._out_block(hidden_repr))
-        return self.lm_head(out)
+        # out = self.out_norm(hidden_repr + self._out_block(hidden_repr))
+        # return self.lm_head(out)
+        return self.lm_head(hidden_repr)
 
-    def get_dur_predictions(self, hidden_repr):
-        return self.dur_head(hidden_repr)
+    # def get_dur_predictions(self, hidden_repr):
+    #     return self.dur_head(hidden_repr)
 
     def forward(self, x, timesteps, padding_mask):
         """

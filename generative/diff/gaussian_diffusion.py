@@ -638,7 +638,10 @@ class GaussianDiffusion:
 
         input_ids_mask = model_kwargs.pop("input_mask").to(t.device)
         # embedded
-        x_start_mean = model.model.module.get_embeds(input_ids_x, input_durs_x)
+        x_start_mean = model.model.module.get_embeds(
+            input_ids_x,
+            # input_durs_x,
+        )
 
         std = _extract_into_tensor(
             self.sqrt_one_minus_alphas_cumprod, th.tensor([0]).to(x_start_mean.device), x_start_mean.shape
@@ -672,15 +675,16 @@ class GaussianDiffusion:
         # Rounding error: embedding regularization
         get_logits = model.model.module.get_logits
         decoder_nll = self._token_discrete_loss(x_start, get_logits, input_ids_x, mask=padding_mask)
-        get_predict_head = model.model.module.get_dur_predictions
-        decoder_mse = self._prediction_mse_loss(x_start, get_predict_head, input_durs_x, mask=padding_mask)
+        # get_predict_head = model.model.module.get_dur_predictions
+        # decoder_mse = self._prediction_mse_loss(x_start, get_predict_head, input_durs_x, mask=padding_mask)
 
         # x_0->model_out_x_start
         input_ids_mask[padding_mask == 0] = 0
         terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_x, mask=input_ids_mask)
         # assert (model.model.module.lm_head.weight == model.model.module.word_embedding.weight).all()
 
-        decoder_loss = decoder_nll + 0.1 * decoder_mse / (decoder_mse / decoder_nll).detach()
+        # decoder_loss = decoder_nll + 0.1 * decoder_mse / (decoder_mse / decoder_nll).detach()
+        decoder_loss = decoder_nll
         terms["loss"] = terms["mse"] + tT_loss + decoder_loss
 
         if model.mean_embed is not None:
