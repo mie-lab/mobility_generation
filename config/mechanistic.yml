@@ -1,0 +1,20 @@
+misc:
+  dataset: mobis
+
+  dataset_variation: small
+  level: "10_13"
+  src_min_days: 14
+  tgt_min_days: 7
+
+  batch_size: 1
+  num_workers: 0
+  generate_len: 50
+
+  seed: 101
+
+model:
+  networkName: epr
+
+dataset:
+  data_dir: ./data/diff
+  save_root: ./runs
