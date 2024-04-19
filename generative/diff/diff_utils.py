@@ -11,6 +11,9 @@ from generative.diff import gaussian_diffusion, transformer_model
 
 
 def create_model_and_diffusion(config):
+    if config.pre_train_embed != "None":
+        loaded_embed = pickle.load(open(config.pre_train_embed, "rb")).astype(np.float32)
+
     model = transformer_model.TransformerNetModel(
         input_dims=config.hidden_dim,
         hidden_t_dim=config.hidden_t_dim,
@@ -20,6 +23,7 @@ def create_model_and_diffusion(config):
         num_encoder_layers=config.num_encoder_layers,
         max_location=config.max_location,
         learned_mean_embed=config.learned_mean_embed,
+        loaded_embed=loaded_embed,
     )
 
     betas = gaussian_diffusion.get_named_beta_schedule(config.noise_schedule, config.diffusion_steps)

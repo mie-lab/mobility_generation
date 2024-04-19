@@ -30,6 +30,7 @@ class TransformerNetModel(nn.Module):
         dropout=0,
         max_location=None,
         learned_mean_embed=False,
+        loaded_embed=None,
     ):
         super().__init__()
 
@@ -49,7 +50,10 @@ class TransformerNetModel(nn.Module):
         self.hidden_size = hidden_size
 
         # embeds
-        self.token_embedding = nn.Embedding(max_location, self.input_dims)
+        if loaded_embed is not None:
+            self.token_embedding = nn.Embedding.from_pretrained(torch.tensor(loaded_embed))
+        else:
+            self.token_embedding = nn.Embedding(max_location, self.input_dims)
 
         # heads
         self.lm_head = nn.Linear(self.input_dims, max_location)

@@ -70,7 +70,16 @@ class TrainLoop:
 
         self.early_stop_patience = early_stop_patience
 
-        self.opt = AdamW(self.master_params, lr=self.lr, weight_decay=weight_decay, eps=1e-5)
+        # control learning rate
+        param_groups = []
+        name_group = ["lm_head", "token_embedding"]
+        for name, parameter in self.model.named_parameters():
+            if np.any([n in name for n in name_group]):
+                param_groups.append({"params": [parameter], "lr": self.lr * 0.1})
+            else:
+                param_groups.append({"params": [parameter], "lr": self.lr})
+
+        self.opt = AdamW(param_groups, lr=self.lr, weight_decay=weight_decay, eps=1e-5)
         self.scaler = torch.cuda.amp.GradScaler(growth_interval=3000, init_scale=8192, enabled=self.use_fp16)
         # define learning rate schedule
         if self.decay_epochs == 0:
@@ -134,11 +143,7 @@ class TrainLoop:
                 "lr_schedule": self.scheduler_ES.state_dict(),
             }
 
-            self.ES(
-                {"loss": current_loss},
-                state_dict=checkpoint,
-                save_name=f"model_ema_{epoch}",
-            )
+            self.ES({"loss": current_loss}, state_dict=checkpoint, save_name=f"model_ema_{epoch}")
             dist.barrier()
             if self.ES.early_stop:
                 if is_main_process():
@@ -170,7 +175,11 @@ class TrainLoop:
                 self.ES.counter = 0
                 self.scheduler_ES.step()
                 if is_main_process():
-                    logger.log("Current lr: {:.6f}".format(self.opt.param_groups[0]["lr"]))
+                    logger.log(
+                        "Current lr: {:.6f} -- {:.6f}".format(
+                            self.opt.param_groups[0]["lr"], self.opt.param_groups[1]["lr"]
+                        )
+                    )
 
     def train_epoch(self, epoch, early_stop_count):
         self.ddp_model.train()
