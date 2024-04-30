@@ -59,6 +59,7 @@ TODO:
 
 ### With mechanistic individual models. 
 
+- EPR
 - DTEPR (TODO:)
 - TimeGeo (TODO:)
 - Container (TODO:)
@@ -85,8 +86,11 @@ Use 4 weeks as input (TODO: Tune weeks)
 
 - VOLUNTEER (TODO:)
     - implement
-- DiffSeq
+- DiffSeq-v2
     - loss shall be < 0.01
+    - V2 shall be initialized from random
+    - We only consider V2 
+    - pretrain slightly better
 
 ## Metrics (TODO: verify)
 

@@ -1,6 +1,7 @@
 # Sensitive
 data/
 runs/
+metrics/figures/
 paths.json
 *.out
 

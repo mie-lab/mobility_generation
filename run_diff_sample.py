@@ -62,6 +62,7 @@ def main():
     training_args["batch_size"] = config.batch_size
     training_args["dataset_variation"] = config.dataset_variation
     training_args["data_dir"] = config.data_dir
+    training_args["pre_train_embed"] = config.pre_train_embed
     training_args["save_root"] = config.save_root
     training_args["split"] = config.split
     CUDA_VISIBLE_DEVICES = int(os.environ["LOCAL_RANK"])
@@ -71,9 +72,6 @@ def main():
     logger.log("### Creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(config)
 
-    # model.load_state_dict(
-    #     dist_util.load_state_dict(os.path.join(config.model_path, config.trained_model_name), map_location="cpu")
-    # )
     checkpoint = dist_util.load_state_dict(
         os.path.join(config.model_path, config.trained_model_name), map_location="cpu"
     )
@@ -88,7 +86,7 @@ def main():
         torch.nn.Embedding(
             num_embeddings=config.max_location,
             embedding_dim=config.hidden_dim,
-            _weight=model.word_embedding.weight.clone().cpu(),
+            _weight=model.token_embedding.weight.clone().cpu(),
         )
         .eval()
         .requires_grad_(False)
@@ -102,7 +100,6 @@ def main():
         shuffle=False,
         data_args=config,
         split=config.split,
-        model_emb=model_emb.cpu(),  # using the same embedding wight with training data
     )
     data_valid = iter(data_valid)
 

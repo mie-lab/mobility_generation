@@ -11,6 +11,7 @@ from generative.diff import gaussian_diffusion, transformer_model
 
 
 def create_model_and_diffusion(config):
+    loaded_embed = None
     if config.pre_train_embed != "None":
         loaded_embed = pickle.load(open(config.pre_train_embed, "rb")).astype(np.float32)
 

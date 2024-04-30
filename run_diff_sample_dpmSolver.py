@@ -61,6 +61,7 @@ def main():
     with open(config_path, "rb") as f:
         training_args = json.load(f)
     training_args["batch_size"] = config.batch_size
+    training_args["pre_train_embed"] = config.pre_train_embed
     training_args["dataset_variation"] = config.dataset_variation
     training_args["data_dir"] = config.data_dir
     training_args["save_root"] = config.save_root
@@ -85,8 +86,8 @@ def main():
     model.to(dist_util.get_device())
     model.eval()
 
-    model_emb = torch.nn.Embedding(num_embeddings=config.max_location, embedding_dim=config.hidden_dim)
-    model_emb.weight = th.nn.Parameter(model.word_embedding.weight.clone().cpu())
+    # model_emb = torch.nn.Embedding(num_embeddings=config.max_location, embedding_dim=config.hidden_dim)
+    # model_emb.weight = th.nn.Parameter(model.word_embedding.weight.clone().cpu())
 
     print("### Sampling...on", config.split)
 
@@ -96,7 +97,7 @@ def main():
         shuffle=False,
         data_args=config,
         split=config.split,
-        model_emb=model_emb.cpu(),  # using the same embedding wight with training data
+        # model_emb=model_emb.cpu(),  # using the same embedding wight with training data
     )
     data_valid = iter(data_valid)
 
