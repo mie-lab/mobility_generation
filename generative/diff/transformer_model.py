@@ -73,9 +73,19 @@ class TransformerNetModel(nn.Module):
             nn.Linear(self.hidden_size, self.hidden_size),
         )
         self.attn = nn.MultiheadAttention(self.hidden_size, 8, batch_first=True)
-        self.norm = nn.BatchNorm1d(self.hidden_size)
-        self.linear1 = nn.Linear(self.hidden_size * 2, self.hidden_size)
-        self.dropout1 = nn.Dropout(p=0.1)
+        self.norm = nn.LayerNorm(self.hidden_size, eps=model_config.layer_norm_eps)
+        self.linear1 = nn.Sequential(
+            nn.Linear(self.hidden_size * 2, self.hidden_size),
+            nn.ReLU(),
+            nn.Dropout(p=0.1),
+        )
+        self.ff_block = nn.Sequential(
+            nn.Linear(self.hidden_size, self.hidden_size * 2),
+            nn.ReLU(),
+            nn.Dropout(p=0.1),
+            nn.Linear(self.hidden_size * 2, self.hidden_size),
+            nn.Dropout(p=0.1),
+        )
 
         self.input_up_proj = nn.Sequential(
             nn.Linear(input_dims, self.hidden_size),
@@ -104,14 +114,6 @@ class TransformerNetModel(nn.Module):
         else:
             self.mean_embed = None
 
-    def _dense_block(self, x):
-        x = self.linear2(self.dropout1(F.relu(self.linear1(x))))
-        return self.dropout2(x)
-
-    def _out_block(self, x):
-        x = self.linear4(self.dropout3(F.relu(self.linear3(x))))
-        return self.dropout4(x)
-
     def get_embeds(self, input_ids):
         return self.token_embedding(input_ids)
 
@@ -122,13 +124,12 @@ class TransformerNetModel(nn.Module):
         emb_x = self.input_up_proj(x)
         emb_xy = self.input_up_proj_xy(xy)
 
-        context, _ = self.attn(emb_x, emb_xy, emb_xy, key_padding_mask=key_padding_mask)
-
-        emb_x = torch.cat([emb_x, context], 1)
-        emb_x = self.dropout1(F.relu(self.linear1(emb_x)))
+        context, _ = self.attn(emb_x, emb_xy, emb_xy, key_padding_mask=(1 - key_padding_mask).to(bool))
 
         # residual connection
-        emb_x = self.norm(emb_x + self._ff_block(emb_x))
+        emb_x = torch.cat([emb_x, context], -1)
+        emb_x = self.linear1(emb_x)
+        emb_x = self.norm(emb_x + self.ff_block(emb_x))
         return emb_x
 
         # x = self.linear2(self.dropout1(F.relu(self.linear1(x))))

@@ -375,7 +375,7 @@ def process_helper_fnc(seq_ls, split):
     seq_dataset = seq_dataset.map(
         merge_and_mask,
         batched=True,
-        num_proc=1,
+        num_proc=4,
         desc="merge and mask",
         remove_columns=["src", "src_xy", "tgt", "tgt_xy"],
     )

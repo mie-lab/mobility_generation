@@ -198,7 +198,7 @@ class GaussianDiffusion:
         log_variance = _extract_into_tensor(self.log_one_minus_alphas_cumprod, t, x_start.shape)
         return mean, variance, log_variance
 
-    def q_sample(self, x_start, t, noise=None, mask=None, mean_embed=None):
+    def q_sample(self, x_start, t, noise=None, mask=None, mean_embed=None, denoise=True):
         """
         Diffuse the data for a given number of diffusion steps.
 
@@ -231,7 +231,7 @@ class GaussianDiffusion:
                 + mean_embed_expand.detach() * mask
             )
 
-        if self.denoise:
+        if denoise:
             mask_rate = (
                 _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape[:2]) * self.denoise_rate
             )
@@ -654,7 +654,7 @@ class GaussianDiffusion:
             noise_x = th.randn_like(x_start)
         # reparametrization trick -> noise only on y
         x_t = self.q_sample(x_start, t, noise=noise_x, mask=input_ids_mask, mean_embed=model.mean_embed)
-        x_xys = self.q_sample(input_xys, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed)
+        x_xys = self.q_sample(input_xys, t, noise=noise, mask=input_ids_mask, mean_embed=None, denoise=False)
 
         terms = {}
 
@@ -764,14 +764,14 @@ class _WrappedModel:
         self.rescale_timesteps = rescale_timesteps
         self.original_num_steps = original_num_steps
 
-    def __call__(self, x, ts, padding_mask, **kwargs):
+    def __call__(self, x, xy, ts, padding_mask, **kwargs):
         # print(ts)
         map_tensor = th.tensor(self.timestep_map, device=ts.device, dtype=ts.dtype)
         new_ts = map_tensor[ts]
         # print(new_ts)
         if self.rescale_timesteps:
             new_ts = new_ts.float() * (1000.0 / self.original_num_steps)
-        return self.model(x, new_ts, padding_mask, **kwargs)
+        return self.model(x, xy, new_ts, padding_mask, **kwargs)
 
     @property
     def mean_embed(self):
