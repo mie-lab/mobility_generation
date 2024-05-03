@@ -101,12 +101,17 @@ class TransformerNetModel(nn.Module):
 
         self.dropout = nn.Dropout(model_config.hidden_dropout_prob)
 
-        if self.output_dims != self.hidden_size:
-            self.output_down_proj = nn.Sequential(
-                nn.Linear(self.hidden_size, self.hidden_size),
-                nn.Tanh(),
-                nn.Linear(self.hidden_size, self.output_dims),
-            )
+        self.output_down_proj = nn.Sequential(
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.Tanh(),
+            nn.Linear(self.hidden_size, self.output_dims),
+        )
+
+        self.output_down_proj_xy = nn.Sequential(
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.Tanh(),
+            nn.Linear(self.hidden_size, 2),
+        )
 
         if learned_mean_embed:
             self.mean_embed = nn.Parameter(torch.randn(input_dims))
@@ -157,12 +162,12 @@ class TransformerNetModel(nn.Module):
             emb_inputs, attention_mask=padding_mask[:, None, None, :]
         ).last_hidden_state
 
-        if self.output_dims != self.hidden_size:
-            h = self.output_down_proj(input_trans_hidden_states)
-        else:
-            h = input_trans_hidden_states
+        h = self.output_down_proj(input_trans_hidden_states)
         h = h.type(x.dtype)
-        return h
+
+        pred_xy = self.output_down_proj_xy(input_trans_hidden_states)
+        pred_xy = pred_xy.type(x.dtype)
+        return h, pred_xy
 
 
 def timestep_embedding(timesteps, dim, max_period=10000):

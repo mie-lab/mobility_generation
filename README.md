@@ -88,9 +88,10 @@ Use 4 weeks as input (TODO: Tune weeks)
     - implement
 - DiffSeq-v2
     - loss shall be < 0.01
-    - V2 shall be initialized from random
     - We only consider V2 
-    - pretrain slightly better
+        - The mean embedding of V2 shall be initialized from random
+        - pretrain slightly better
+        - layer 2 better than layer 6
 
 ## Metrics (TODO: verify)
 

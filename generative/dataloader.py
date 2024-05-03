@@ -375,7 +375,7 @@ def process_helper_fnc(seq_ls, split):
     seq_dataset = seq_dataset.map(
         merge_and_mask,
         batched=True,
-        num_proc=4,
+        num_proc=2,
         desc="merge and mask",
         remove_columns=["src", "src_xy", "tgt", "tgt_xy"],
     )
@@ -389,7 +389,7 @@ def process_helper_fnc(seq_ls, split):
 def get_sequence(args, split="train"):
     print("#" * 30, "\nLoading dataset {} from {}...".format(args.dataset, args.data_dir))
 
-    print(f"### Loading form the {split} set...")
+    print(f"### Loading from the {split} set...")
     path = f"{args.data_dir}/{split}_level{args.level}_{args.src_min_days}_{args.tgt_min_days}_{args.dataset_variation}_continues.pk"
 
     sequence_ls = pickle.load(open(path, "rb"))

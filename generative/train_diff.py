@@ -75,7 +75,7 @@ class TrainLoop:
         name_group = ["lm_head", "token_embedding"]
         for name, parameter in self.model.named_parameters():
             if np.any([n in name for n in name_group]):
-                param_groups.append({"params": [parameter], "lr": self.lr * 0.1})
+                param_groups.append({"params": [parameter], "lr": self.lr})
             else:
                 param_groups.append({"params": [parameter], "lr": self.lr})
 
@@ -175,11 +175,7 @@ class TrainLoop:
                 self.ES.counter = 0
                 self.scheduler_ES.step()
                 if is_main_process():
-                    logger.log(
-                        "Current lr: {:.6f} -- {:.6f}".format(
-                            self.opt.param_groups[0]["lr"], self.opt.param_groups[1]["lr"]
-                        )
-                    )
+                    logger.log("Current lr: {:.6f}".format(self.opt.param_groups[0]["lr"]))
 
     def train_epoch(self, epoch, early_stop_count):
         self.ddp_model.train()
