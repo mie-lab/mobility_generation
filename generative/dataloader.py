@@ -323,30 +323,43 @@ def process_helper_fnc(seq_ls, split):
 
     def merge_and_mask(ls):
         lst = []
-        durations = []
+        lst_xy = []
+        # durations = []
         mask = []
 
         for i in range(len(ls["src"])):
             src = ls["src"][i]
-            src_duration = ls["src_duration"][i]
+            src_xy = ls["src_xy"][i]
+            # src_duration = ls["src_duration"][i]
             tgt = ls["tgt"][i]
-            tgt_duration = ls["tgt_duration"][i]
+            tgt_xy = ls["tgt_xy"][i]
+            # tgt_duration = ls["tgt_duration"][i]
 
             if split == "test":
                 if len(tgt) < 50:
                     tgt = tgt + [0] * (50 - len(tgt))
-                    tgt_duration = tgt_duration + [0] * (50 - len(tgt))
+
+                    remain = []
+                    for _ in range(50 - len(tgt)):
+                        remain.append([0, 0])
+                    tgt_xy = tgt_xy + remain
+
+                    # tgt_duration = tgt_duration + [0] * (50 - len(tgt))
                 else:
                     tgt = tgt[:50]
-                    tgt_duration = tgt_duration[:50]
+
+                    tgt_xy = tgt_xy[:50]
+                    # tgt_duration = tgt_duration[:50]
             else:
                 if len(tgt) > 128:
                     tgt = tgt[:128]
-                    tgt_duration = tgt_duration[:128]
+                    tgt_xy = tgt_xy[:128]
+                    # tgt_duration = tgt_duration[:128]
 
             # 1 is reserved for seperation
             lst.append(src + [1] + tgt)
-            durations.append(src_duration + [1] + tgt_duration)
+            lst_xy.append(src_xy + [[1, 1]] + tgt_xy)
+            # durations.append(src_duration + [1] + tgt_duration)
 
             current_mask = np.ones(len(src + tgt) + 1)
             current_mask[: (len(src) + 1)] = 0
@@ -354,16 +367,17 @@ def process_helper_fnc(seq_ls, split):
                 assert current_mask.sum() == 50
             mask.append(current_mask)
         ls["input_ids"] = lst
-        ls["input_durations"] = durations
+        ls["input_xys"] = lst_xy
+        # ls["input_durations"] = durations
         ls["input_mask"] = mask
         return ls
 
     seq_dataset = seq_dataset.map(
         merge_and_mask,
         batched=True,
-        num_proc=2,
+        num_proc=1,
         desc="merge and mask",
-        remove_columns=["src", "tgt"],
+        remove_columns=["src", "src_xy", "tgt", "tgt_xy"],
     )
 
     raw_datasets = datasets.DatasetDict()
@@ -376,20 +390,20 @@ def get_sequence(args, split="train"):
     print("#" * 30, "\nLoading dataset {} from {}...".format(args.dataset, args.data_dir))
 
     print(f"### Loading form the {split} set...")
-    path = (
-        f"{args.data_dir}/{split}_level{args.level}_{args.src_min_days}_{args.tgt_min_days}_{args.dataset_variation}.pk"
-    )
+    path = f"{args.data_dir}/{split}_level{args.level}_{args.src_min_days}_{args.tgt_min_days}_{args.dataset_variation}_continues.pk"
 
     sequence_ls = pickle.load(open(path, "rb"))
 
-    processed_dict = {"src": [], "src_duration": [], "tgt": [], "tgt_duration": []}
+    processed_dict = {"src": [], "src_xy": [], "tgt": [], "tgt_xy": []}
     for record in sequence_ls:
         processed_dict["src"].append(record["src"])
+        processed_dict["src_xy"].append(record["src_xy"])
         # for padding and seperator, add normalization (max 2881 = 60 * 24 * 2 - 1 + 2)
-        processed_dict["src_duration"].append(record["src_duration"] + 2 / (60 * 24 * 2 + 1))
+        # processed_dict["src_duration"].append(record["src_duration"] + 2 / (60 * 24 * 2 + 1))
 
         processed_dict["tgt"].append(record["tgt"])
-        processed_dict["tgt_duration"].append(record["tgt_duration"] + 2 / (60 * 24 * 2 + 1))
+        processed_dict["tgt_xy"].append(record["tgt_xy"])
+        # processed_dict["tgt_duration"].append(record["tgt_duration"] + 2 / (60 * 24 * 2 + 1))
 
     print("### Data samples...\n", processed_dict["src"][:1], processed_dict["tgt"][:1])
 
@@ -418,7 +432,8 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         # arr = np.array(arr, dtype=np.float32)
         out_kwargs = {}
         out_kwargs["input_ids"] = torch.tensor(self.text_datasets["train"][idx]["input_ids"])
-        out_kwargs["input_durations"] = torch.tensor(self.text_datasets["train"][idx]["input_durations"])
+        out_kwargs["input_xys"] = torch.tensor(self.text_datasets["train"][idx]["input_xys"])
+        # out_kwargs["input_durations"] = torch.tensor(self.text_datasets["train"][idx]["input_durations"])
         out_kwargs["input_mask"] = torch.tensor(self.text_datasets["train"][idx]["input_mask"])
 
         return arr, out_kwargs
@@ -429,27 +444,27 @@ def collate_fn(batch):
     src_batch = []
 
     # get one sample batch
-    # dict_batch = {"len": []}
-    dict_batch = {}
+    dict_batch = {"len": []}
+    # dict_batch = {}
     for key in batch[0][-1]:
         dict_batch[key] = []
 
     for arr_sample, out_kwargs_dict in batch:
         src_batch.append(arr_sample)
 
-        # dict_batch["len"].append(len(arr_sample))
+        dict_batch["len"].append(len(arr_sample))
         for key in out_kwargs_dict:
             dict_batch[key].append(out_kwargs_dict[key])
 
     src_batch = pad_sequence(src_batch, padding_value=0, batch_first=True)
-    # dict_batch["len"] = torch.tensor(dict_batch["len"], dtype=torch.int64)
 
-    dict_batch["input_ids"] = pad_sequence(dict_batch["input_ids"], padding_value=0, batch_first=True)
+    dict_batch["len"] = torch.tensor(dict_batch["len"], dtype=torch.int64)
+    # dict_batch["input_ids"] = pad_sequence(dict_batch["input_ids"], padding_value=0, batch_first=True)
     dict_batch["input_mask"] = pad_sequence(dict_batch["input_mask"], padding_value=1, batch_first=True)
-    dict_batch["input_durations"] = pad_sequence(dict_batch["input_durations"], padding_value=0, batch_first=True)
+    # dict_batch["input_durations"] = pad_sequence(dict_batch["input_durations"], padding_value=0, batch_first=True)
 
     for key in dict_batch:
-        if key in ["len", "input_ids", "input_durations", "input_mask"]:
+        if key in ["len", "input_durations", "input_mask"]:
             continue
         dict_batch[key] = pad_sequence(dict_batch[key], padding_value=0, batch_first=True)
 

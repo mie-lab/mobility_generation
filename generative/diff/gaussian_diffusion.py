@@ -632,16 +632,18 @@ class GaussianDiffusion:
                  Some mean or variance settings may also have other keys.
         """
         assert "input_ids" in model_kwargs
-        input_ids_x = model_kwargs.pop("input_ids").to(t.device).long()
-        input_durs_x = model_kwargs.pop("input_durations").to(t.device).float()
-        padding_mask = (input_ids_x != 0) * 1
-
+        input_ids = model_kwargs.pop("input_ids").to(t.device).long()
+        input_xys = model_kwargs.pop("input_xys").to(t.device).float()
         input_ids_mask = model_kwargs.pop("input_mask").to(t.device)
+
+        # padding_mask
+        max_len = input_ids.shape[1]
+        lens = model_kwargs.pop("len").to(t.device).int()
+        padding_mask = (th.arange(max_len).expand(len(lens), max_len).to(t.device) < lens.unsqueeze(1)) * 1
+        # padding_mask = (input_ids_x != 0) * 1
+
         # embedded
-        x_start_mean = model.model.module.get_embeds(
-            input_ids_x,
-            # input_durs_x,
-        )
+        x_start_mean = model.model.module.get_embeds(input_ids)
 
         std = _extract_into_tensor(
             self.sqrt_one_minus_alphas_cumprod, th.tensor([0]).to(x_start_mean.device), x_start_mean.shape
@@ -649,14 +651,15 @@ class GaussianDiffusion:
 
         x_start = self._get_x_start(x_start_mean, std)
         if noise is None:
-            noise = th.randn_like(x_start)
+            noise_x = th.randn_like(x_start)
         # reparametrization trick -> noise only on y
-        x_t = self.q_sample(x_start, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed)
+        x_t = self.q_sample(x_start, t, noise=noise_x, mask=input_ids_mask, mean_embed=model.mean_embed)
+        x_xys = self.q_sample(input_xys, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed)
 
         terms = {}
 
         # model use x_t (partially noised) to predict x_start
-        model_output = model(x_t, self._scale_timesteps(t), padding_mask, **model_kwargs)
+        model_output = model(x_t, x_xys, self._scale_timesteps(t), padding_mask, **model_kwargs)
         assert model_output.shape == x_start.shape
 
         # Lt-1
@@ -674,13 +677,13 @@ class GaussianDiffusion:
 
         # Rounding error: embedding regularization
         get_logits = model.model.module.get_logits
-        decoder_nll = self._token_discrete_loss(x_start, get_logits, input_ids_x, mask=padding_mask)
+        decoder_nll = self._token_discrete_loss(x_start, get_logits, input_ids, mask=padding_mask)
         # get_predict_head = model.model.module.get_dur_predictions
         # decoder_mse = self._prediction_mse_loss(x_start, get_predict_head, input_durs_x, mask=padding_mask)
 
         # x_0->model_out_x_start
         input_ids_mask[padding_mask == 0] = 0
-        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids_x, mask=input_ids_mask)
+        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids, mask=input_ids_mask)
         # assert (model.model.module.lm_head.weight == model.model.module.word_embedding.weight).all()
 
         # decoder_loss = decoder_nll + 0.1 * decoder_mse / (decoder_mse / decoder_nll).detach()

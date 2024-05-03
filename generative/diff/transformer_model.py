@@ -66,12 +66,22 @@ class TransformerNetModel(nn.Module):
             nn.Linear(hidden_t_dim * 4, model_config.hidden_size),
         )
 
-        if self.input_dims != self.hidden_size:
-            self.input_up_proj = nn.Sequential(
-                nn.Linear(input_dims, self.hidden_size),
-                nn.Tanh(),
-                nn.Linear(self.hidden_size, self.hidden_size),
-            )
+        # the residual
+        self.input_up_proj_xy = nn.Sequential(
+            nn.Linear(2, self.hidden_size),
+            nn.Tanh(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+        )
+        self.attn = nn.MultiheadAttention(self.hidden_size, 8, batch_first=True)
+        self.norm = nn.BatchNorm1d(self.hidden_size)
+        self.linear1 = nn.Linear(self.hidden_size * 2, self.hidden_size)
+        self.dropout1 = nn.Dropout(p=0.1)
+
+        self.input_up_proj = nn.Sequential(
+            nn.Linear(input_dims, self.hidden_size),
+            nn.Tanh(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+        )
 
         self.input_transformers = BertEncoder(model_config)
 
@@ -108,7 +118,23 @@ class TransformerNetModel(nn.Module):
     def get_logits(self, hidden_repr):
         return self.lm_head(hidden_repr)
 
-    def forward(self, x, timesteps, padding_mask):
+    def _res_block_combine(self, x, xy, key_padding_mask):
+        emb_x = self.input_up_proj(x)
+        emb_xy = self.input_up_proj_xy(xy)
+
+        context, _ = self.attn(emb_x, emb_xy, emb_xy, key_padding_mask=key_padding_mask)
+
+        emb_x = torch.cat([emb_x, context], 1)
+        emb_x = self.dropout1(F.relu(self.linear1(emb_x)))
+
+        # residual connection
+        emb_x = self.norm(emb_x + self._ff_block(emb_x))
+        return emb_x
+
+        # x = self.linear2(self.dropout1(F.relu(self.linear1(x))))
+        # return self.dropout2(x)
+
+    def forward(self, x, xy, timesteps, padding_mask):
         """
         Apply the model to an input batch.
 
@@ -118,10 +144,7 @@ class TransformerNetModel(nn.Module):
         """
         emb_t = self.time_embed(timestep_embedding(timesteps, self.hidden_t_dim))
 
-        if self.input_dims != self.hidden_size:
-            emb_x = self.input_up_proj(x)
-        else:
-            emb_x = x
+        emb_x = self._res_block_combine(x, xy, padding_mask)
 
         seq_length = x.size(1)
         position_ids = self.position_ids[:, :seq_length]
