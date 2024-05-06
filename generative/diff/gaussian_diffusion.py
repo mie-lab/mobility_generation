@@ -651,14 +651,15 @@ class GaussianDiffusion:
         # reparametrization trick -> noise only on y
         x_t = self.q_sample(x_start, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed)
 
+        context = {}
         noise = th.randn_like(input_xys)
         xy_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(t.device)
-        x_xys = th.where(xy_mask == 0, input_xys, noise)
+        context["xy"] = th.where(xy_mask == 0, input_xys, noise)
 
         terms = {}
 
         # model use x_t (partially noised) to predict x_start
-        model_output = model(x_t, x_xys, self._scale_timesteps(t), padding_mask, **model_kwargs)
+        model_output = model(x_t, context, self._scale_timesteps(t), padding_mask, **model_kwargs)
         assert model_output.shape == x_start.shape
 
         # Lt-1

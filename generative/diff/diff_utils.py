@@ -17,7 +17,6 @@ def create_model_and_diffusion(config):
 
     model = transformer_model.TransformerNetModel(
         input_dims=config.hidden_dim,
-        hidden_t_dim=config.hidden_t_dim,
         num_attention_heads=config.num_attention_heads,
         dropout=config.dropout,
         hidden_size=config.hidden_size,
@@ -25,6 +24,9 @@ def create_model_and_diffusion(config):
         max_location=config.max_location,
         learned_mean_embed=config.learned_mean_embed,
         loaded_embed=loaded_embed,
+        embed_xy=config.if_embed_xy,
+        embed_poi=config.if_embed_poi,
+        poi_dims=config.poi_dim,
     )
 
     betas = gaussian_diffusion.get_named_beta_schedule(config.noise_schedule, config.diffusion_steps)

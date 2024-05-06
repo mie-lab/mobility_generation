@@ -405,7 +405,7 @@ def get_sequence(args, split="train"):
         processed_dict["tgt_xy"].append(record["tgt_xy"])
         # processed_dict["tgt_duration"].append(record["tgt_duration"] + 2 / (60 * 24 * 2 + 1))
 
-    print("### Data samples...\n", processed_dict["src"][:1], processed_dict["tgt"][:1])
+    print("### Data samples...\n", processed_dict["src"][0][:5], processed_dict["tgt"][0][:5])
 
     train_dataset = process_helper_fnc(processed_dict, split)
     return train_dataset
