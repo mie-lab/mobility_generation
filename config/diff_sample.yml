@@ -9,7 +9,6 @@ misc:
 
   # normal
   # clip_denoised: False
-  
   # clamp_step: 500
   # step: 2000
   # DPM
@@ -20,8 +19,8 @@ misc:
   # 
   split: test
   top_p: 0
-  model_path: ./runs/mobis_diffseq_v1_2_normal
-  trained_model_name: model_ema_35.pt
+  model_path: ./runs/mobis_diffseq_noise
+  trained_model_name: model_ema_7.pt
   pre_train_embed: None # ./data/matrix/loc_embedding.pk
 
   # seq_len: 512
@@ -29,7 +28,7 @@ misc:
 
   seed: 101
   
-  batch_size: 64
+  batch_size: 128
   num_workers: 0
   
   networkName: diffseq

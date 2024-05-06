@@ -80,7 +80,7 @@ class TrainLoop:
                 param_groups.append({"params": [parameter], "lr": self.lr})
 
         self.opt = AdamW(param_groups, lr=self.lr, weight_decay=weight_decay, eps=1e-5)
-        self.scaler = torch.cuda.amp.GradScaler(growth_interval=3000, init_scale=8192, enabled=self.use_fp16)
+        self.scaler = torch.cuda.amp.GradScaler(growth_interval=4000, init_scale=4096, enabled=self.use_fp16)
         # define learning rate schedule
         if self.decay_epochs == 0:
             self.scheduler = get_constant_schedule_with_warmup(

@@ -147,28 +147,42 @@ def main():
 
     for cond in tqdm(all_test_data):
         input_ids_x = cond.pop("input_ids").to(dist_util.get_device())
+        input_xys = cond.pop("input_xys").to(dist_util.get_device()).float()
         x_start = model.get_embeds(input_ids_x)
-        padding_mask = (input_ids_x != 0) * 1
+
+        # padding_mask
+        max_len = input_ids_x.shape[1]
+        lens = cond.pop("len").to(dist_util.get_device()).int()
+        padding_mask = (
+            th.arange(max_len).expand(len(lens), max_len).to(dist_util.get_device()) < lens.unsqueeze(1)
+        ) * 1
+        # padding_mask = (input_ids_x != 0) * 1
 
         input_ids_mask = cond.pop("input_mask")
         input_ids_mask_ori = input_ids_mask
 
+        # noise input_xys
+        noise = th.randn_like(input_xys)
+        xy_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(dist_util.get_device())
+        xy_noised = th.where(xy_mask == 0, input_xys, noise)
+
+        # noise x_start
         noise = th.randn_like(x_start)
-        input_ids_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), x_start.shape).to(dist_util.get_device())
-        x_noised = th.where(input_ids_mask == 0, x_start, noise)
+        x_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), x_start.shape).to(dist_util.get_device())
+        x_noised = th.where(x_mask == 0, x_start, noise)
 
         ## You can use steps = 10, 12, 15, 20, 25, 50, 100.
         ## Empirically, we find that steps in [10, 20] can generate quite good samples.
         ## And steps = 20 can almost converge.
-
         with autocast():
             x_sample = dpm_solver.sample(
                 x_noised,
+                xy=xy_noised,
                 steps=SOLVER_STEP,
                 order=2,
                 skip_type="time_uniform",
                 method="multistep",
-                input_ids_mask=input_ids_mask,
+                input_mask=input_ids_mask,
                 x_start=x_start,
                 padding_mask=padding_mask,
             )

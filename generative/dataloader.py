@@ -336,18 +336,18 @@ def process_helper_fnc(seq_ls, split):
             # tgt_duration = ls["tgt_duration"][i]
 
             if split == "test":
-                if len(tgt) < 50:
-                    tgt = tgt + [0] * (50 - len(tgt))
+                ori_len = len(tgt)
+                if ori_len < 50:
+                    tgt = tgt + [0] * (50 - ori_len)
 
                     remain = []
-                    for _ in range(50 - len(tgt)):
+                    for _ in range(50 - ori_len):
                         remain.append([0, 0])
                     tgt_xy = tgt_xy + remain
 
                     # tgt_duration = tgt_duration + [0] * (50 - len(tgt))
                 else:
                     tgt = tgt[:50]
-
                     tgt_xy = tgt_xy[:50]
                     # tgt_duration = tgt_duration[:50]
             else:

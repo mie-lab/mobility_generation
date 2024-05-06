@@ -645,25 +645,24 @@ class GaussianDiffusion:
         # embedded
         x_start_mean = model.model.module.get_embeds(input_ids)
 
-        std = _extract_into_tensor(
-            self.sqrt_one_minus_alphas_cumprod, th.tensor([0]).to(x_start_mean.device), x_start_mean.shape
-        )
+        std = _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, th.tensor([0]).to(t.device), x_start_mean.shape)
 
         x_start = self._get_x_start(x_start_mean, std)
         # reparametrization trick -> noise only on y
         x_t = self.q_sample(x_start, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed)
-        x_xys = self.q_sample(input_xys, t, noise=noise, mask=input_ids_mask, mean_embed=None, denoise=False)
+
+        noise = th.randn_like(input_xys)
+        xy_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(t.device)
+        x_xys = th.where(xy_mask == 0, input_xys, noise)
 
         terms = {}
 
         # model use x_t (partially noised) to predict x_start
-        model_output, pred_xy = model(x_t, x_xys, self._scale_timesteps(t), padding_mask, **model_kwargs)
+        model_output = model(x_t, x_xys, self._scale_timesteps(t), padding_mask, **model_kwargs)
         assert model_output.shape == x_start.shape
 
         # Lt-1
-        terms["mse"] = mean_flat((x_start - model_output) ** 2, padding_mask) + mean_flat(
-            (input_xys - pred_xy) ** 2, padding_mask
-        )
+        terms["mse"] = mean_flat((x_start - model_output) ** 2, padding_mask)
         # L0
         model_out_x_start = self._x0_helper(model_output, x_t, t)["pred_xstart"]  # predicted_xstart = model_output
         t0_mask = t == 0

@@ -49,24 +49,23 @@ class TransformerNetModel(nn.Module):
         self.dropout = dropout
         self.hidden_size = hidden_size
 
-        # embeds
+        # embeds and heads
         if loaded_embed is not None:
             self.token_embedding = nn.Embedding.from_pretrained(torch.tensor(loaded_embed))
         else:
             self.token_embedding = nn.Embedding(max_location, self.input_dims)
-
-        # heads
         self.lm_head = nn.Linear(self.input_dims, max_location)
         with torch.no_grad():
             self.lm_head.weight = self.token_embedding.weight
 
+        # timestep embedding
         self.time_embed = nn.Sequential(
             nn.Linear(hidden_t_dim, hidden_t_dim * 4),
             torch.nn.SiLU(),
             nn.Linear(hidden_t_dim * 4, model_config.hidden_size),
         )
 
-        # the residual
+        # xy embedding
         self.input_up_proj_xy = nn.Sequential(
             nn.Linear(2, self.hidden_size),
             nn.Tanh(),
@@ -87,6 +86,7 @@ class TransformerNetModel(nn.Module):
             nn.Dropout(p=0.1),
         )
 
+        # location embedding
         self.input_up_proj = nn.Sequential(
             nn.Linear(input_dims, self.hidden_size),
             nn.Tanh(),
@@ -107,11 +107,11 @@ class TransformerNetModel(nn.Module):
             nn.Linear(self.hidden_size, self.output_dims),
         )
 
-        self.output_down_proj_xy = nn.Sequential(
-            nn.Linear(self.hidden_size, self.hidden_size),
-            nn.Tanh(),
-            nn.Linear(self.hidden_size, 2),
-        )
+        # self.output_down_proj_xy = nn.Sequential(
+        #     nn.Linear(self.hidden_size, self.hidden_size),
+        #     nn.Tanh(),
+        #     nn.Linear(self.hidden_size, 2),
+        # )
 
         if learned_mean_embed:
             self.mean_embed = nn.Parameter(torch.randn(input_dims))
@@ -132,13 +132,9 @@ class TransformerNetModel(nn.Module):
         context, _ = self.attn(emb_x, emb_xy, emb_xy, key_padding_mask=(1 - key_padding_mask).to(bool))
 
         # residual connection
-        emb_x = torch.cat([emb_x, context], -1)
-        emb_x = self.linear1(emb_x)
-        emb_x = self.norm(emb_x + self.ff_block(emb_x))
-        return emb_x
-
-        # x = self.linear2(self.dropout1(F.relu(self.linear1(x))))
-        # return self.dropout2(x)
+        emb = self.linear1(torch.cat([emb_x, context], -1))
+        emb = self.norm(emb + self.ff_block(emb))
+        return emb
 
     def forward(self, x, xy, timesteps, padding_mask):
         """
@@ -165,9 +161,11 @@ class TransformerNetModel(nn.Module):
         h = self.output_down_proj(input_trans_hidden_states)
         h = h.type(x.dtype)
 
-        pred_xy = self.output_down_proj_xy(input_trans_hidden_states)
-        pred_xy = pred_xy.type(x.dtype)
-        return h, pred_xy
+        return h
+
+        # pred_xy = self.output_down_proj_xy(input_trans_hidden_states)
+        # pred_xy = pred_xy.type(x.dtype)
+        # return h, pred_xy
 
 
 def timestep_embedding(timesteps, dim, max_period=10000):

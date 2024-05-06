@@ -131,23 +131,34 @@ def main():
     else:
         iterator = iter(all_test_data)
 
+    device = dist_util.get_device()
     for cond in iterator:
         if not cond:  # Barrier for Remainder
             for i in range(world_size):
                 dist.barrier()
             continue
 
-        input_ids_x = cond.pop("input_ids").to(dist_util.get_device())
-        x_start = model.get_embeds(input_ids_x)
-        padding_mask = (input_ids_x != 0) * 1
+        input_ids = cond.pop("input_ids").to(device)
+        input_xys = cond.pop("input_xys").to(device).float()
+        x_start = model.get_embeds(input_ids)
 
-        input_ids_mask = cond.pop("input_mask").to(dist_util.get_device())
+        # padding_mask
+        max_len = input_ids.shape[1]
+        lens = cond.pop("len").to(device).int()
+        padding_mask = (torch.arange(max_len).expand(len(lens), max_len).to(device) < lens.unsqueeze(1)) * 1
+
+        input_ids_mask = cond.pop("input_mask").to(device)
         input_ids_mask_ori = input_ids_mask
 
+        # noise input_xys
+        noise = torch.randn_like(input_xys)
+        xy_mask = torch.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(device)
+        xy_noised = torch.where(xy_mask == 0, input_xys, noise)
+
+        # noise x_start
         noise = torch.randn_like(x_start)
-        input_ids_mask = torch.broadcast_to(input_ids_mask.unsqueeze(dim=-1), x_start.shape)
-        # real_y applied with noice
-        x_noised = torch.where(input_ids_mask == 0, x_start, noise)
+        x_mask = torch.broadcast_to(input_ids_mask.unsqueeze(dim=-1), x_start.shape).to(device)
+        x_noised = torch.where(x_mask == 0, x_start, noise)
 
         model_kwargs = {}
 
@@ -169,6 +180,7 @@ def main():
                 model,
                 sample_shape,
                 noise=x_noised,
+                xy_noise=xy_noised,
                 clip_denoised=config.clip_denoised,
                 denoised_fn=partial(denoised_fn_round, config, model_emb),
                 model_kwargs=model_kwargs,
@@ -178,6 +190,7 @@ def main():
                 mask=input_ids_mask,
                 padding_mask=padding_mask,
                 x_start=x_start,
+                xy_start=input_xys,
                 gap=step_gap,
             )
         # only get the latest timestep ()
@@ -190,7 +203,7 @@ def main():
         loc_ls_true = []
         loc_ls_input = []
 
-        for seq_pred, seq_ref, input_mask in zip(cands, input_ids_x, input_ids_mask_ori):
+        for seq_pred, seq_ref, input_mask in zip(cands, input_ids, input_ids_mask_ori):
             len_x = int(curr_seq_len - sum(input_mask).tolist())
             loc_ls_pred.append(seq_pred[len_x:].detach().cpu().numpy())
 
