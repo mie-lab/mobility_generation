@@ -634,6 +634,7 @@ class GaussianDiffusion:
         assert "input_ids" in model_kwargs
         input_ids = model_kwargs.pop("input_ids").to(t.device).long()
         input_xys = model_kwargs.pop("input_xys").to(t.device).float()
+        input_poi = model_kwargs.pop("input_poi").to(t.device).float()
         input_ids_mask = model_kwargs.pop("input_mask").to(t.device)
 
         # padding_mask
@@ -652,12 +653,16 @@ class GaussianDiffusion:
         x_t = self.q_sample(x_start, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed)
 
         context = {}
+        # xy
         noise = th.randn_like(input_xys)
         xy_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(t.device)
         context["xy"] = th.where(xy_mask == 0, input_xys, noise)
+        # poi
+        noise = th.randn_like(input_poi)
+        poi_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_poi.shape).to(t.device)
+        context["poi"] = th.where(poi_mask == 0, input_poi, noise)
 
         terms = {}
-
         # model use x_t (partially noised) to predict x_start
         model_output = model(x_t, context, self._scale_timesteps(t), padding_mask, **model_kwargs)
         assert model_output.shape == x_start.shape

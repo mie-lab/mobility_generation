@@ -16,8 +16,8 @@ class ContextModel(nn.Module):
         self.embed_xy = embed_xy
         self.embed_poi = embed_poi
 
+        # xy embedding
         if embed_xy:
-            # xy embedding
             self.xy_up_proj = nn.Sequential(
                 nn.Linear(2, input_dims),
                 nn.Tanh(),
@@ -29,8 +29,9 @@ class ContextModel(nn.Module):
                 nn.ReLU(),
                 nn.Dropout(p=0.1),
             )
+
+        # poi embedding
         if embed_poi:
-            # poi embedding
             self.poi_up_proj = nn.Sequential(
                 nn.Linear(poi_dims, input_dims),
                 nn.Tanh(),
@@ -204,10 +205,6 @@ class TransformerNetModel(nn.Module):
         h = h.type(x.dtype)
 
         return h
-
-        # pred_xy = self.output_down_proj_xy(input_trans_hidden_states)
-        # pred_xy = pred_xy.type(x.dtype)
-        # return h, pred_xy
 
 
 def timestep_embedding(timesteps, dim, max_period=10000):

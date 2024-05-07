@@ -345,10 +345,16 @@ def process_helper_fnc(seq_ls, split):
                         remain.append([0, 0])
                     tgt_xy = tgt_xy + remain
 
+                    # remain = []
+                    # for _ in range(50 - ori_len):
+                    #     remain.append(np.zeros_like(tgt_poi[0]))
+                    # tgt_poi = tgt_poi + remain
+
                     # tgt_duration = tgt_duration + [0] * (50 - len(tgt))
                 else:
                     tgt = tgt[:50]
                     tgt_xy = tgt_xy[:50]
+                    # tgt_poi = tgt_poi[:50]
                     # tgt_duration = tgt_duration[:50]
             else:
                 if len(tgt) > 128:
@@ -375,7 +381,7 @@ def process_helper_fnc(seq_ls, split):
     seq_dataset = seq_dataset.map(
         merge_and_mask,
         batched=True,
-        num_proc=2,
+        num_proc=4,
         desc="merge and mask",
         remove_columns=["src", "src_xy", "tgt", "tgt_xy"],
     )
@@ -397,12 +403,14 @@ def get_sequence(args, split="train"):
     processed_dict = {"src": [], "src_xy": [], "tgt": [], "tgt_xy": []}
     for record in sequence_ls:
         processed_dict["src"].append(record["src"])
-        processed_dict["src_xy"].append(record["src_xy"])
+        processed_dict["src_xy"].append(np.float32(record["src_xy"]))
+
         # for padding and seperator, add normalization (max 2881 = 60 * 24 * 2 - 1 + 2)
         # processed_dict["src_duration"].append(record["src_duration"] + 2 / (60 * 24 * 2 + 1))
 
         processed_dict["tgt"].append(record["tgt"])
-        processed_dict["tgt_xy"].append(record["tgt_xy"])
+        processed_dict["tgt_xy"].append(np.float32(record["tgt_xy"]))
+
         # processed_dict["tgt_duration"].append(record["tgt_duration"] + 2 / (60 * 24 * 2 + 1))
 
     print("### Data samples...\n", processed_dict["src"][0][:5], processed_dict["tgt"][0][:5])
@@ -419,11 +427,16 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         self.data_args = data_args
         self.model_emb = model_emb
 
+        poi_file_path = f"{data_args.data_dir}/poi_level{data_args.level}.npy"
+        poi_file = np.load(poi_file_path, allow_pickle=True)
+        self.poiValues = poi_file[()]["poiValues"]
+
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
-        arr = torch.tensor(self.text_datasets["train"][idx]["input_ids"])
+        ids = self.text_datasets["train"][idx]["input_ids"]
+        arr = torch.tensor(ids)
 
         # if self.model_emb is not None:
         #     with torch.no_grad():
@@ -431,8 +444,16 @@ class DiffSeqDataset(torch.utils.data.Dataset):
 
         # arr = np.array(arr, dtype=np.float32)
         out_kwargs = {}
-        out_kwargs["input_ids"] = torch.tensor(self.text_datasets["train"][idx]["input_ids"])
+        out_kwargs["input_ids"] = torch.tensor(ids)
         out_kwargs["input_xys"] = torch.tensor(self.text_datasets["train"][idx]["input_xys"])
+
+        # construct the pois
+        ids = np.array(ids)
+        pois = np.take(self.poiValues, ids[ids != 1] - 2, axis=0)
+        # insert the seperator
+        pois = np.insert(pois, np.where(ids == 1)[0][0], np.ones(pois.shape[-1]), axis=0)
+        out_kwargs["input_poi"] = torch.tensor(pois)
+
         # out_kwargs["input_durations"] = torch.tensor(self.text_datasets["train"][idx]["input_durations"])
         out_kwargs["input_mask"] = torch.tensor(self.text_datasets["train"][idx]["input_mask"])
 

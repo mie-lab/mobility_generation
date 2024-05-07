@@ -319,10 +319,10 @@ def model_wrapper(
         else:
             return t_continuous
 
-    def noise_pred_fn(x, xy, t_continuous, padding_mask, cond=None):
+    def noise_pred_fn(x, x_context, t_continuous, padding_mask, cond=None):
         t_input = get_model_input_time(t_continuous)
         if cond is None:
-            output = model(x, xy, t_input, padding_mask, **model_kwargs)
+            output = model(x, x_context, t_input, padding_mask, **model_kwargs)
         else:
             output = model(x, t_input, cond, **model_kwargs)
 
@@ -347,12 +347,12 @@ def model_wrapper(
             log_prob = classifier_fn(x_in, t_input, condition, **classifier_kwargs)
             return torch.autograd.grad(log_prob.sum(), x_in)[0]
 
-    def model_fn(x, xy, t_continuous, padding_mask):
+    def model_fn(x, x_context, t_continuous, padding_mask):
         """
         The noise predicition model function that is used for DPM-Solver.
         """
         if guidance_type == "uncond":
-            return noise_pred_fn(x, xy, t_continuous, padding_mask)
+            return noise_pred_fn(x, x_context, t_continuous, padding_mask)
         elif guidance_type == "classifier":
             assert classifier_fn is not None
             t_input = get_model_input_time(t_continuous)
@@ -442,7 +442,7 @@ class DPM_Solver:
             Burcu Karagol Ayan, S Sara Mahdavi, Rapha Gontijo Lopes, et al. Photorealistic text-to-image diffusion models
             with deep language understanding. arXiv preprint arXiv:2205.11487, 2022b.
         """
-        self.model = lambda x, xy, t, padding: model_fn(x, xy, t.expand((x.shape[0])), padding)
+        self.model = lambda x, x_context, t, padding: model_fn(x, x_context, t.expand((x.shape[0])), padding)
         self.noise_schedule = noise_schedule
         assert algorithm_type in ["dpmsolver", "dpmsolver++"]
         self.algorithm_type = algorithm_type
@@ -465,22 +465,22 @@ class DPM_Solver:
         x0 = torch.clamp(x0, -s, s) / s
         return x0
 
-    def data_prediction_fn(self, x, xy, t, padding):
+    def data_prediction_fn(self, x, x_context, t, padding):
         """
         Return the data prediction model (with corrector).
         """
-        noise = self.model(x, xy, t, padding)
+        noise = self.model(x, x_context, t, padding)
         alpha_t, sigma_t = self.noise_schedule.marginal_alpha(t), self.noise_schedule.marginal_std(t)
         x0 = (x - sigma_t * noise) / alpha_t
         if self.correcting_x0_fn is not None:
             x0 = self.correcting_x0_fn(x0)
         return x0
 
-    def model_fn(self, x, xy, t, padding):
+    def model_fn(self, x, x_context, t, padding):
         """
         Convert the model to the noise prediction model or the data prediction model.
         """
-        return self.data_prediction_fn(x, xy, t, padding)
+        return self.data_prediction_fn(x, x_context, t, padding)
 
     def get_time_steps(self, skip_type, t_T, t_0, N, device):
         """Compute the intermediate time steps for sampling.
@@ -1181,7 +1181,7 @@ class DPM_Solver:
         x_start=None,
         input_mask=None,
         padding_mask=None,
-        xy=None,
+        x_context=None,
     ):
         """
         Compute the sample at time `t_end` by DPM-Solver, given the initial `x` at time `t_start`.
@@ -1326,7 +1326,7 @@ class DPM_Solver:
                 t = timesteps[step]
                 t_prev_list = [t]
 
-                x = self.model_fn(x, xy, t, padding_mask)
+                x = self.model_fn(x, x_context, t, padding_mask)
                 x = torch.where(x_mask == 0, x_start, x)
 
                 model_prev_list = [x]
@@ -1348,7 +1348,7 @@ class DPM_Solver:
                         intermediates.append(x)
                     t_prev_list.append(t)
 
-                    x = self.model_fn(x, xy, t, padding_mask)
+                    x = self.model_fn(x, x_context, t, padding_mask)
                     x = torch.where(x_mask == 0, x_start, x)
 
                     model_prev_list.append(x)
@@ -1375,7 +1375,7 @@ class DPM_Solver:
                     t_prev_list[-1] = t
                     # We do not need to evaluate the final model value.
                     if step < steps:
-                        x = self.model_fn(x, xy, t, padding_mask)
+                        x = self.model_fn(x, x_context, t, padding_mask)
                         x = torch.where(x_mask == 0, x_start, x)
 
                         model_prev_list[-1] = x
