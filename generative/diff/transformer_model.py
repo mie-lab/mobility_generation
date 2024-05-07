@@ -27,13 +27,16 @@ class ContextModel(nn.Module):
         if embed_xy:
             self.xy_up_proj = nn.Sequential(
                 nn.Linear(2, input_dims),
-                nn.Tanh(),
+                nn.ReLU(),
                 nn.Linear(input_dims, hidden_dims),
             )
             self.mha_xy = nn.MultiheadAttention(hidden_dims, 8, batch_first=True)
-            self.comb_xy = nn.Sequential(
-                nn.Linear(hidden_dims * 2, hidden_dims),
+            self.norm_xy = nn.LayerNorm(hidden_dims)
+            self.ff_xy = nn.Sequential(
+                nn.Linear(hidden_dims, hidden_dims * 2),
                 nn.ReLU(),
+                nn.Dropout(p=0.1),
+                nn.Linear(hidden_dims * 2, hidden_dims),
                 nn.Dropout(p=0.1),
             )
 
@@ -41,25 +44,13 @@ class ContextModel(nn.Module):
         if embed_poi:
             self.poi_up_proj = nn.Sequential(
                 nn.Linear(poi_dims, input_dims),
-                nn.Tanh(),
+                nn.ReLU(),
                 nn.Linear(input_dims, hidden_dims),
             )
             self.mha_poi = nn.MultiheadAttention(hidden_dims, 8, batch_first=True)
 
-            self.comb_poi = nn.Sequential(
-                nn.Linear(hidden_dims * 2, hidden_dims),
-                nn.ReLU(),
-                nn.Dropout(p=0.1),
-            )
-        if embed_xy and embed_poi:
-            self.comb_xy_poi = nn.Sequential(
-                nn.Linear(hidden_dims * 2, hidden_dims),
-                nn.ReLU(),
-                nn.Dropout(p=0.1),
-            )
-        if embed_xy or embed_poi:
-            self.norm = nn.LayerNorm(hidden_dims)
-            self.ff_block = nn.Sequential(
+            self.norm_poi = nn.LayerNorm(hidden_dims)
+            self.ff_poi = nn.Sequential(
                 nn.Linear(hidden_dims, hidden_dims * 2),
                 nn.ReLU(),
                 nn.Dropout(p=0.1),
@@ -72,23 +63,13 @@ class ContextModel(nn.Module):
         if self.embed_xy:
             xy = self.xy_up_proj(context["xy"])
             attn_xy, _ = self.mha_xy(emb, xy, xy, key_padding_mask=(1 - key_padding_mask).to(bool))
-            emb_xy = self.comb_xy(torch.cat([emb, attn_xy], -1))
 
+            emb = self.norm_xy(emb + self.ff_xy(attn_xy))
         if self.embed_poi:
             poi = self.poi_up_proj(context["poi"])
             attn_poi, _ = self.mha_poi(emb, poi, poi, key_padding_mask=(1 - key_padding_mask).to(bool))
-            emb_poi = self.comb_poi(torch.cat([emb, attn_poi], -1))
 
-        if self.embed_xy and self.embed_poi:
-            emb = self.comb_xy_poi(torch.cat([emb_xy, emb_poi], -1))
-        elif self.embed_xy:
-            emb = emb_xy
-        elif self.embed_poi:
-            emb = emb_poi
-
-        # residual connection
-        if self.embed_xy or self.embed_poi:
-            emb = self.norm(emb + self.ff_block(emb))
+            emb = self.norm_poi(emb + self.ff_poi(attn_poi))
         return emb
 
 
@@ -161,9 +142,9 @@ class TransformerNetModel(nn.Module):
         self.dropout = nn.Dropout(model_config.hidden_dropout_prob)
 
         self.output_down_proj = nn.Sequential(
-            nn.Linear(self.hidden_size, self.hidden_size),
-            nn.Tanh(),
             nn.Linear(self.hidden_size, self.output_dims),
+            nn.Tanh(),
+            nn.Linear(self.output_dims, self.output_dims),
         )
 
         if learned_mean_embed:

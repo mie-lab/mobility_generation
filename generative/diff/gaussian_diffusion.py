@@ -198,7 +198,7 @@ class GaussianDiffusion:
         log_variance = _extract_into_tensor(self.log_one_minus_alphas_cumprod, t, x_start.shape)
         return mean, variance, log_variance
 
-    def q_sample(self, x_start, t, noise=None, mask=None, mean_embed=None, denoise=True):
+    def q_sample(self, x_start, t, noise=None, mask=None, mean_embed=None):
         """
         Diffuse the data for a given number of diffusion steps.
 
@@ -231,7 +231,7 @@ class GaussianDiffusion:
                 + mean_embed_expand.detach() * mask
             )
 
-        if denoise:
+        if self.denoise:
             mask_rate = (
                 _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape[:2]) * self.denoise_rate
             )
@@ -640,7 +640,7 @@ class GaussianDiffusion:
         max_len = input_ids.shape[1]
         lens = model_kwargs.pop("len").to(t.device).int()
         padding_mask = (th.arange(max_len).expand(len(lens), max_len).to(t.device) < lens.unsqueeze(1)) * 1
-        # padding_mask = (input_ids_x != 0) * 1
+        # padding_mask_2 = (input_ids != 0) * 1
 
         # embedded
         x_start_mean = model.model.module.get_embeds(input_ids)
