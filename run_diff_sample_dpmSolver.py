@@ -147,7 +147,7 @@ def main():
 
     for cond in tqdm(all_test_data):
         input_ids_x = cond.pop("input_ids").to(dist_util.get_device())
-        input_xys = cond.pop("input_xys").to(dist_util.get_device()).float()
+
         x_start = model.get_embeds(input_ids_x)
 
         # padding_mask
@@ -162,9 +162,19 @@ def main():
         input_ids_mask_ori = input_ids_mask
 
         # noise input_xys
-        noise = th.randn_like(input_xys)
-        xy_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(dist_util.get_device())
-        xy_noised = th.where(xy_mask == 0, input_xys, noise)
+        context = {}
+        if "input_xys" in cond:
+            input_xys = cond.pop("input_xys").to(dist_util.get_device()).float()
+            noise = th.randn_like(input_xys)
+            xy_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(dist_util.get_device())
+            context["xy"] = th.where(xy_mask == 0, input_xys, noise)
+
+        if "input_poi" in cond:
+            input_poi = cond.pop("input_poi").to(dist_util.get_device()).float()
+
+            noise = th.randn_like(input_poi)
+            poi_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_poi.shape).to(dist_util.get_device())
+            context["poi"] = th.where(poi_mask == 0, input_poi, noise)
 
         # noise x_start
         noise = th.randn_like(x_start)
@@ -177,7 +187,7 @@ def main():
         with autocast():
             x_sample = dpm_solver.sample(
                 x_noised,
-                xy=xy_noised,
+                x_context=context,
                 steps=SOLVER_STEP,
                 order=2,
                 skip_type="time_uniform",

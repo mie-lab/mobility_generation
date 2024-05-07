@@ -19,8 +19,8 @@ misc:
   # 
   split: test
   top_p: 0
-  model_path: ./runs/mobis_diffseq_v2_2_pretrain
-  trained_model_name: model_ema_9.pt
+  model_path: ./runs/mobis_diffseq_xy_noise
+  trained_model_name: model_ema_13.pt
   pre_train_embed: None # ./data/matrix/loc_embedding.pk
 
   # seq_len: 512

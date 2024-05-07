@@ -9,23 +9,30 @@ import math
 
 
 class ContextModel(nn.Module):
-    def __init__(self, input_dims, embed_xy, embed_poi, poi_dims=None):
+    def __init__(self, input_dims, hidden_dims, embed_xy, embed_poi, poi_dims=None):
         super().__init__()
 
         self.input_dims = input_dims
+        self.hidden_dims = hidden_dims
         self.embed_xy = embed_xy
         self.embed_poi = embed_poi
 
+        # upproject embedding
+        self.input_up_proj = nn.Sequential(
+            nn.Linear(input_dims, input_dims),
+            nn.Tanh(),
+            nn.Linear(input_dims, hidden_dims),
+        )
         # xy embedding
         if embed_xy:
             self.xy_up_proj = nn.Sequential(
                 nn.Linear(2, input_dims),
                 nn.Tanh(),
-                nn.Linear(input_dims, input_dims),
+                nn.Linear(input_dims, hidden_dims),
             )
-            self.mha_xy = nn.MultiheadAttention(input_dims, 8, batch_first=True)
+            self.mha_xy = nn.MultiheadAttention(hidden_dims, 8, batch_first=True)
             self.comb_xy = nn.Sequential(
-                nn.Linear(input_dims * 2, input_dims),
+                nn.Linear(hidden_dims * 2, hidden_dims),
                 nn.ReLU(),
                 nn.Dropout(p=0.1),
             )
@@ -35,33 +42,33 @@ class ContextModel(nn.Module):
             self.poi_up_proj = nn.Sequential(
                 nn.Linear(poi_dims, input_dims),
                 nn.Tanh(),
-                nn.Linear(input_dims, input_dims),
+                nn.Linear(input_dims, hidden_dims),
             )
-            self.mha_poi = nn.MultiheadAttention(input_dims, 8, batch_first=True)
+            self.mha_poi = nn.MultiheadAttention(hidden_dims, 8, batch_first=True)
 
             self.comb_poi = nn.Sequential(
-                nn.Linear(input_dims * 2, input_dims),
+                nn.Linear(hidden_dims * 2, hidden_dims),
                 nn.ReLU(),
                 nn.Dropout(p=0.1),
             )
         if embed_xy and embed_poi:
             self.comb_xy_poi = nn.Sequential(
-                nn.Linear(input_dims * 2, input_dims),
+                nn.Linear(hidden_dims * 2, hidden_dims),
                 nn.ReLU(),
                 nn.Dropout(p=0.1),
             )
         if embed_xy or embed_poi:
-            self.norm = nn.LayerNorm(input_dims)
+            self.norm = nn.LayerNorm(hidden_dims)
             self.ff_block = nn.Sequential(
-                nn.Linear(input_dims, input_dims * 4),
+                nn.Linear(hidden_dims, hidden_dims * 2),
                 nn.ReLU(),
                 nn.Dropout(p=0.1),
-                nn.Linear(input_dims * 4, input_dims),
+                nn.Linear(hidden_dims * 2, hidden_dims),
                 nn.Dropout(p=0.1),
             )
 
     def forward(self, x, context, key_padding_mask):
-        emb = x
+        emb = self.input_up_proj(x)
         if self.embed_xy:
             xy = self.xy_up_proj(context["xy"])
             attn_xy, _ = self.mha_xy(emb, xy, xy, key_padding_mask=(1 - key_padding_mask).to(bool))
@@ -142,14 +149,8 @@ class TransformerNetModel(nn.Module):
             torch.nn.SiLU(),
             nn.Linear(input_dims * 4, self.hidden_size),
         )
-        # upproject embedding
-        self.input_up_proj = nn.Sequential(
-            nn.Linear(input_dims, self.hidden_size),
-            nn.Tanh(),
-            nn.Linear(self.hidden_size, self.hidden_size),
-        )
 
-        self.context_model = ContextModel(self.input_dims, embed_xy, embed_poi, poi_dims)
+        self.context_model = ContextModel(self.input_dims, self.hidden_size, embed_xy, embed_poi, poi_dims=poi_dims)
 
         self.input_transformers = BertEncoder(model_config)
 
@@ -189,7 +190,6 @@ class TransformerNetModel(nn.Module):
 
         # combine x and context (xy and poi)
         emb_x = self.context_model(x, context, padding_mask)
-        emb_x = self.input_up_proj(emb_x)
 
         seq_length = x.size(1)
         position_ids = self.position_ids[:, :seq_length]
