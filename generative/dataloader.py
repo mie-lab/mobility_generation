@@ -427,9 +427,13 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         self.data_args = data_args
         self.model_emb = model_emb
 
-        poi_file_path = f"{data_args.data_dir}/poi_level{data_args.level}.npy"
-        poi_file = np.load(poi_file_path, allow_pickle=True)
-        self.poiValues = poi_file[()]["poiValues"]
+        self.if_embed_poi = data_args.if_embed_poi
+        self.if_embed_xy = data_args.if_embed_xy
+
+        if self.if_embed_poi:
+            poi_file_path = f"{data_args.data_dir}/poi_level{data_args.level}.npy"
+            poi_file = np.load(poi_file_path, allow_pickle=True)
+            self.poiValues = poi_file[()]["poiValues"]
 
     def __len__(self):
         return self.length
@@ -445,14 +449,17 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         # arr = np.array(arr, dtype=np.float32)
         out_kwargs = {}
         out_kwargs["input_ids"] = torch.tensor(ids)
-        out_kwargs["input_xys"] = torch.tensor(self.text_datasets["train"][idx]["input_xys"])
+
+        if self.if_embed_xy:
+            out_kwargs["input_xys"] = torch.tensor(self.text_datasets["train"][idx]["input_xys"])
 
         # construct the pois
-        ids = np.array(ids)
-        pois = np.take(self.poiValues, ids[ids != 1] - 2, axis=0)
-        # insert the seperator
-        pois = np.insert(pois, np.where(ids == 1)[0][0], np.ones(pois.shape[-1]), axis=0)
-        out_kwargs["input_poi"] = torch.tensor(pois)
+        if self.if_embed_poi:
+            ids = np.array(ids)
+            pois = np.take(self.poiValues, ids[ids != 1] - 2, axis=0)
+            # insert the seperator
+            pois = np.insert(pois, np.where(ids == 1)[0][0], np.ones(pois.shape[-1]), axis=0)
+            out_kwargs["input_poi"] = torch.tensor(pois)
 
         # out_kwargs["input_durations"] = torch.tensor(self.text_datasets["train"][idx]["input_durations"])
         out_kwargs["input_mask"] = torch.tensor(self.text_datasets["train"][idx]["input_mask"])
