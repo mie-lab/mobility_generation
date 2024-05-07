@@ -19,9 +19,9 @@ class ContextModel(nn.Module):
 
         # upproject embedding
         self.input_up_proj = nn.Sequential(
-            nn.Linear(input_dims, input_dims),
-            nn.Tanh(),
             nn.Linear(input_dims, hidden_dims),
+            nn.Tanh(),
+            nn.Linear(hidden_dims, hidden_dims),
         )
         # xy embedding
         if embed_xy:
@@ -142,9 +142,9 @@ class TransformerNetModel(nn.Module):
         self.dropout = nn.Dropout(model_config.hidden_dropout_prob)
 
         self.output_down_proj = nn.Sequential(
-            nn.Linear(self.hidden_size, self.output_dims),
+            nn.Linear(self.hidden_size, self.hidden_size),
             nn.Tanh(),
-            nn.Linear(self.output_dims, self.output_dims),
+            nn.Linear(self.hidden_size, self.output_dims),
         )
 
         if learned_mean_embed:
