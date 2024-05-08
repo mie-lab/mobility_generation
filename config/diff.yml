@@ -14,10 +14,8 @@ misc:
 
   seed: 101
   # 
-  if_embed_time: False
-  if_embed_user: False
+  if_embed_xy: True
   if_embed_poi: False
-  if_embed_duration: False
   
   batch_size: 128
   microbatch: 32
@@ -31,7 +29,7 @@ fp16:
 embedding:
   pre_train_embed: ./data/matrix/loc_embedding.pk
   hidden_dim: 128
-  hidden_t_dim: 128
+  poi_dim: 32
 
 diffusion:
   networkName: diffseq
@@ -55,15 +53,15 @@ diffusion:
 model:
   # 
   num_encoder_layers: 2
-  hidden_size: 192
+  hidden_size: 768
   num_attention_heads: 12
   dropout: 0.1
 
 
 
 optimiser:
-  lr: 0.005
-  weight_decay: 0
+  lr: 0.001
+  weight_decay: 0.01
   ema_rate: 0.999
   gradient_clipping: 3
   # for loss

@@ -654,9 +654,9 @@ class GaussianDiffusion:
         if "input_xys" in model_kwargs:
             input_xys = model_kwargs.pop("input_xys").to(t.device).float()
 
-            noise = th.randn_like(input_xys)
+            zeros = th.zeros_like(input_xys)
             xy_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(t.device)
-            context["xy"] = th.where(xy_mask == 0, input_xys, noise)
+            context["xy"] = th.where(xy_mask == 0, input_xys, zeros)
 
         # poi
         if "input_poi" in model_kwargs:

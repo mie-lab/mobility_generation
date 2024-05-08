@@ -13,14 +13,13 @@ misc:
   # step: 2000
   # DPM
   clip_denoised: False
-  clamp_step: 0
-  step: 20
+  step: 10
   start_n: 0
   # 
   split: test
   top_p: 0
-  model_path: ./runs/mobis_diffseq_xy_noise
-  trained_model_name: model_ema_13.pt
+  model_path: ./runs/mobis_diffseq_xy_0_residual
+  trained_model_name: model_ema_4.pt
   pre_train_embed: None # ./data/matrix/loc_embedding.pk
 
   # seq_len: 512
@@ -28,7 +27,7 @@ misc:
 
   seed: 101
   
-  batch_size: 128
+  batch_size: 64
   num_workers: 0
   
   networkName: diffseq

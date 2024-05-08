@@ -17,7 +17,6 @@ from easydict import EasyDict as edict
 from tqdm import tqdm
 import numpy as np
 import torch as th
-import torch
 from torch.cuda.amp import autocast
 import torch.distributed as dist
 
@@ -72,7 +71,7 @@ def main():
 
     logger.log("### Creating model and diffusion...")
     # args.denoise_rate = 0.0
-    print("#" * 10, config.clamp_step)
+    print("#" * 10)
     model, diffusion = create_model_and_diffusion(config)
 
     checkpoint = dist_util.load_state_dict(
@@ -165,9 +164,9 @@ def main():
         context = {}
         if "input_xys" in cond:
             input_xys = cond.pop("input_xys").to(dist_util.get_device()).float()
-            noise = th.randn_like(input_xys)
+            zeros = th.zeros_like(input_xys)
             xy_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(dist_util.get_device())
-            context["xy"] = th.where(xy_mask == 0, input_xys, noise)
+            context["xy"] = th.where(xy_mask == 0, input_xys, zeros)
 
         if "input_poi" in cond:
             input_poi = cond.pop("input_poi").to(dist_util.get_device()).float()
