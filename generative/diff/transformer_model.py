@@ -6,6 +6,112 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 import math
+import numpy as np
+
+
+def _cal_freq_list(freq_init, frequency_num, max_radius, min_radius):
+    if freq_init == "random":
+        # the frequence we use for each block, alpha in ICLR paper
+        # freq_list shape: (frequency_num)
+        freq_list = np.random.random(size=[frequency_num]) * max_radius
+    elif freq_init == "geometric":
+        log_timescale_increment = math.log(float(max_radius) / float(min_radius)) / (frequency_num * 1.0 - 1)
+
+        timescales = min_radius * np.exp(np.arange(frequency_num).astype(float) * log_timescale_increment)
+
+        freq_list = 1.0 / timescales
+
+    return freq_list
+
+
+class TheoryGridCellSpatialRelationEncoder(nn.Module):
+    """
+    Given a list of (deltaX,deltaY), encode them using the position encoding function
+
+    """
+
+    def __init__(
+        self,
+        coord_dim=2,
+        frequency_num=16,
+        max_radius=350,
+        min_radius=1,
+        freq_init="geometric",
+    ):
+        """
+        Args:
+            spa_embed_dim: the output spatial relation embedding dimention
+            coord_dim: the dimention of space, 2D, 3D, or other
+            frequency_num: the number of different sinusoidal with different frequencies/wavelengths
+            max_radius: the largest context radius this model can handle
+        """
+        super(TheoryGridCellSpatialRelationEncoder, self).__init__()
+        self.frequency_num = frequency_num
+        self.coord_dim = coord_dim
+        self.max_radius = max_radius
+        self.min_radius = min_radius
+        self.freq_init = freq_init
+
+        # the frequence we use for each block, alpha in ICLR paper
+        self.cal_freq_mat()
+
+    def cal_freq_mat(self):
+        freq_list = _cal_freq_list(self.freq_init, self.frequency_num, self.max_radius, self.min_radius)
+        # freq_mat shape: (frequency_num, 1)
+        freq_mat = np.expand_dims(freq_list, axis=1)
+        # self.freq_mat shape: (frequency_num, 6)
+        self.freq_mat = np.repeat(freq_mat, 6, axis=1)
+
+    def make_input_embeds(self, coords):
+        # there unit vectors which is 120 degree apart from each other
+        unit_vec1 = torch.tensor([1.0, 0.0]).to(coords.device)  # 0
+        unit_vec2 = torch.tensor([-1.0 / 2.0, math.sqrt(3) / 2.0]).to(coords.device)  # 120 degree
+        unit_vec3 = torch.tensor([-1.0 / 2.0, -math.sqrt(3) / 2.0]).to(coords.device)  # 240 degree
+        freq_mat = torch.tensor(self.freq_mat).to(coords.device).to(coords.dtype)
+
+        # (batch_size, num_context_pt, coord_dim)
+        coords_mat = coords.float()
+        batch_size, num_pt, _ = coords_mat.shape
+
+        # compute the dot product between [deltaX, deltaY] and each unit_vec
+        # (batch_size, num_context_pt, 1)
+        angle_mat1 = torch.unsqueeze(torch.matmul(coords_mat, unit_vec1), axis=-1)
+        # (batch_size, num_context_pt, 1)
+        angle_mat2 = torch.unsqueeze(torch.matmul(coords_mat, unit_vec2), axis=-1)
+        # (batch_size, num_context_pt, 1)
+        angle_mat3 = torch.unsqueeze(torch.matmul(coords_mat, unit_vec3), axis=-1)
+
+        # (batch_size, num_context_pt, 6)
+        angle_mat = torch.cat([angle_mat1, angle_mat1, angle_mat2, angle_mat2, angle_mat3, angle_mat3], axis=-1)
+        # (batch_size, num_context_pt, 1, 6)
+        angle_mat = torch.unsqueeze(angle_mat, axis=-2)
+        # (batch_size, num_context_pt, frequency_num, 6)
+        angle_mat = torch.repeat_interleave(angle_mat, self.frequency_num, axis=-2)
+        # (batch_size, num_context_pt, frequency_num, 6)
+        angle_mat = angle_mat * freq_mat
+        # (batch_size, num_context_pt, frequency_num*6)
+        spr_embeds = torch.reshape(angle_mat, (batch_size, num_pt, -1))
+
+        # make sinuniod function
+        # sin for 2i, cos for 2i+1
+        # spr_embeds: (batch_size, num_context_pt, frequency_num*6=input_embed_dim)
+        spr_embeds[:, :, 0::2] = torch.sin(spr_embeds[:, :, 0::2])  # dim 2i
+        spr_embeds[:, :, 1::2] = torch.cos(spr_embeds[:, :, 1::2])  # dim 2i+1
+
+        return spr_embeds
+
+    def forward(self, coords):
+        """
+        Given a list of coords (deltaX, deltaY), give their spatial relation embedding
+        Args:
+            coords: a python list with shape (batch_size, num_context_pt, coord_dim)
+        Return:
+            sprenc: Tensor shape (batch_size, num_context_pt, spa_embed_dim)
+        """
+        spr_embeds = self.make_input_embeds(coords)
+
+        # spr_embeds: (batch_size, num_context_pt, input_embed_dim)
+        return spr_embeds
 
 
 class ContextModel(nn.Module):
@@ -25,20 +131,9 @@ class ContextModel(nn.Module):
         )
         # xy embedding
         if embed_xy:
-            self.xy_up_proj = nn.Sequential(
-                nn.Linear(2, input_dims),
-                nn.ReLU(),
-                nn.Linear(input_dims, hidden_dims),
-            )
-            self.mha_xy = nn.MultiheadAttention(hidden_dims, 8, batch_first=True)
-            self.norm_xy = nn.LayerNorm(hidden_dims)
-            self.ff_xy = nn.Sequential(
-                nn.Linear(hidden_dims, hidden_dims * 2),
-                nn.ReLU(),
-                nn.Dropout(p=0.1),
-                nn.Linear(hidden_dims * 2, hidden_dims),
-                nn.Dropout(p=0.1),
-            )
+            frequency_num = 16
+            self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num)
+            self.xy_up_proj = nn.Linear(frequency_num * 6, hidden_dims)
 
         # poi embedding
         if embed_poi:
@@ -61,10 +156,8 @@ class ContextModel(nn.Module):
     def forward(self, x, context, key_padding_mask):
         emb = self.input_up_proj(x)
         if self.embed_xy:
-            xy = self.xy_up_proj(context["xy"])
-            attn_xy, _ = self.mha_xy(emb, xy, xy, key_padding_mask=(1 - key_padding_mask).to(bool))
-
-            emb = self.norm_xy(emb + self.ff_xy(attn_xy))
+            xy = self.encoder(context["xy"])
+            emb = emb + self.xy_up_proj(xy)
         if self.embed_poi:
             poi = self.poi_up_proj(context["poi"])
             attn_poi, _ = self.mha_poi(emb, poi, poi, key_padding_mask=(1 - key_padding_mask).to(bool))

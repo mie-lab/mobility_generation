@@ -403,13 +403,13 @@ def get_sequence(args, split="train"):
     processed_dict = {"src": [], "src_xy": [], "tgt": [], "tgt_xy": []}
     for record in sequence_ls:
         processed_dict["src"].append(record["src"])
-        processed_dict["src_xy"].append(np.float32(record["src_xy"]))
+        processed_dict["src_xy"].append(record["src_xy"])
 
         # for padding and seperator, add normalization (max 2881 = 60 * 24 * 2 - 1 + 2)
         # processed_dict["src_duration"].append(record["src_duration"] + 2 / (60 * 24 * 2 + 1))
 
         processed_dict["tgt"].append(record["tgt"])
-        processed_dict["tgt_xy"].append(np.float32(record["tgt_xy"]))
+        processed_dict["tgt_xy"].append(record["tgt_xy"])
 
         # processed_dict["tgt_duration"].append(record["tgt_duration"] + 2 / (60 * 24 * 2 + 1))
 
