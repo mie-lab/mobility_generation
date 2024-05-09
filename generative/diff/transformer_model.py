@@ -16,7 +16,6 @@ def _cal_freq_list(freq_init, frequency_num, max_radius, min_radius):
         freq_list = np.random.random(size=[frequency_num]) * max_radius
     elif freq_init == "geometric":
         log_timescale_increment = math.log(float(max_radius) / float(min_radius)) / (frequency_num * 1.0 - 1)
-
         timescales = min_radius * np.exp(np.arange(frequency_num).astype(float) * log_timescale_increment)
 
         freq_list = 1.0 / timescales
@@ -127,15 +126,8 @@ class ContextModel(nn.Module):
         )
         # xy embedding
         if embed_xy:
-            frequency_num = 16
+            frequency_num = int(hidden_dims / 6)
             self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
-            self.xy_up_proj = nn.Sequential(
-                nn.Linear(frequency_num * 6, frequency_num * 6),
-                nn.Tanh(),
-                nn.Dropout(p=0.1),
-                nn.Linear(frequency_num * 6, hidden_dims),
-                nn.Dropout(p=0.1),
-            )
 
         # poi embedding
         if embed_poi:
@@ -158,8 +150,7 @@ class ContextModel(nn.Module):
     def forward(self, x, context, key_padding_mask):
         emb = self.input_up_proj(x)
         if self.embed_xy:
-            xy = self.encoder(context["xy"])
-            emb = emb + self.xy_up_proj(xy)
+            emb = emb + self.encoder(context["xy"])
         if self.embed_poi:
             poi = self.poi_up_proj(context["poi"])
             attn_poi, _ = self.mha_poi(emb, poi, poi, key_padding_mask=(1 - key_padding_mask).to(bool))
