@@ -37,6 +37,7 @@ class TheoryGridCellSpatialRelationEncoder(nn.Module):
         max_radius=350,
         min_radius=1,
         freq_init="geometric",
+        device="",
     ):
         """
         Args:
@@ -52,34 +53,29 @@ class TheoryGridCellSpatialRelationEncoder(nn.Module):
         self.min_radius = min_radius
         self.freq_init = freq_init
 
-        # the frequence we use for each block, alpha in ICLR paper
-        self.cal_freq_mat()
+        # there unit vectors which is 120 degree apart from each other
+        self.unit_vec1 = torch.tensor([1.0, 0.0]).to(device)  # 0
+        self.unit_vec2 = torch.tensor([-1.0 / 2.0, math.sqrt(3) / 2.0]).to(device)  # 120 degree
+        self.unit_vec3 = torch.tensor([-1.0 / 2.0, -math.sqrt(3) / 2.0]).to(device)  # 240 degree
 
-    def cal_freq_mat(self):
+        # the frequence we use for each block, alpha in ICLR paper
         freq_list = _cal_freq_list(self.freq_init, self.frequency_num, self.max_radius, self.min_radius)
         # freq_mat shape: (frequency_num, 1)
         freq_mat = np.expand_dims(freq_list, axis=1)
         # self.freq_mat shape: (frequency_num, 6)
-        self.freq_mat = np.repeat(freq_mat, 6, axis=1)
+        self.freq_mat = torch.tensor(np.repeat(freq_mat, 6, axis=1)).to(device).float()
 
-    def make_input_embeds(self, coords):
-        # there unit vectors which is 120 degree apart from each other
-        unit_vec1 = torch.tensor([1.0, 0.0]).to(coords.device)  # 0
-        unit_vec2 = torch.tensor([-1.0 / 2.0, math.sqrt(3) / 2.0]).to(coords.device)  # 120 degree
-        unit_vec3 = torch.tensor([-1.0 / 2.0, -math.sqrt(3) / 2.0]).to(coords.device)  # 240 degree
-        freq_mat = torch.tensor(self.freq_mat).to(coords.device).to(coords.dtype)
-
+    def make_input_embeds(self, coords_mat):
         # (batch_size, num_context_pt, coord_dim)
-        coords_mat = coords.float()
         batch_size, num_pt, _ = coords_mat.shape
 
         # compute the dot product between [deltaX, deltaY] and each unit_vec
         # (batch_size, num_context_pt, 1)
-        angle_mat1 = torch.unsqueeze(torch.matmul(coords_mat, unit_vec1), axis=-1)
+        angle_mat1 = torch.unsqueeze(torch.matmul(coords_mat, self.unit_vec1), axis=-1)
         # (batch_size, num_context_pt, 1)
-        angle_mat2 = torch.unsqueeze(torch.matmul(coords_mat, unit_vec2), axis=-1)
+        angle_mat2 = torch.unsqueeze(torch.matmul(coords_mat, self.unit_vec2), axis=-1)
         # (batch_size, num_context_pt, 1)
-        angle_mat3 = torch.unsqueeze(torch.matmul(coords_mat, unit_vec3), axis=-1)
+        angle_mat3 = torch.unsqueeze(torch.matmul(coords_mat, self.unit_vec3), axis=-1)
 
         # (batch_size, num_context_pt, 6)
         angle_mat = torch.cat([angle_mat1, angle_mat1, angle_mat2, angle_mat2, angle_mat3, angle_mat3], axis=-1)
@@ -88,7 +84,7 @@ class TheoryGridCellSpatialRelationEncoder(nn.Module):
         # (batch_size, num_context_pt, frequency_num, 6)
         angle_mat = torch.repeat_interleave(angle_mat, self.frequency_num, axis=-2)
         # (batch_size, num_context_pt, frequency_num, 6)
-        angle_mat = angle_mat * freq_mat
+        angle_mat = angle_mat * self.freq_mat
         # (batch_size, num_context_pt, frequency_num*6)
         spr_embeds = torch.reshape(angle_mat, (batch_size, num_pt, -1))
 
@@ -115,7 +111,7 @@ class TheoryGridCellSpatialRelationEncoder(nn.Module):
 
 
 class ContextModel(nn.Module):
-    def __init__(self, input_dims, hidden_dims, embed_xy, embed_poi, poi_dims=None):
+    def __init__(self, input_dims, hidden_dims, embed_xy, embed_poi, poi_dims=None, device=""):
         super().__init__()
 
         self.input_dims = input_dims
@@ -132,8 +128,14 @@ class ContextModel(nn.Module):
         # xy embedding
         if embed_xy:
             frequency_num = 16
-            self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num)
-            self.xy_up_proj = nn.Linear(frequency_num * 6, hidden_dims)
+            self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
+            self.xy_up_proj = nn.Sequential(
+                nn.Linear(frequency_num * 6, frequency_num * 6),
+                nn.Tanh(),
+                nn.Dropout(p=0.1),
+                nn.Linear(frequency_num * 6, hidden_dims),
+                nn.Dropout(p=0.1),
+            )
 
         # poi embedding
         if embed_poi:
@@ -191,6 +193,7 @@ class TransformerNetModel(nn.Module):
         embed_xy=False,
         embed_poi=False,
         poi_dims=32,
+        device="",
     ):
         super().__init__()
 
@@ -224,7 +227,9 @@ class TransformerNetModel(nn.Module):
             nn.Linear(input_dims * 4, self.hidden_size),
         )
 
-        self.context_model = ContextModel(self.input_dims, self.hidden_size, embed_xy, embed_poi, poi_dims=poi_dims)
+        self.context_model = ContextModel(
+            self.input_dims, self.hidden_size, embed_xy, embed_poi, poi_dims=poi_dims, device=device
+        )
 
         self.input_transformers = BertEncoder(model_config)
 

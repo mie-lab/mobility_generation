@@ -180,6 +180,11 @@ def main():
         x_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), x_start.shape).to(dist_util.get_device())
         x_noised = th.where(x_mask == 0, x_start, noise)
 
+        # if model.mean_embed is not None:
+        #     mean_embed = model.mean_embed.expand(x_noised.shape)
+        #     mask = input_ids_mask.unsqueeze(dim=-1).expand(x_noised.shape).to(dist_util.get_device())
+        #     x_noised += mean_embed * mask
+
         ## You can use steps = 10, 12, 15, 20, 25, 50, 100.
         ## Empirically, we find that steps in [10, 20] can generate quite good samples.
         ## And steps = 20 can almost converge.
