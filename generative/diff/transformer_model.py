@@ -122,7 +122,7 @@ class ContextModel(nn.Module):
         # upproject embedding
         self.input_up_proj = nn.Sequential(
             nn.Linear(input_dims, hidden_dims),
-            nn.LeakyReLU(),
+            nn.Tanh(),
             nn.Linear(hidden_dims, hidden_dims),
         )
         # xy embedding
@@ -238,7 +238,7 @@ class TransformerNetModel(nn.Module):
 
         self.output_down_proj = nn.Sequential(
             nn.Linear(self.hidden_size, self.hidden_size),
-            nn.LeakyReLU(),
+            nn.Tanh(),
             nn.Linear(self.hidden_size, self.output_dims),
         )
 
