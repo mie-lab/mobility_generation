@@ -16,6 +16,7 @@ def _cal_freq_list(freq_init, frequency_num, max_radius, min_radius):
         freq_list = np.random.random(size=[frequency_num]) * max_radius
     elif freq_init == "geometric":
         log_timescale_increment = math.log(float(max_radius) / float(min_radius)) / (frequency_num * 1.0 - 1)
+
         timescales = min_radius * np.exp(np.arange(frequency_num).astype(float) * log_timescale_increment)
 
         freq_list = 1.0 / timescales
@@ -121,13 +122,16 @@ class ContextModel(nn.Module):
         # upproject embedding
         self.input_up_proj = nn.Sequential(
             nn.Linear(input_dims, hidden_dims),
-            nn.Tanh(),
+            nn.LeakyReLU(),
             nn.Linear(hidden_dims, hidden_dims),
         )
         # xy embedding
         if embed_xy:
-            frequency_num = int(hidden_dims / 6)
+            frequency_num = 16
             self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
+            self.xy_up_proj = nn.Sequential(
+                nn.Linear(frequency_num * 6, input_dims),
+            )
 
         # poi embedding
         if embed_poi:
@@ -148,14 +152,16 @@ class ContextModel(nn.Module):
             )
 
     def forward(self, x, context, key_padding_mask):
-        emb = self.input_up_proj(x)
+        emb = x
         if self.embed_xy:
-            emb = emb + self.encoder(context["xy"])
+            xy = self.encoder(context["xy"])
+            emb = emb + self.xy_up_proj(xy)
         if self.embed_poi:
             poi = self.poi_up_proj(context["poi"])
             attn_poi, _ = self.mha_poi(emb, poi, poi, key_padding_mask=(1 - key_padding_mask).to(bool))
 
             emb = self.norm_poi(emb + self.ff_poi(attn_poi))
+        emb = self.input_up_proj(emb)
         return emb
 
 
@@ -214,7 +220,7 @@ class TransformerNetModel(nn.Module):
         # timestep embedding
         self.time_embed = nn.Sequential(
             nn.Linear(input_dims, input_dims * 4),
-            torch.nn.SiLU(),
+            nn.SiLU(),
             nn.Linear(input_dims * 4, self.hidden_size),
         )
 
@@ -232,7 +238,7 @@ class TransformerNetModel(nn.Module):
 
         self.output_down_proj = nn.Sequential(
             nn.Linear(self.hidden_size, self.hidden_size),
-            nn.Tanh(),
+            nn.LeakyReLU(),
             nn.Linear(self.hidden_size, self.output_dims),
         )
 
