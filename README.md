@@ -92,6 +92,11 @@ Use 4 weeks as input (TODO: Tune weeks)
         - The mean embedding of V2 shall be initialized from random
         - pretrain slightly better
         - layer 2 better than layer 6
+    - adding xy coordinate information
+        - use geo encoding method
+        - complicated mlp for encoding learning leads to overfit
+        - (TODO: take the best performaing xy encoding method and try with non-location embedding pretrain)
+
 
 ## Metrics (TODO: verify)
 
