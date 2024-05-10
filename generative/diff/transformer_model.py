@@ -9,17 +9,12 @@ import math
 import numpy as np
 
 
-def _cal_freq_list(freq_init, frequency_num, max_radius, min_radius):
-    if freq_init == "random":
-        # the frequence we use for each block, alpha in ICLR paper
-        # freq_list shape: (frequency_num)
-        freq_list = np.random.random(size=[frequency_num]) * max_radius
-    elif freq_init == "geometric":
-        log_timescale_increment = math.log(float(max_radius) / float(min_radius)) / (frequency_num * 1.0 - 1)
+def _cal_freq_list(frequency_num, max_radius, min_radius):
+    log_timescale_increment = math.log(float(max_radius) / float(min_radius)) / (frequency_num * 1.0 - 1)
 
-        timescales = min_radius * np.exp(np.arange(frequency_num).astype(float) * log_timescale_increment)
+    timescales = min_radius * np.exp(np.arange(frequency_num).astype(float) * log_timescale_increment)
 
-        freq_list = 1.0 / timescales
+    freq_list = 1.0 / timescales
 
     return freq_list
 
@@ -34,9 +29,8 @@ class TheoryGridCellSpatialRelationEncoder(nn.Module):
         self,
         coord_dim=2,
         frequency_num=16,
-        max_radius=350,
-        min_radius=1,
-        freq_init="geometric",
+        max_radius=400,
+        min_radius=0.5,
         device="",
     ):
         """
@@ -51,7 +45,6 @@ class TheoryGridCellSpatialRelationEncoder(nn.Module):
         self.coord_dim = coord_dim
         self.max_radius = max_radius
         self.min_radius = min_radius
-        self.freq_init = freq_init
 
         # there unit vectors which is 120 degree apart from each other
         self.unit_vec1 = torch.tensor([1.0, 0.0]).to(device)  # 0
@@ -59,7 +52,7 @@ class TheoryGridCellSpatialRelationEncoder(nn.Module):
         self.unit_vec3 = torch.tensor([-1.0 / 2.0, -math.sqrt(3) / 2.0]).to(device)  # 240 degree
 
         # the frequence we use for each block, alpha in ICLR paper
-        freq_list = _cal_freq_list(self.freq_init, self.frequency_num, self.max_radius, self.min_radius)
+        freq_list = _cal_freq_list(self.frequency_num, self.max_radius, self.min_radius)
         # freq_mat shape: (frequency_num, 1)
         freq_mat = np.expand_dims(freq_list, axis=1)
         # self.freq_mat shape: (frequency_num, 6)
@@ -127,11 +120,8 @@ class ContextModel(nn.Module):
         )
         # xy embedding
         if embed_xy:
-            frequency_num = 16
+            frequency_num = int(hidden_dims / 6)
             self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
-            self.xy_up_proj = nn.Sequential(
-                nn.Linear(frequency_num * 6, input_dims),
-            )
 
         # poi embedding
         if embed_poi:
@@ -142,13 +132,11 @@ class ContextModel(nn.Module):
             )
 
     def forward(self, x, context):
-        emb = x
+        emb = self.input_up_proj(x)
         if self.embed_xy:
-            xy = self.encoder(context["xy"])
-            emb = emb + self.xy_up_proj(xy)
+            emb = emb + self.encoder(context["xy"])
         if self.embed_poi:
             emb = emb + self.poi_up_proj(context["poi"])
-        emb = self.input_up_proj(emb)
         return emb
 
 
@@ -256,6 +244,7 @@ class TransformerNetModel(nn.Module):
 
         seq_length = x.size(1)
         position_ids = self.position_ids[:, :seq_length]
+        #
         emb_inputs = self.position_embeddings(position_ids) + emb_x + emb_t.unsqueeze(1).expand(-1, seq_length, -1)
         emb_inputs = self.dropout(self.LayerNorm(emb_inputs))
 
