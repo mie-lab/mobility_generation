@@ -120,14 +120,11 @@ class ContextModel(nn.Module):
         )
         self.LayerNorm = nn.LayerNorm(input_dims)
         self.dropout = nn.Dropout(0.1)
-
         # xy embedding
         if embed_xy:
-            frequency_num = 16
+            frequency_num = int(hidden_dims / 6)
             self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
-            self.xy_up_proj = nn.Sequential(
-                nn.Linear(frequency_num * 6, input_dims),
-            )
+            self.xy_proj = nn.Linear(hidden_dims, input_dims)
 
         # poi embedding
         if embed_poi:
@@ -141,7 +138,7 @@ class ContextModel(nn.Module):
         emb = x
         if self.embed_xy:
             xy = self.encoder(context["xy"])
-            emb = emb + self.xy_up_proj(xy)
+            emb = emb + self.xy_proj(xy)
         if self.embed_poi:
             emb = emb + self.poi_up_proj(context["poi"])
 
