@@ -94,7 +94,8 @@ Use 4 weeks as input (TODO: Tune weeks)
         - layer 2 better than layer 6
     - adding xy coordinate information
         - use geo encoding method
-        - complicated mlp for encoding learning leads to overfit
+        - complicated mlp for encoding learning leads to overfit (from encode_update)
+        - upprojection for location embedding will destroy the embeding space -> xy feature can only be added after embedding (from encode_up and v2?)
         - (TODO: take the best performaing xy encoding method and try with non-location embedding pretrain)
 
 
