@@ -118,13 +118,10 @@ class ContextModel(nn.Module):
             nn.SiLU(),
             nn.Linear(hidden_dims, hidden_dims),
         )
-        self.LayerNorm = nn.LayerNorm(input_dims)
-        self.dropout = nn.Dropout(0.1)
         # xy embedding
         if embed_xy:
             frequency_num = int(hidden_dims / 6)
             self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
-            self.xy_proj = nn.Linear(hidden_dims, input_dims)
 
         # poi embedding
         if embed_poi:
@@ -135,15 +132,11 @@ class ContextModel(nn.Module):
             )
 
     def forward(self, x, context):
-        emb = x
+        emb = self.input_up_proj(x)
         if self.embed_xy:
-            xy = self.encoder(context["xy"])
-            emb = emb + self.xy_proj(xy)
+            emb = emb + self.encoder(context["xy"])
         if self.embed_poi:
             emb = emb + self.poi_up_proj(context["poi"])
-
-        emb = self.dropout(self.LayerNorm(emb))
-        emb = self.input_up_proj(emb)
         return emb
 
 
