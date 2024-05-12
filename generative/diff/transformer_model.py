@@ -122,6 +122,7 @@ class ContextModel(nn.Module):
         if embed_xy:
             frequency_num = int(hidden_dims / 6)
             self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
+            self.xy_ff = nn.Linear(hidden_dims, hidden_dims)
 
         # poi embedding
         if embed_poi:
@@ -134,7 +135,7 @@ class ContextModel(nn.Module):
     def forward(self, x, context):
         emb = self.input_up_proj(x)
         if self.embed_xy:
-            emb = emb + self.encoder(context["xy"])
+            emb = emb + self.xy_ff(self.encoder(context["xy"]))
         if self.embed_poi:
             emb = emb + self.poi_up_proj(context["poi"])
         return emb
