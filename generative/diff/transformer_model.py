@@ -115,31 +115,28 @@ class ContextModel(nn.Module):
         # upproject embedding
         self.input_up_proj = nn.Sequential(
             nn.Linear(input_dims, hidden_dims),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(hidden_dims, hidden_dims),
         )
         # xy embedding
         if embed_xy:
             frequency_num = int(hidden_dims / 6)
             self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
-            self.xy_proj = nn.Linear(hidden_dims, input_dims)
 
         # poi embedding
         if embed_poi:
             self.poi_up_proj = nn.Sequential(
                 nn.Linear(poi_dims, input_dims),
-                nn.Tanh(),
+                nn.ReLU(),
                 nn.Linear(input_dims, input_dims),
             )
 
     def forward(self, x, context):
-        emb = x
+        emb = self.input_up_proj(x)
         if self.embed_xy:
-            xy = self.encoder(context["xy"])
-            emb = emb + self.xy_proj(xy)
+            emb = emb + self.encoder(context["xy"])
         if self.embed_poi:
             emb = emb + self.poi_up_proj(context["poi"])
-        emb = self.input_up_proj(emb)
         return emb
 
 
@@ -216,7 +213,7 @@ class TransformerNetModel(nn.Module):
 
         self.output_down_proj = nn.Sequential(
             nn.Linear(self.hidden_size, self.hidden_size),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(self.hidden_size, self.output_dims),
         )
 
