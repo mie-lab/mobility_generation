@@ -115,7 +115,7 @@ class ContextModel(nn.Module):
         # upproject embedding
         self.input_up_proj = nn.Sequential(
             nn.Linear(input_dims, hidden_dims),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hidden_dims, hidden_dims),
         )
         # xy embedding
@@ -127,7 +127,7 @@ class ContextModel(nn.Module):
         if embed_poi:
             self.poi_up_proj = nn.Sequential(
                 nn.Linear(poi_dims, input_dims),
-                nn.ReLU(),
+                nn.Tanh(),
                 nn.Linear(input_dims, input_dims),
             )
 
@@ -213,7 +213,7 @@ class TransformerNetModel(nn.Module):
 
         self.output_down_proj = nn.Sequential(
             nn.Linear(self.hidden_size, self.hidden_size),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(self.hidden_size, self.output_dims),
         )
 
