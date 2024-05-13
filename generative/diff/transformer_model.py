@@ -120,9 +120,13 @@ class ContextModel(nn.Module):
         )
         # xy embedding
         if embed_xy:
-            frequency_num = int(hidden_dims / 6)
+            frequency_num = 16
             self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
-            self.comb_xy = nn.Linear(hidden_dims * 2, hidden_dims)
+            self.comb_xy = nn.Sequential(
+                nn.Linear(input_dims + frequency_num * 6, input_dims),
+                nn.ReLU(),
+                nn.Dropout(),
+            )
 
         # poi embedding
         if embed_poi:
@@ -133,12 +137,13 @@ class ContextModel(nn.Module):
             )
 
     def forward(self, x, context):
-        emb = self.input_up_proj(x)
+        emb = x
         if self.embed_xy:
             emb = torch.cat([emb, self.encoder(context["xy"])], dim=-1)
             emb = self.comb_xy(emb)
         if self.embed_poi:
             emb = emb + self.poi_up_proj(context["poi"])
+        emb = self.input_up_proj(emb)
         return emb
 
 
