@@ -115,8 +115,10 @@ class ContextModel(nn.Module):
         # upproject embedding
         self.input_up_proj = nn.Sequential(
             nn.Linear(input_dims, hidden_dims),
-            nn.Tanh(),
+            nn.LayerNorm(hidden_dims),
+            nn.ReLU(),
             nn.Linear(hidden_dims, hidden_dims),
+            nn.LayerNorm(hidden_dims),
         )
         # xy embedding
         if embed_xy:
@@ -124,15 +126,18 @@ class ContextModel(nn.Module):
             self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
             self.comb_xy = nn.Sequential(
                 nn.Linear(input_dims + frequency_num * 6, input_dims),
+                nn.LayerNorm(input_dims),
                 nn.ReLU(),
-                nn.Dropout(),
+                nn.Linear(input_dims, input_dims),
+                nn.LayerNorm(input_dims),
+                nn.Dropout(0.1),
             )
 
         # poi embedding
         if embed_poi:
             self.poi_up_proj = nn.Sequential(
                 nn.Linear(poi_dims, input_dims),
-                nn.Tanh(),
+                nn.ReLU(),
                 nn.Linear(input_dims, input_dims),
             )
 
@@ -140,7 +145,7 @@ class ContextModel(nn.Module):
         emb = x
         if self.embed_xy:
             emb = torch.cat([emb, self.encoder(context["xy"])], dim=-1)
-            emb = self.comb_xy(emb)
+            emb = x + self.comb_xy(emb)
         if self.embed_poi:
             emb = emb + self.poi_up_proj(context["poi"])
         emb = self.input_up_proj(emb)
@@ -190,19 +195,10 @@ class TransformerNetModel(nn.Module):
         self.dropout = dropout
         self.hidden_size = hidden_size
 
-        # embeds and heads
-        if loaded_embed is not None:
-            self.token_embedding = nn.Embedding.from_pretrained(torch.tensor(loaded_embed))
-        else:
-            self.token_embedding = nn.Embedding(max_location, self.input_dims)
-        self.lm_head = nn.Linear(self.input_dims, max_location)
-        with torch.no_grad():
-            self.lm_head.weight = self.token_embedding.weight
-
         # timestep embedding
         self.time_embed = nn.Sequential(
             nn.Linear(input_dims, input_dims * 4),
-            nn.SiLU(),
+            nn.ReLU(),
             nn.Linear(input_dims * 4, self.hidden_size),
         )
 
@@ -220,15 +216,33 @@ class TransformerNetModel(nn.Module):
 
         self.output_down_proj = nn.Sequential(
             nn.Linear(self.hidden_size, self.hidden_size),
-            nn.Tanh(),
+            nn.LayerNorm(self.hidden_size),
+            nn.ReLU(),
             nn.Linear(self.hidden_size, self.output_dims),
         )
+
+        self._init_weights()
+
+        # embeds and heads
+        if loaded_embed is not None:
+            self.token_embedding = nn.Embedding.from_pretrained(torch.tensor(loaded_embed))
+        else:
+            self.token_embedding = nn.Embedding(max_location, self.input_dims)
+        self.lm_head = nn.Linear(self.input_dims, max_location)
+        with torch.no_grad():
+            self.lm_head.weight = self.token_embedding.weight
 
         if learned_mean_embed:
             self.mean_embed = nn.Parameter(torch.randn(input_dims))
             nn.init.normal_(self.mean_embed, mean=0, std=input_dims**-0.5)
         else:
             self.mean_embed = None
+
+    def _init_weights(self):
+        """Initiate parameters in the transformer model."""
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.kaiming_normal_(p)
 
     def get_embeds(self, input_ids):
         return self.token_embedding(input_ids)
