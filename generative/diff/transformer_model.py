@@ -115,10 +115,8 @@ class ContextModel(nn.Module):
         # upproject embedding
         self.input_up_proj = nn.Sequential(
             nn.Linear(input_dims, hidden_dims),
-            nn.LayerNorm(hidden_dims),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hidden_dims, hidden_dims),
-            nn.LayerNorm(hidden_dims),
         )
         # xy embedding
         if embed_xy:
@@ -198,7 +196,7 @@ class TransformerNetModel(nn.Module):
         # timestep embedding
         self.time_embed = nn.Sequential(
             nn.Linear(input_dims, input_dims * 4),
-            nn.ReLU(),
+            nn.SiLU(),
             nn.Linear(input_dims * 4, self.hidden_size),
         )
 
@@ -216,12 +214,9 @@ class TransformerNetModel(nn.Module):
 
         self.output_down_proj = nn.Sequential(
             nn.Linear(self.hidden_size, self.hidden_size),
-            nn.LayerNorm(self.hidden_size),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(self.hidden_size, self.output_dims),
         )
-
-        self._init_weights()
 
         # embeds and heads
         if loaded_embed is not None:
