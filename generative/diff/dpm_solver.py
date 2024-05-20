@@ -1331,7 +1331,7 @@ class DPM_Solver:
 
                 model_prev_list = [x]
                 if self.correcting_xt_fn is not None:
-                    x = self.correcting_xt_fn(x, t, step)
+                    x, _ = self.correcting_xt_fn(x, t, step)
                 if return_intermediate:
                     intermediates.append(x)
                 # Init the first `order` values by lower order multistep DPM-Solver.
@@ -1343,7 +1343,7 @@ class DPM_Solver:
                     x = torch.where(x_mask == 0, x_start, x)
 
                     if self.correcting_xt_fn is not None:
-                        x = self.correcting_xt_fn(x, t, step)
+                        x, _ = self.correcting_xt_fn(x, t, step)
                     if return_intermediate:
                         intermediates.append(x)
                     t_prev_list.append(t)
@@ -1366,7 +1366,7 @@ class DPM_Solver:
                     x = torch.where(x_mask == 0, x_start, x)
 
                     if self.correcting_xt_fn is not None:
-                        x = self.correcting_xt_fn(x, t, step)
+                        x, _ = self.correcting_xt_fn(x, t, step)
                     if return_intermediate:
                         intermediates.append(x)
                     for i in range(order - 1):

@@ -14,6 +14,8 @@ import json
 from json import JSONEncoder
 from easydict import EasyDict as edict
 
+from functools import partial
+
 from tqdm import tqdm
 import numpy as np
 import torch as th
@@ -21,7 +23,7 @@ from torch.cuda.amp import autocast
 import torch.distributed as dist
 
 from generative.dataloader import load_data_diffusion
-from generative.diff.diff_utils import create_model_and_diffusion
+from generative.diff.diff_utils import create_model_and_diffusion, denoised_fn_round
 from generative.diff.dpm_solver import NoiseScheduleVP, model_wrapper, DPM_Solver
 
 from utils import dist_util, logger
@@ -83,6 +85,17 @@ def main():
     logger.log(f"### The parameter count is {pytorch_total_params}")
 
     model.to(dist_util.get_device())
+    model_emb = (
+        th.nn.Embedding(
+            num_embeddings=config.max_location,
+            embedding_dim=config.hidden_dim,
+            _weight=model.token_embedding.weight.clone().cpu(),
+        )
+        .eval()
+        .requires_grad_(False)
+    )
+    model_emb.to(dist_util.get_device())
+
     model.eval()
 
     # model_emb = torch.nn.Embedding(num_embeddings=config.max_location, embedding_dim=config.hidden_dim)
@@ -142,7 +155,12 @@ def main():
     ## You can adjust the `steps` to balance the computation
     ## costs and the sample quality.
 
-    dpm_solver = DPM_Solver(model_fn, noise_schedule, algorithm_type="dpmsolver++")
+    dpm_solver = DPM_Solver(
+        model_fn,
+        noise_schedule,
+        algorithm_type="dpmsolver++",
+        correcting_xt_fn=partial(denoised_fn_round, config, model_emb),
+    )
 
     for cond in tqdm(all_test_data):
         input_ids_x = cond.pop("input_ids").to(dist_util.get_device())

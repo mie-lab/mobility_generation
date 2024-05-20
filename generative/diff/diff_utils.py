@@ -114,7 +114,7 @@ def get_efficient_knn(model_emb, text_emb):
     return topk_out.values, topk_out.indices
 
 
-def denoised_fn_round(args, model, old_embed, t):
+def denoised_fn_round(args, model, old_embed, t, step=None):
     # print(text_emb.shape) # bsz, seqlen, dim
     model_emb = model.weight  # input_embs
     # print(t)
