@@ -583,7 +583,7 @@ class GaussianDiffusion:
         """
         logits = get_logits(x_0)  # bsz, seqlen, vocab
         # print(logits.shape)
-        loss_fct = th.nn.CrossEntropyLoss(reduction="none")
+        loss_fct = th.nn.CrossEntropyLoss(reduction="none", ignore_index=0)
         decoder_nll = loss_fct(logits.view(-1, logits.size(-1)), input_ids.view(-1)).view(input_ids.shape)
         if mask is not None:
             decoder_nll *= mask
@@ -592,6 +592,30 @@ class GaussianDiffusion:
             decoder_nll = decoder_nll.mean(dim=-1)
 
         return decoder_nll
+
+    def _diff_loss(self, x_0, get_logits, mask=None):
+        """
+        the loss of penalizing same consecutive tokens
+        :param x_start_mean: word embedding
+        :return: x_0
+        """
+        logits = get_logits(x_0)  # bsz, seqlen, vocab
+        pred = th.topk(logits, k=1, dim=-1).indices.squeeze()
+
+        diff_loss = th.diff(pred)
+
+        # penalize difference == 0 items
+        flag = diff_loss != 0
+        diff_loss[flag] = 0
+        diff_loss[~flag] = 1
+
+        if mask is not None:
+            diff_loss *= mask[:, 1:]
+            diff_loss = diff_loss.sum(dim=-1) / mask[:, 1:].sum(dim=-1)
+        else:
+            diff_loss = diff_loss.mean(dim=-1)
+
+        return diff_loss
 
     def _prediction_mse_loss(self, x_0, get_predict_head, inputs, mask=None):
         predict = get_predict_head(x_0).squeeze()
@@ -690,14 +714,17 @@ class GaussianDiffusion:
         # get_predict_head = model.model.module.get_dur_predictions
         # decoder_mse = self._prediction_mse_loss(x_start, get_predict_head, input_durs_x, mask=padding_mask)
 
+        # difference loss
+        diff_loss = self._diff_loss(x_start, get_logits, mask=padding_mask)
+        diff_loss = 0.1 * diff_loss / (diff_loss / terms["mse"]).detach()
+
         # x_0->model_out_x_start
         input_ids_mask[padding_mask == 0] = 0
         terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids, mask=input_ids_mask)
         # assert (model.model.module.lm_head.weight == model.model.module.word_embedding.weight).all()
 
-        # decoder_loss = decoder_nll + 0.1 * decoder_mse / (decoder_mse / decoder_nll).detach()
         decoder_loss = decoder_nll
-        terms["loss"] = terms["mse"] + tT_loss + decoder_loss
+        terms["loss"] = terms["mse"] + tT_loss + decoder_loss + diff_loss
 
         if model.mean_embed is not None:
             terms["loss"] = terms["loss"] + self.reg_rate * model.mean_embed.norm(p=2).sum()
