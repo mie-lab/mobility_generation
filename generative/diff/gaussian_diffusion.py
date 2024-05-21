@@ -611,7 +611,7 @@ class GaussianDiffusion:
 
         if mask is not None:
             diff_loss *= mask[:, 1:]
-            diff_loss = diff_loss.sum(dim=-1) / mask[:, 1:].sum(dim=-1)
+            diff_loss = diff_loss.sum(dim=-1) / (mask[:, 1:].sum(dim=-1) + 1e-8)
         else:
             diff_loss = diff_loss.mean(dim=-1)
 
@@ -624,7 +624,7 @@ class GaussianDiffusion:
         decoder_mse = loss_fct(predict.view(-1), inputs.view(-1)).view(inputs.shape)
         if mask is not None:
             decoder_mse *= mask
-            decoder_mse = decoder_mse.sum(dim=-1) / mask.sum(dim=-1)
+            decoder_mse = decoder_mse.sum(dim=-1) / (mask.sum(dim=-1) + 1e-8)
         else:
             decoder_mse = decoder_mse.mean(dim=-1)
 
@@ -716,7 +716,10 @@ class GaussianDiffusion:
 
         # difference loss
         diff_loss = self._diff_loss(x_start, get_logits, mask=padding_mask)
-        diff_loss = 0.1 * diff_loss / (diff_loss / terms["mse"]).detach()
+        if th.isnan(diff_loss).any():
+            print(diff_loss)
+            print(padding_mask[th.isnan(diff_loss), :])
+        diff_loss = 0.1 * diff_loss / (diff_loss / (terms["mse"] + 1e-8)).detach()
 
         # x_0->model_out_x_start
         input_ids_mask[padding_mask == 0] = 0
