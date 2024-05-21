@@ -719,7 +719,7 @@ class GaussianDiffusion:
         if th.isnan(diff_loss).any():
             print(diff_loss)
             print(padding_mask[th.isnan(diff_loss), :])
-        diff_loss = 0.1 * diff_loss / (diff_loss / (terms["mse"] + 1e-8)).detach()
+        diff_loss = 0.1 * diff_loss / ((diff_loss / (terms["mse"] + 1e-8)).detach() + 1e-8)
 
         # x_0->model_out_x_start
         input_ids_mask[padding_mask == 0] = 0
