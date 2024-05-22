@@ -16,6 +16,7 @@ misc:
   # 
   if_embed_xy: True
   if_embed_poi: True
+  if_diffuse_duration: True
   
   batch_size: 256
   microbatch: 32

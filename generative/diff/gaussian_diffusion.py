@@ -657,14 +657,12 @@ class GaussianDiffusion:
         """
         assert "input_ids" in model_kwargs
         input_ids = model_kwargs.pop("input_ids").to(t.device).long()
-
         input_ids_mask = model_kwargs.pop("input_mask").to(t.device)
 
         # padding_mask
         max_len = input_ids.shape[1]
         lens = model_kwargs.pop("len").to(t.device).int()
         padding_mask = (th.arange(max_len).expand(len(lens), max_len).to(t.device) < lens.unsqueeze(1)) * 1
-        # padding_mask_2 = (input_ids != 0) * 1
 
         # embedded
         x_start_mean = model.model.module.get_embeds(input_ids)
@@ -690,15 +688,24 @@ class GaussianDiffusion:
             poi_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_poi.shape).to(t.device)
             context["poi"] = th.where(poi_mask == 0, input_poi, noise)
 
+        # duration
+        duration = model_kwargs.pop("input_durations").to(t.device).float()
+        duration_t = self.q_sample(duration, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed)
+        context["duration"] = model_kwargs.pop("input_durations").to(t.device).float()
+
         terms = {}
         # model use x_t (partially noised) to predict x_start
         model_output = model(x_t, context, self._scale_timesteps(t), padding_mask, **model_kwargs)
-        assert model_output.shape == x_start.shape
+        if len(model_output) == 2:
+            loc_out, dur_out = model_output
+        else:
+            loc_out = model_output
+        assert loc_out.shape == x_start.shape
 
         # Lt-1
-        terms["mse"] = mean_flat((x_start - model_output) ** 2, padding_mask)
+        terms["mse"] = mean_flat((x_start - loc_out) ** 2, padding_mask)
         # L0
-        model_out_x_start = self._x0_helper(model_output, x_t, t)["pred_xstart"]  # predicted_xstart = model_output
+        model_out_x_start = self._x0_helper(loc_out, x_t, t)["pred_xstart"]  # predicted_xstart = loc_out
         t0_mask = t == 0
         t0_loss = mean_flat((x_start_mean - model_out_x_start) ** 2, padding_mask)
         # L0 combined Lt-1
