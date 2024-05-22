@@ -15,9 +15,9 @@ misc:
   seed: 101
   # 
   if_embed_xy: True
-  if_embed_poi: False
+  if_embed_poi: True
   
-  batch_size: 128
+  batch_size: 256
   microbatch: 32
   log_interval: 10
   num_workers: 0
@@ -27,7 +27,7 @@ fp16:
 
 
 embedding:
-  pre_train_embed: ./data/matrix/loc_embedding.pk
+  pre_train_embed: None #./data/matrix/loc_embedding.pk
   hidden_dim: 128
   poi_dim: 32
 
@@ -64,11 +64,9 @@ optimiser:
   weight_decay: 0.01
   ema_rate: 0.999
   gradient_clipping: 3
-  # for loss
-  # loss_weight: 0.1
 
   # for warmup
-  warmup_epochs: 2
+  warmup_epochs: 3
   decay_epochs: 0
   # for early stop
   early_stop_patience: 3
