@@ -85,16 +85,6 @@ def main():
     logger.log(f"### The parameter count is {pytorch_total_params}")
 
     model.to(dist_util.get_device())
-    model_emb = (
-        th.nn.Embedding(
-            num_embeddings=config.max_location,
-            embedding_dim=config.hidden_dim,
-            _weight=model.token_embedding.weight.clone().cpu(),
-        )
-        .eval()
-        .requires_grad_(False)
-    )
-    model_emb.to(dist_util.get_device())
 
     model.eval()
 
@@ -155,12 +145,26 @@ def main():
     ## You can adjust the `steps` to balance the computation
     ## costs and the sample quality.
 
-    dpm_solver = DPM_Solver(
-        model_fn,
-        noise_schedule,
-        algorithm_type="dpmsolver++",
-        correcting_xt_fn=partial(denoised_fn_round, config, model_emb),
-    )
+    if config.clamp:
+        model_emb = (
+            th.nn.Embedding(
+                num_embeddings=config.max_location,
+                embedding_dim=config.hidden_dim,
+                _weight=model.token_embedding.weight.clone().cpu(),
+            )
+            .eval()
+            .requires_grad_(False)
+        )
+        model_emb.to(dist_util.get_device())
+
+        dpm_solver = DPM_Solver(
+            model_fn,
+            noise_schedule,
+            algorithm_type="dpmsolver++",
+            correcting_xt_fn=partial(denoised_fn_round, config, model_emb),
+        )
+    else:
+        dpm_solver = DPM_Solver(model_fn, noise_schedule, algorithm_type="dpmsolver++")
 
     for cond in tqdm(all_test_data):
         input_ids_x = cond.pop("input_ids").to(dist_util.get_device())
