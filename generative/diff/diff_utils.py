@@ -28,6 +28,7 @@ def create_model_and_diffusion(config):
         embed_poi=config.if_embed_poi,
         poi_dims=config.poi_dim,
         device=config.device,
+        diffuse_duration=config.if_diffuse_duration,
     )
 
     betas = gaussian_diffusion.get_named_beta_schedule(config.noise_schedule, config.diffusion_steps)

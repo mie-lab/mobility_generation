@@ -198,7 +198,7 @@ class GaussianDiffusion:
         log_variance = _extract_into_tensor(self.log_one_minus_alphas_cumprod, t, x_start.shape)
         return mean, variance, log_variance
 
-    def q_sample(self, x_start, t, noise=None, mask=None, mean_embed=None):
+    def q_sample(self, x_start, t, noise=None, mask=None, mean_embed=None, denoise=True):
         """
         Diffuse the data for a given number of diffusion steps.
 
@@ -231,7 +231,7 @@ class GaussianDiffusion:
                 + mean_embed_expand.detach() * mask
             )
 
-        if self.denoise:
+        if denoise:
             mask_rate = (
                 _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape[:2]) * self.denoise_rate
             )
@@ -669,7 +669,9 @@ class GaussianDiffusion:
         std = _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, th.tensor([0]).to(t.device), x_start_mean.shape)
         x_start = self._get_x_start(x_start_mean, std)
         # reparametrization trick -> noise only on y
-        x_t = self.q_sample(x_start, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed)
+        x_t = self.q_sample(
+            x_start, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed, denoise=self.denoise
+        )
 
         context = {}
         # xy
@@ -689,9 +691,9 @@ class GaussianDiffusion:
             context["poi"] = th.where(poi_mask == 0, input_poi, noise)
 
         # duration
-        duration = model_kwargs.pop("input_durations").to(t.device).float()
-        duration_t = self.q_sample(duration, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed)
-        context["duration"] = model_kwargs.pop("input_durations").to(t.device).float()
+        duration = model_kwargs.pop("input_durations").to(t.device).float().unsqueeze(-1)
+        duration_t = self.q_sample(duration, t, noise=None, mask=input_ids_mask, mean_embed=None, denoise=False)
+        context["duration"] = duration_t
 
         terms = {}
         # model use x_t (partially noised) to predict x_start
@@ -710,10 +712,15 @@ class GaussianDiffusion:
         t0_loss = mean_flat((x_start_mean - model_out_x_start) ** 2, padding_mask)
         # L0 combined Lt-1
         terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
+        # duration
+        terms["mse"] += mean_flat((duration - dur_out) ** 2, padding_mask)
 
         # LT
         out_mean, _, _ = self.q_mean_variance(x_start, th.LongTensor([self.num_timesteps - 1]).to(x_start.device))
         tT_loss = mean_flat(out_mean**2, padding_mask)
+        # duration
+        dur_mean, _, _ = self.q_mean_variance(duration, th.LongTensor([self.num_timesteps - 1]).to(x_start.device))
+        tT_loss += mean_flat(dur_mean**2, padding_mask)
 
         # Rounding error: embedding regularization
         get_logits = model.model.module.get_logits
@@ -723,9 +730,6 @@ class GaussianDiffusion:
 
         # difference loss
         diff_loss = self._diff_loss(x_start, get_logits, mask=padding_mask)
-        if th.isnan(diff_loss).any():
-            print(diff_loss)
-            print(padding_mask[th.isnan(diff_loss), :])
         diff_loss = 0.1 * diff_loss / ((diff_loss / (terms["mse"] + 1e-8)).detach() + 1e-8)
 
         # x_0->model_out_x_start
@@ -737,7 +741,7 @@ class GaussianDiffusion:
         terms["loss"] = terms["mse"] + tT_loss + decoder_loss + diff_loss
 
         if model.mean_embed is not None:
-            terms["loss"] = terms["loss"] + self.reg_rate * model.mean_embed.norm(p=2).sum()
+            terms["loss"] += self.reg_rate * model.mean_embed.norm(p=2).sum()
 
         return terms
 
@@ -810,14 +814,14 @@ class _WrappedModel:
         self.rescale_timesteps = rescale_timesteps
         self.original_num_steps = original_num_steps
 
-    def __call__(self, x, xy, ts, padding_mask, **kwargs):
+    def __call__(self, x, context, ts, padding_mask, **kwargs):
         # print(ts)
         map_tensor = th.tensor(self.timestep_map, device=ts.device, dtype=ts.dtype)
         new_ts = map_tensor[ts]
         # print(new_ts)
         if self.rescale_timesteps:
             new_ts = new_ts.float() * (1000.0 / self.original_num_steps)
-        return self.model(x, xy, new_ts, padding_mask, **kwargs)
+        return self.model(x, context, new_ts, padding_mask, **kwargs)
 
     @property
     def mean_embed(self):
