@@ -135,8 +135,16 @@ class ContextModel(nn.Module):
         if embed_poi:
             self.poi_up_proj = nn.Sequential(
                 nn.Linear(poi_dims, input_dims),
-                nn.ReLU(),
+                nn.Tanh(),
                 nn.Linear(input_dims, input_dims),
+            )
+            self.comb_poi = nn.Sequential(
+                nn.Linear(hidden_dims + input_dims, input_dims),
+                nn.LayerNorm(input_dims),
+                nn.ReLU(),
+                nn.Linear(input_dims, hidden_dims),
+                nn.LayerNorm(hidden_dims),
+                nn.Dropout(0.1),
             )
 
     def forward(self, x, context):
@@ -145,7 +153,8 @@ class ContextModel(nn.Module):
             res = torch.cat([emb, self.encoder(context["xy"])], dim=-1)
             emb = emb + self.comb_xy(res)
         if self.embed_poi:
-            emb = emb + self.poi_up_proj(context["poi"])
+            res = torch.cat([emb, self.poi_up_proj(context["poi"])], dim=-1)
+            emb = emb + self.comb_poi(res)
         return emb
 
 
