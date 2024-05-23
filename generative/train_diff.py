@@ -100,7 +100,7 @@ class TrainLoop:
             main_process=is_main_process(),
             verbose=True,
             monitor="loss",
-            delta=0.00001,
+            delta=-1,
         )
 
         self.ema_params = copy.deepcopy(self.master_params)
