@@ -44,7 +44,7 @@ def main():
     setup_seed(config.seed)
     setup_dist()
 
-    time_now = int(datetime.datetime.now().timestamp())
+    time_now = int(int(datetime.datetime.now().timestamp()) / 100)
     log_dir = init_save_path(config, time_now=time_now)
 
     logger.configure(dir=log_dir)
