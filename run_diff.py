@@ -45,7 +45,10 @@ def main():
     setup_dist()
 
     time_now = int(int(datetime.datetime.now().timestamp()) / 100)
-    log_dir = init_save_path(config, time_now=time_now)
+    if config.load_checkpoint:
+        log_dir = config.checkpoint_path
+    else:
+        log_dir = init_save_path(config, time_now=time_now)
 
     logger.configure(dir=log_dir)
     logger.log("### Creating data loader...")
@@ -93,11 +96,13 @@ def main():
         use_fp16=config.use_fp16,
         schedule_sampler=schedule_sampler,
         weight_decay=config.weight_decay,
-        early_stop_gamma=config.early_stop_gamma,
-        early_stop_patience=config.early_stop_patience,
         decay_epochs=config.decay_epochs,
+        max_epochs=config.max_epochs,
+        save_epochs=config.save_epochs,
         warmup_epochs=config.warmup_epochs,
         checkpoint_path=log_dir,
+        load_checkpoint=config.load_checkpoint,
+        load_opt=config.load_opt,
         gradient_clipping=config.gradient_clipping,
         eval_data=data_valid,
     ).run_loop()
