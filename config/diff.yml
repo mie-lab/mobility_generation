@@ -60,7 +60,7 @@ model:
 
 
 optimiser:
-  lr: 0.0005
+  lr: 0.0001
   weight_decay: 0.01
   ema_rate: 0.9999
   gradient_clipping: 3
@@ -68,9 +68,15 @@ optimiser:
   # for warmup
   warmup_epochs: 3
   decay_epochs: 0
-  # for early stop
-  early_stop_patience: 3
-  early_stop_gamma: 0.1
+
+  # training
+  max_epochs: 120
+  save_epochs: 2
+
+  # 
+  load_checkpoint: True
+  checkpoint_path: ./runs/mobis_diffseq_17165500
+  load_opt: False
 
 dataset:
   data_dir: ./data/diff
