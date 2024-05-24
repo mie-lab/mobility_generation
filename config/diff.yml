@@ -9,18 +9,18 @@ misc:
   tgt_min_days: 7
 
   # seq_len: 512
-  # 14882 + 1 for seperation
-  max_location: 14883
+  # 14882 + 1 (28743 + 1) for seperation
+  max_location: 14883 # 28744, 14883
 
   seed: 101
   # 
-  if_embed_xy: True
-  if_embed_poi: True
+  if_embed_xy: False
+  if_embed_poi: False
   
-  batch_size: 256
+  batch_size: 512
   microbatch: 32
   log_interval: 10
-  num_workers: 0
+  num_workers: 16
   
 fp16:
   use_fp16: True
@@ -60,9 +60,9 @@ model:
 
 
 optimiser:
-  lr: 0.001
+  lr: 0.0005
   weight_decay: 0.01
-  ema_rate: 0.999
+  ema_rate: 0.9999
   gradient_clipping: 3
 
   # for warmup
