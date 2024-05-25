@@ -729,8 +729,8 @@ class GaussianDiffusion:
         # decoder_mse = self._prediction_mse_loss(x_start, get_predict_head, input_durs_x, mask=padding_mask)
 
         # difference loss
-        diff_loss = self._diff_loss(x_start, get_logits, mask=padding_mask)
-        diff_loss = 0.1 * diff_loss / ((diff_loss / (terms["mse"] + 1e-8)).detach() + 1e-8)
+        # diff_loss = self._diff_loss(x_start, get_logits, mask=padding_mask)
+        # diff_loss = 0.1 * diff_loss / ((diff_loss / (terms["mse"] + 1e-8)).detach() + 1e-8)
 
         # x_0->model_out_x_start
         input_ids_mask[padding_mask == 0] = 0
@@ -738,7 +738,8 @@ class GaussianDiffusion:
         # assert (model.model.module.lm_head.weight == model.model.module.word_embedding.weight).all()
 
         decoder_loss = decoder_nll
-        terms["loss"] = terms["mse"] + tT_loss + decoder_loss + diff_loss
+        terms["loss"] = terms["mse"] + tT_loss + decoder_loss
+        # terms["loss"] += diff_loss
 
         if model.mean_embed is not None:
             terms["loss"] += self.reg_rate * model.mean_embed.norm(p=2).sum()

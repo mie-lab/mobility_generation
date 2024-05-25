@@ -88,19 +88,10 @@ def main():
 
     model.eval()
 
-    # model_emb = torch.nn.Embedding(num_embeddings=config.max_location, embedding_dim=config.hidden_dim)
-    # model_emb.weight = th.nn.Parameter(model.word_embedding.weight.clone().cpu())
-
     print("### Sampling...on", config.split)
 
     ## load data
-    data_valid = load_data_diffusion(
-        batch_size=config.batch_size,
-        shuffle=False,
-        data_args=config,
-        split=config.split,
-        # model_emb=model_emb.cpu(),  # using the same embedding wight with training data
-    )
+    data_valid = load_data_diffusion(batch_size=config.batch_size, shuffle=False, data_args=config, split=config.split)
     data_valid = iter(data_valid)
 
     start_t = time.time()
@@ -202,6 +193,7 @@ def main():
         x_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), x_start.shape).to(dist_util.get_device())
         x_noised = th.where(x_mask == 0, x_start, noise)
 
+        # adding or not does not influence the results 
         # if model.mean_embed is not None:
         #     mean_embed = model.mean_embed.expand(x_noised.shape)
         #     mask = input_ids_mask.unsqueeze(dim=-1).expand(x_noised.shape).to(dist_util.get_device())

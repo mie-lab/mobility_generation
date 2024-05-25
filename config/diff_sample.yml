@@ -19,8 +19,8 @@ misc:
   # 
   split: test
   top_p: 0
-  model_path: ./runs/mobis_diffseq_xy_loss_layer6
-  trained_model_name: model_ema_25.pt
+  model_path: ./runs/mobis_diffseq_baseline_encode_long_seed110
+  trained_model_name: model_ema_45.pt
   pre_train_embed: None # ./data/matrix/loc_embedding.pk
 
   # seq_len: 512

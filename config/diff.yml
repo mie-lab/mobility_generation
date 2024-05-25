@@ -9,19 +9,19 @@ misc:
   tgt_min_days: 7
 
   # seq_len: 512
-  # 14882 + 1 for seperation
-  max_location: 14883
+  # 14882 + 1 (28743 + 1) for seperation
+  max_location: 14883 # 28744, 14883
 
   seed: 101
   # 
-  if_embed_xy: True
-  if_embed_poi: True
+  if_embed_xy: False
+  if_embed_poi: False
   if_diffuse_duration: True
   
-  batch_size: 256
+  batch_size: 512
   microbatch: 32
   log_interval: 10
-  num_workers: 0
+  num_workers: 16
   
 fp16:
   use_fp16: True
@@ -61,17 +61,23 @@ model:
 
 
 optimiser:
-  lr: 0.001
+  lr: 0.0001
   weight_decay: 0.01
-  ema_rate: 0.999
+  ema_rate: 0.9999
   gradient_clipping: 3
 
   # for warmup
   warmup_epochs: 3
   decay_epochs: 0
-  # for early stop
-  early_stop_patience: 3
-  early_stop_gamma: 0.1
+
+  # training
+  max_epochs: 120
+  save_epochs: 2
+
+  # 
+  load_checkpoint: True
+  checkpoint_path: ./runs/mobis_diffseq_17165500
+  load_opt: False
 
 dataset:
   data_dir: ./data/diff

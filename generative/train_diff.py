@@ -2,6 +2,7 @@ import copy
 import functools
 import os
 import time
+import glob
 
 import blobfile as bf
 import numpy as np
@@ -9,7 +10,6 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import StepLR
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -18,7 +18,6 @@ import pickle as pickle
 from transformers import get_constant_schedule_with_warmup, get_linear_schedule_with_warmup
 from utils import logger
 from utils.dist_util import get_device, load_state_dict
-from utils.earlystopping import EarlyStopping
 
 from generative.diff.step_sample import LossAwareSampler, UniformSampler
 
@@ -37,12 +36,14 @@ class TrainLoop:
         log_interval,
         warmup_epochs=2,
         decay_epochs=100,
-        early_stop_gamma,
-        early_stop_patience,
+        max_epochs=150,
+        save_epochs=5,
         use_fp16=False,
         schedule_sampler=None,
         weight_decay=0.0,
         checkpoint_path="",
+        load_checkpoint=False,
+        load_opt=True,
         gradient_clipping=-1.0,
         eval_data=None,
     ):
@@ -62,13 +63,13 @@ class TrainLoop:
 
         self.step = 0
         self.global_batch = self.batch_size * dist.get_world_size()
+        self.max_epochs = max_epochs
+        self.save_epochs = save_epochs
 
         self.model_params = list(self.model.parameters())
         self.master_params = self.model_params
 
         self.checkpoint_path = checkpoint_path
-
-        self.early_stop_patience = early_stop_patience
 
         # control learning rate
         param_groups = []
@@ -82,6 +83,8 @@ class TrainLoop:
         self.opt = AdamW(param_groups, lr=self.lr, weight_decay=weight_decay, eps=1e-5)
         self.scaler = torch.cuda.amp.GradScaler(growth_interval=4000, init_scale=4096, enabled=self.use_fp16)
         # define learning rate schedule
+        if load_checkpoint:
+            warmup_epochs = 0
         if self.decay_epochs == 0:
             self.scheduler = get_constant_schedule_with_warmup(
                 self.opt, num_warmup_steps=len(self.data) * warmup_epochs
@@ -92,16 +95,6 @@ class TrainLoop:
                 num_warmup_steps=len(self.data) * warmup_epochs,
                 num_training_steps=len(self.data) * self.decay_epochs,
             )
-        # early stopping
-        self.scheduler_ES = StepLR(self.opt, step_size=1, gamma=early_stop_gamma)
-        self.ES = EarlyStopping(
-            checkpoint_path,
-            patience=early_stop_patience,
-            main_process=is_main_process(),
-            verbose=True,
-            monitor="loss",
-            delta=0.00001,
-        )
 
         self.ema_params = copy.deepcopy(self.master_params)
 
@@ -122,62 +115,60 @@ class TrainLoop:
             self.use_ddp = False
             self.ddp_model = self.model
 
+        self.loaded_epoch = 0
+        if load_checkpoint:
+            files = glob.glob(os.path.join(self.checkpoint_path, "*.pt"))
+            self.loaded_epoch = np.max([int(file[-12:].split(".")[0].split("_")[-1]) for file in files])
+
+            file_name = f"model_ema_{self.loaded_epoch}.pt"
+            logger.log(f"loading model from checkpoint: {file_name}...")
+            # load best model for retraining
+            checkpoint = load_state_dict(
+                bf.join(self.checkpoint_path, file_name), map_location={"cuda:0": f"{get_device()}"}
+            )
+            self.ema_params = self._state_dict_to_master_params(checkpoint["ema"])
+            self.model.load_state_dict(checkpoint["model"])
+            self.scaler.load_state_dict(checkpoint["scaler"])
+            if load_opt:
+                self.opt.load_state_dict(checkpoint["optimizer"])
+                self.scheduler.load_state_dict(checkpoint["lr_schedule"])
+
     def run_loop(self):
-        early_stop_count = 0
-        for epoch in range(1000):  # stop managed by ES
+        previous_loss = np.inf
+        for epoch in range(self.loaded_epoch + 1, self.max_epochs):
             self.data.sampler.set_epoch(epoch)
             self.eval_data.sampler.set_epoch(epoch)
 
             # train
-            self.train_epoch(epoch, early_stop_count)
+            self.train_epoch(epoch)
 
             # evaluate
             current_loss = self.evaluate_epoch()
 
-            # early stop
-            checkpoint = {
-                "model": self._master_params_to_state_dict(self.master_params),
-                "ema": self._master_params_to_state_dict(self.ema_params),
-                "optimizer": self.opt.state_dict(),
-                "scaler": self.scaler.state_dict(),
-                "lr_schedule": self.scheduler_ES.state_dict(),
-            }
+            # loss monitor
+            if is_main_process():
+                logger.log(f"Evaluation loss: {previous_loss:.5f} --> {current_loss:.5f}.")
+            previous_loss = current_loss
 
-            self.ES({"loss": current_loss}, state_dict=checkpoint, save_name=f"model_ema_{epoch}")
-            dist.barrier()
-            if self.ES.early_stop:
+            # save
+            if epoch % self.save_epochs == 0:
+                # early stop
+                checkpoint = {
+                    "model": self._master_params_to_state_dict(self.master_params),
+                    "ema": self._master_params_to_state_dict(self.ema_params),
+                    "optimizer": self.opt.state_dict(),
+                    "scaler": self.scaler.state_dict(),
+                    "lr_schedule": self.scheduler.state_dict(),
+                }
                 if is_main_process():
-                    logger.log("=" * 50)
-                    logger.log("Early stopping")
+                    logger.log(f"Saving model after epoch {epoch}.")
+                    torch.save(checkpoint, self.checkpoint_path + f"/model_ema_{epoch}.pt")
+                dist.barrier()
 
-                # only es for 2 times
-                if early_stop_count == 2:
-                    if is_main_process():
-                        logger.log("Training finished.")
-                    break
+        if is_main_process():
+            logger.log("Training finished.")
 
-                if is_main_process():
-                    logger.log(f"loading model from checkpoint: {self.ES.save_name}...")
-
-                # load best model for retraining
-                checkpoint = load_state_dict(
-                    bf.join(self.checkpoint_path, self.ES.save_name + ".pt"), map_location={"cuda:0": f"{get_device()}"}
-                )
-                self.ema_params = self._state_dict_to_master_params(checkpoint["ema"])
-                self.model.load_state_dict(checkpoint["model"])
-                self.opt.load_state_dict(checkpoint["optimizer"])
-                self.scaler.load_state_dict(checkpoint["scaler"])
-                self.scheduler_ES.load_state_dict(checkpoint["lr_schedule"])
-                #
-                early_stop_count += 1
-                # reset
-                self.ES.early_stop = False
-                self.ES.counter = 0
-                self.scheduler_ES.step()
-                if is_main_process():
-                    logger.log("Current lr: {:.6f}".format(self.opt.param_groups[0]["lr"]))
-
-    def train_epoch(self, epoch, early_stop_count):
+    def train_epoch(self, epoch):
         self.ddp_model.train()
         # train
         n_batches = len(self.data)
@@ -190,8 +181,7 @@ class TrainLoop:
             current_step += 1
             self.run_step(batch, cond)
 
-            if not early_stop_count:
-                self.scheduler.step()
+            self.scheduler.step()
 
             # log
             if current_step % self.log_interval == 0:
