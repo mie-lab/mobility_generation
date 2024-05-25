@@ -113,11 +113,7 @@ class ContextModel(nn.Module):
         self.embed_poi = embed_poi
 
         # upproject embedding
-        self.input_up_proj = nn.Sequential(
-            nn.Linear(input_dims, hidden_dims),
-            nn.Tanh(),
-            nn.Linear(hidden_dims, hidden_dims),
-        )
+        self.input_up_proj = nn.Linear(input_dims, hidden_dims, bias=False)
         # xy embedding
         if embed_xy:
             frequency_num = 16
@@ -260,17 +256,13 @@ class TransformerNetModel(nn.Module):
 
         # embed input
         # timestep embedding
-        self.time_embed = nn.Sequential(
-            nn.Linear(input_dims, input_dims * 4), nn.SiLU(), nn.Linear(input_dims * 4, self.hidden_size)
-        )
+        self.time_embed = nn.Linear(input_dims, self.hidden_size, bias=False)
         self.register_buffer("position_ids", torch.arange(max_position_embeddings).expand((1, -1)))
         self.position_embeddings = nn.Embedding(max_position_embeddings, self.hidden_size)
         self.LayerNorm = nn.LayerNorm(self.hidden_size)
         self.dropout = nn.Dropout(dropout)
 
-        self.output_down_proj = nn.Sequential(
-            nn.Linear(self.hidden_size, self.hidden_size), nn.Tanh(), nn.Linear(self.hidden_size, self.output_dims)
-        )
+        self.output_down_proj = nn.Linear(self.hidden_size, input_dims, bias=False)
 
         # embeds and heads
         if loaded_embed is not None:

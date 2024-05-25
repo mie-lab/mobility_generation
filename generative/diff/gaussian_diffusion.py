@@ -16,7 +16,7 @@ import sys
 import torch.nn.functional as F
 
 
-def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, warmup_steps_ratio=0.1):
+def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, rescaling_factor=1):
     """
     Get a pre-defined beta schedule for the given name.
 
@@ -27,18 +27,16 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, warmup_steps
     """
 
     if schedule_name == "sqrt":
-        return betas_for_alpha_bar(
-            num_diffusion_timesteps,
-            lambda t: 1 - np.sqrt(t + 0.0001),
-        )
-    elif schedule_name == "warmup-decay":
-        warmup_steps = max(1, int(warmup_steps_ratio * num_diffusion_timesteps))
-        sqrt_steps = get_named_beta_schedule("sqrt", num_diffusion_timesteps)
-        beta_mid = sqrt_steps[-warmup_steps]
-        warmup = np.linspace(beta_mid, 0.0001, warmup_steps)
-        return np.concatenate([sqrt_steps[:-warmup_steps], warmup])
+        shift = 0.0001
+        alpha_bar = lambda t: 1 - np.sqrt(t + shift)
+
     else:
         raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
+
+    f2 = rescaling_factor**2
+    rescaled_alpha_bar = lambda t: alpha_bar(t) / (f2 - (f2 - 1) * alpha_bar(t))
+
+    return betas_for_alpha_bar(num_diffusion_timesteps, rescaled_alpha_bar)
 
 
 def betas_for_alpha_bar_left(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
@@ -583,7 +581,7 @@ class GaussianDiffusion:
         """
         logits = get_logits(x_0)  # bsz, seqlen, vocab
         # print(logits.shape)
-        loss_fct = th.nn.CrossEntropyLoss(reduction="none", ignore_index=0)
+        loss_fct = th.nn.CrossEntropyLoss(reduction="none", ignore_index=0, label_smoothing=0.1)
         decoder_nll = loss_fct(logits.view(-1, logits.size(-1)), input_ids.view(-1)).view(input_ids.shape)
         if mask is not None:
             decoder_nll *= mask
@@ -691,14 +689,17 @@ class GaussianDiffusion:
             context["poi"] = th.where(poi_mask == 0, input_poi, noise)
 
         # duration
-        duration = model_kwargs.pop("input_durations").to(t.device).float().unsqueeze(-1)
-        duration_t = self.q_sample(duration, t, noise=None, mask=input_ids_mask, mean_embed=None, denoise=False)
-        context["duration"] = duration_t
+        if_duration = False
+        if "input_durations" in model_kwargs:
+            if_duration = True
+            duration = model_kwargs.pop("input_durations").to(t.device).float().unsqueeze(-1)
+            duration_t = self.q_sample(duration, t, noise=None, mask=input_ids_mask, mean_embed=None, denoise=False)
+            context["duration"] = duration_t
 
         terms = {}
         # model use x_t (partially noised) to predict x_start
         model_output = model(x_t, context, self._scale_timesteps(t), padding_mask, **model_kwargs)
-        if len(model_output) == 2:
+        if if_duration:
             loc_out, dur_out = model_output
         else:
             loc_out = model_output
@@ -713,18 +714,20 @@ class GaussianDiffusion:
         # L0 combined Lt-1
         terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
         # duration
-        terms["mse"] += mean_flat((duration - dur_out) ** 2, padding_mask)
+        if if_duration:
+            terms["mse"] += mean_flat((duration - dur_out) ** 2, padding_mask)
 
         # LT
         out_mean, _, _ = self.q_mean_variance(x_start, th.LongTensor([self.num_timesteps - 1]).to(x_start.device))
         tT_loss = mean_flat(out_mean**2, padding_mask)
         # duration
-        dur_mean, _, _ = self.q_mean_variance(duration, th.LongTensor([self.num_timesteps - 1]).to(x_start.device))
-        tT_loss += mean_flat(dur_mean**2, padding_mask)
+        if if_duration:
+            dur_mean, _, _ = self.q_mean_variance(duration, th.LongTensor([self.num_timesteps - 1]).to(x_start.device))
+            tT_loss += mean_flat(dur_mean**2, padding_mask)
 
         # Rounding error: embedding regularization
         get_logits = model.model.module.get_logits
-        decoder_nll = self._token_discrete_loss(x_start, get_logits, input_ids, mask=padding_mask)
+        decoder_nll = self._token_discrete_loss(model_out_x_start, get_logits, input_ids, mask=padding_mask)
         # get_predict_head = model.model.module.get_dur_predictions
         # decoder_mse = self._prediction_mse_loss(x_start, get_predict_head, input_durs_x, mask=padding_mask)
 

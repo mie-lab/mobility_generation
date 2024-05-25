@@ -31,7 +31,9 @@ def create_model_and_diffusion(config):
         diffuse_duration=config.if_diffuse_duration,
     )
 
-    betas = gaussian_diffusion.get_named_beta_schedule(config.noise_schedule, config.diffusion_steps)
+    betas = gaussian_diffusion.get_named_beta_schedule(
+        config.noise_schedule, config.diffusion_steps, config.rescaling_factor
+    )
 
     if not config.timestep_respacing:
         timestep_respacing = [config.diffusion_steps]
