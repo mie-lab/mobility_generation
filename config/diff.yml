@@ -3,7 +3,7 @@ misc:
 
   wandb_name: test
   split: train
-  dataset_variation: tiny
+  dataset_variation: small
   level: "10_13"
   src_min_days: 14
   tgt_min_days: 7
@@ -16,6 +16,7 @@ misc:
   # 
   if_embed_xy: False
   if_embed_poi: False
+  if_diffuse_duration: True
   
   batch_size: 512
   microbatch: 32

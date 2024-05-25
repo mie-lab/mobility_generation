@@ -198,7 +198,7 @@ class GaussianDiffusion:
         log_variance = _extract_into_tensor(self.log_one_minus_alphas_cumprod, t, x_start.shape)
         return mean, variance, log_variance
 
-    def q_sample(self, x_start, t, noise=None, mask=None, mean_embed=None):
+    def q_sample(self, x_start, t, noise=None, mask=None, mean_embed=None, denoise=True):
         """
         Diffuse the data for a given number of diffusion steps.
 
@@ -231,7 +231,7 @@ class GaussianDiffusion:
                 + mean_embed_expand.detach() * mask
             )
 
-        if self.denoise:
+        if denoise:
             mask_rate = (
                 _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape[:2]) * self.denoise_rate
             )
@@ -657,21 +657,21 @@ class GaussianDiffusion:
         """
         assert "input_ids" in model_kwargs
         input_ids = model_kwargs.pop("input_ids").to(t.device).long()
-
         input_ids_mask = model_kwargs.pop("input_mask").to(t.device)
 
         # padding_mask
         max_len = input_ids.shape[1]
         lens = model_kwargs.pop("len").to(t.device).int()
         padding_mask = (th.arange(max_len).expand(len(lens), max_len).to(t.device) < lens.unsqueeze(1)) * 1
-        # padding_mask_2 = (input_ids != 0) * 1
 
         # embedded
         x_start_mean = model.model.module.get_embeds(input_ids)
         std = _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, th.tensor([0]).to(t.device), x_start_mean.shape)
         x_start = self._get_x_start(x_start_mean, std)
         # reparametrization trick -> noise only on y
-        x_t = self.q_sample(x_start, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed)
+        x_t = self.q_sample(
+            x_start, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed, denoise=self.denoise
+        )
 
         context = {}
         # xy
@@ -690,23 +690,37 @@ class GaussianDiffusion:
             poi_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_poi.shape).to(t.device)
             context["poi"] = th.where(poi_mask == 0, input_poi, noise)
 
+        # duration
+        duration = model_kwargs.pop("input_durations").to(t.device).float().unsqueeze(-1)
+        duration_t = self.q_sample(duration, t, noise=None, mask=input_ids_mask, mean_embed=None, denoise=False)
+        context["duration"] = duration_t
+
         terms = {}
         # model use x_t (partially noised) to predict x_start
         model_output = model(x_t, context, self._scale_timesteps(t), padding_mask, **model_kwargs)
-        assert model_output.shape == x_start.shape
+        if len(model_output) == 2:
+            loc_out, dur_out = model_output
+        else:
+            loc_out = model_output
+        assert loc_out.shape == x_start.shape
 
         # Lt-1
-        terms["mse"] = mean_flat((x_start - model_output) ** 2, padding_mask)
+        terms["mse"] = mean_flat((x_start - loc_out) ** 2, padding_mask)
         # L0
-        model_out_x_start = self._x0_helper(model_output, x_t, t)["pred_xstart"]  # predicted_xstart = model_output
+        model_out_x_start = self._x0_helper(loc_out, x_t, t)["pred_xstart"]  # predicted_xstart = loc_out
         t0_mask = t == 0
         t0_loss = mean_flat((x_start_mean - model_out_x_start) ** 2, padding_mask)
         # L0 combined Lt-1
         terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
+        # duration
+        terms["mse"] += mean_flat((duration - dur_out) ** 2, padding_mask)
 
         # LT
         out_mean, _, _ = self.q_mean_variance(x_start, th.LongTensor([self.num_timesteps - 1]).to(x_start.device))
         tT_loss = mean_flat(out_mean**2, padding_mask)
+        # duration
+        dur_mean, _, _ = self.q_mean_variance(duration, th.LongTensor([self.num_timesteps - 1]).to(x_start.device))
+        tT_loss += mean_flat(dur_mean**2, padding_mask)
 
         # Rounding error: embedding regularization
         get_logits = model.model.module.get_logits
@@ -728,7 +742,7 @@ class GaussianDiffusion:
         # terms["loss"] += diff_loss
 
         if model.mean_embed is not None:
-            terms["loss"] = terms["loss"] + self.reg_rate * model.mean_embed.norm(p=2).sum()
+            terms["loss"] += self.reg_rate * model.mean_embed.norm(p=2).sum()
 
         return terms
 
