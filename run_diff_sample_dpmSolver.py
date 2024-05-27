@@ -193,7 +193,7 @@ def main():
         x_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), x_start.shape).to(dist_util.get_device())
         x_noised = th.where(x_mask == 0, x_start, noise)
 
-        # adding or not does not influence the results 
+        # adding or not does not influence the results
         # if model.mean_embed is not None:
         #     mean_embed = model.mean_embed.expand(x_noised.shape)
         #     mask = input_ids_mask.unsqueeze(dim=-1).expand(x_noised.shape).to(dist_util.get_device())

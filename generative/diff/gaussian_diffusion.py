@@ -269,6 +269,7 @@ class GaussianDiffusion:
         self,
         model,
         x,
+        context,
         t,
         padding_mask=None,
         clip_denoised=True,
@@ -302,7 +303,7 @@ class GaussianDiffusion:
         B = x.size(0)
         assert t.shape == (B,)
         # predict x_0 knowing x_t and t
-        model_output = model(x, self._scale_timesteps(t), padding_mask, **model_kwargs)
+        model_output = model(x, context, self._scale_timesteps(t), padding_mask, **model_kwargs)
 
         # for fixedlarge, we set the initial (log-)variance like so
         # to get a better decoder log likelihood.
@@ -353,6 +354,7 @@ class GaussianDiffusion:
         self,
         model,
         x,
+        context,
         t,
         clip_denoised=True,
         denoised_fn=None,
@@ -382,6 +384,7 @@ class GaussianDiffusion:
         out = self.p_mean_variance(
             model,
             x,
+            context,
             t,
             clip_denoised=clip_denoised,
             denoised_fn=denoised_fn,
@@ -418,6 +421,7 @@ class GaussianDiffusion:
         if mask is None:
             pass
         else:
+            mask = th.broadcast_to(mask.unsqueeze(dim=-1), x_start.shape)
             sample = th.where(mask == 0, x_start, sample)
 
         return {
@@ -431,6 +435,7 @@ class GaussianDiffusion:
     def p_sample_loop(
         self,
         model,
+        context,
         shape,
         noise=None,
         clip_denoised=True,
@@ -469,6 +474,7 @@ class GaussianDiffusion:
         final = []
         for sample in self.p_sample_loop_progressive(
             model,
+            context,
             shape,
             noise=noise,
             clip_denoised=clip_denoised,
@@ -489,6 +495,7 @@ class GaussianDiffusion:
     def p_sample_loop_progressive(
         self,
         model,
+        context,
         shape,
         noise=None,
         clip_denoised=True,
@@ -522,7 +529,9 @@ class GaussianDiffusion:
             )
             sample_x = th.randn(*shape, device=device) * th.exp(0.5 * model_log_variance)
         if model.mean_embed is not None:
-            sample_x += model.mean_embed[None, None] * mask
+            mean_embed = model.mean_embed.expand(sample_x.shape)
+            mask_ = mask.unsqueeze(dim=-1).expand(sample_x.shape).to(sample_x.device)
+            sample_x += mean_embed * mask_
         indices = list(range(self.num_timesteps))[::-1]
 
         if progress:
@@ -548,6 +557,7 @@ class GaussianDiffusion:
                 out = self.p_sample(
                     model,
                     sample_x,
+                    context,
                     t,
                     clip_denoised=clip_denoised,
                     denoised_fn=denoised_fn_cur,
@@ -740,7 +750,7 @@ class GaussianDiffusion:
         terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids, mask=input_ids_mask)
         # assert (model.model.module.lm_head.weight == model.model.module.word_embedding.weight).all()
 
-        decoder_loss = decoder_nll
+        decoder_loss = decoder_nll / ((decoder_nll / (terms["mse"] + 1e-8)).detach() + 1e-8)
         terms["loss"] = terms["mse"] + tT_loss + decoder_loss
         # terms["loss"] += diff_loss
 

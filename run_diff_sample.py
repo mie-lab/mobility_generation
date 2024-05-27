@@ -139,7 +139,6 @@ def main():
             continue
 
         input_ids = cond.pop("input_ids").to(device)
-        input_xys = cond.pop("input_xys").to(device).float()
         x_start = model.get_embeds(input_ids)
 
         # padding_mask
@@ -150,10 +149,13 @@ def main():
         input_ids_mask = cond.pop("input_mask").to(device)
         input_ids_mask_ori = input_ids_mask
 
+        context = {}
         # noise input_xys
-        noise = torch.randn_like(input_xys)
-        xy_mask = torch.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(device)
-        xy_noised = torch.where(xy_mask == 0, input_xys, noise)
+        if "input_xys" in cond:
+            input_xys = cond.pop("input_xys").to(device).float()
+            noise = torch.randn_like(input_xys)
+            xy_mask = torch.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(device)
+            context["xy"] = torch.where(xy_mask == 0, input_xys, noise)
 
         # noise x_start
         noise = torch.randn_like(x_start)
@@ -178,9 +180,9 @@ def main():
         with autocast():
             samples = sample_fn(
                 model,
+                context,
                 sample_shape,
                 noise=x_noised,
-                xy_noise=xy_noised,
                 clip_denoised=config.clip_denoised,
                 denoised_fn=partial(denoised_fn_round, config, model_emb),
                 model_kwargs=model_kwargs,
@@ -190,7 +192,6 @@ def main():
                 mask=input_ids_mask,
                 padding_mask=padding_mask,
                 x_start=x_start,
-                xy_start=input_xys,
                 gap=step_gap,
             )
         # only get the latest timestep ()
