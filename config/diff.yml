@@ -41,9 +41,9 @@ diffusion:
   schedule_sampler: lossaware
   rescaling_factor: 4
 
-  learned_mean_embed: True
+  learned_mean_embed: False
   emb_scale_factor: 1.0
-  denoise: True
+  denoise: False
   denoise_rate: 0.5
   rejection_rate: 0.0
   reg_rate: 0.0
@@ -62,7 +62,7 @@ model:
 
 
 optimiser:
-  lr: 0.0001
+  lr: 0.0005
   weight_decay: 0.01
   ema_rate: 0.9999
   gradient_clipping: 3
