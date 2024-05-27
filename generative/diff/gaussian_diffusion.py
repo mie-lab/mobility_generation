@@ -196,7 +196,7 @@ class GaussianDiffusion:
         log_variance = _extract_into_tensor(self.log_one_minus_alphas_cumprod, t, x_start.shape)
         return mean, variance, log_variance
 
-    def q_sample(self, x_start, t, noise=None, mask=None, mean_embed=None, denoise=True):
+    def q_sample(self, x_start, t, noise=None):
         """
         Diffuse the data for a given number of diffusion steps.
 
@@ -213,36 +213,12 @@ class GaussianDiffusion:
 
         assert noise.shape == x_start.shape
 
-        if mask is not None:
-            mask = th.broadcast_to(mask.unsqueeze(dim=-1), x_start.shape)
-        if mean_embed is None:
-            x_t = (
-                _extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
-                + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
-            )
-        else:
-            mean_embed_expand = mean_embed.expand(x_start.shape)
-            x_t = (
-                _extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape)
-                * (x_start - mean_embed_expand.detach())
-                + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
-                + mean_embed_expand.detach() * mask
-            )
+        x_t = (
+            _extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
+            + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
+        )
 
-        if denoise:
-            mask_rate = (
-                _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape[:2]) * self.denoise_rate
-            )
-            # print('mask_rate', mask_rate.shape)
-            random_mask = mask_rate.bernoulli()[..., None]
-            random_mask = random_mask.expand(x_start.shape)
-            mean_embed_expand = mean_embed.expand(x_start.shape)
-            x_t = th.where(random_mask == 0, x_t, mean_embed_expand)
-
-        if mask is None:
-            return x_t
-        else:
-            return th.where(mask == 0, x_start, x_t)
+        return x_t
 
     def q_posterior_mean_variance(self, x_start, x_t, t):
         """
@@ -650,7 +626,7 @@ class GaussianDiffusion:
 
         return {"pred_xprev": pred_prev, "pred_xstart": pred_xstart}
 
-    def training_losses_seq2seq(self, model, x_start, t, model_kwargs=None, noise=None):
+    def training_losses_seq2seq(self, model, src, tgt, src_ctx, tgt_cxt, t, rescaling_factor):
         """
         Compute training losses for a single timestep.
 
@@ -663,99 +639,48 @@ class GaussianDiffusion:
         :return: a dict with the key "loss" containing a tensor of shape [N].
                  Some mean or variance settings may also have other keys.
         """
-        assert "input_ids" in model_kwargs
-        input_ids = model_kwargs.pop("input_ids").to(t.device).long()
-        input_ids_mask = model_kwargs.pop("input_mask").to(t.device)
+        src = src.long()
+        tgt = tgt.long()
 
-        # padding_mask
-        max_len = input_ids.shape[1]
-        lens = model_kwargs.pop("len").to(t.device).int()
-        padding_mask = (th.arange(max_len).expand(len(lens), max_len).to(t.device) < lens.unsqueeze(1)) * 1
+        encoder_out = model.model.module.encoder(src)
 
-        # embedded
-        x_start_mean = model.model.module.get_embeds(input_ids)
-        std = _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, th.tensor([0]).to(t.device), x_start_mean.shape)
-        x_start = self._get_x_start(x_start_mean, std)
-        # reparametrization trick -> noise only on y
-        x_t = self.q_sample(
-            x_start, t, noise=noise, mask=input_ids_mask, mean_embed=model.mean_embed, denoise=self.denoise
-        )
+        # padding_mask B x T
+        mask = tgt.ne(0)
 
-        context = {}
-        # xy
-        if "input_xys" in model_kwargs:
-            input_xys = model_kwargs.pop("input_xys").to(t.device).float()
+        z_0 = model.model.module.decoder.forward_embedding(tgt)
+        noise = th.randn_like(z_0) * rescaling_factor
 
-            zeros = th.zeros_like(input_xys)
-            xy_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(t.device)
-            context["xy"] = th.where(xy_mask == 0, input_xys, zeros)
-
-        # poi
-        if "input_poi" in model_kwargs:
-            input_poi = model_kwargs.pop("input_poi").to(t.device).float()
-
-            noise = th.randn_like(input_poi)
-            poi_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_poi.shape).to(t.device)
-            context["poi"] = th.where(poi_mask == 0, input_poi, noise)
-
-        # duration
-        if_duration = False
-        if "input_durations" in model_kwargs:
-            if_duration = True
-            duration = model_kwargs.pop("input_durations").to(t.device).float().unsqueeze(-1)
-            duration_t = self.q_sample(duration, t, noise=None, mask=input_ids_mask, mean_embed=None, denoise=False)
-            context["duration"] = duration_t
+        # reparametrization trick
+        z_t = self.q_sample(z_0, t, noise=noise)
 
         terms = {}
-        # model use x_t (partially noised) to predict x_start
-        model_output = model(x_t, context, self._scale_timesteps(t), padding_mask, **model_kwargs)
-        if if_duration:
-            loc_out, dur_out = model_output
-        else:
-            loc_out = model_output
-        assert loc_out.shape == x_start.shape
+        # model use z_t to predict z_0
+        z_0_hat = model.model.module.decoder(z_t, self._scale_timesteps(t), mask, encoder_out)
+
+        assert z_0_hat.shape == z_0.shape
 
         # Lt-1
-        terms["mse"] = mean_flat((x_start - loc_out) ** 2, padding_mask)
-        # L0
-        model_out_x_start = self._x0_helper(loc_out, x_t, t)["pred_xstart"]  # predicted_xstart = loc_out
-        t0_mask = t == 0
-        t0_loss = mean_flat((x_start_mean - model_out_x_start) ** 2, padding_mask)
-        # L0 combined Lt-1
-        terms["mse"] = th.where(t0_mask, t0_loss, terms["mse"])
-        # duration
-        if if_duration:
-            terms["mse"] += mean_flat((duration - dur_out) ** 2, padding_mask)
+        terms["mse"] = mean_flat((z_0_hat - z_0) ** 2, mask)
 
         # LT
-        out_mean, _, _ = self.q_mean_variance(x_start, th.LongTensor([self.num_timesteps - 1]).to(x_start.device))
-        tT_loss = mean_flat(out_mean**2, padding_mask)
-        # duration
-        if if_duration:
-            dur_mean, _, _ = self.q_mean_variance(duration, th.LongTensor([self.num_timesteps - 1]).to(x_start.device))
-            tT_loss += mean_flat(dur_mean**2, padding_mask)
+        out_mean, _, _ = self.q_mean_variance(z_0, th.LongTensor([self.num_timesteps - 1]).to(z_0.device))
+        tT_loss = mean_flat(out_mean**2, mask)
 
         # Rounding error: embedding regularization
         get_logits = model.model.module.get_logits
-        decoder_nll = self._token_discrete_loss(model_out_x_start, get_logits, input_ids, mask=padding_mask)
-        # get_predict_head = model.model.module.get_dur_predictions
-        # decoder_mse = self._prediction_mse_loss(x_start, get_predict_head, input_durs_x, mask=padding_mask)
+        decoder_nll = self._token_discrete_loss(z_0_hat, get_logits, tgt)
+        decoder_loss = decoder_nll
+        # decoder_loss = decoder_nll / ((decoder_nll / (terms["mse"] + 1e-8)).detach() + 1e-8)
 
         # difference loss
         # diff_loss = self._diff_loss(x_start, get_logits, mask=padding_mask)
         # diff_loss = 0.1 * diff_loss / ((diff_loss / (terms["mse"] + 1e-8)).detach() + 1e-8)
 
-        # x_0->model_out_x_start
-        input_ids_mask[padding_mask == 0] = 0
-        terms["nll"] = self._token_discrete_loss(model_out_x_start, get_logits, input_ids, mask=input_ids_mask)
-        # assert (model.model.module.lm_head.weight == model.model.module.word_embedding.weight).all()
-
-        decoder_loss = decoder_nll / ((decoder_nll / (terms["mse"] + 1e-8)).detach() + 1e-8)
         terms["loss"] = terms["mse"] + tT_loss + decoder_loss
         # terms["loss"] += diff_loss
 
-        if model.mean_embed is not None:
-            terms["loss"] += self.reg_rate * model.mean_embed.norm(p=2).sum()
+        # if model.mean_embed is not None:
+        #     terms["loss"] += self.reg_rate * model.mean_embed.norm(p=2).sum()
 
         return terms
 

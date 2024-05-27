@@ -11,24 +11,17 @@ from generative.diff import gaussian_diffusion, transformer_model
 
 
 def create_model_and_diffusion(config):
-    loaded_embed = None
-    if config.pre_train_embed != "None":
-        loaded_embed = pickle.load(open(config.pre_train_embed, "rb")).astype(np.float32)
+    # loaded_embed = None
+    # if config.pre_train_embed != "None":
+    #     loaded_embed = pickle.load(open(config.pre_train_embed, "rb")).astype(np.float32)
 
     model = transformer_model.TransformerNetModel(
         input_dims=config.hidden_dim,
         num_attention_heads=config.num_attention_heads,
         dropout=config.dropout,
         hidden_size=config.hidden_size,
-        num_encoder_layers=config.num_encoder_layers,
+        num_layers=config.num_layers,
         max_location=config.max_location,
-        learned_mean_embed=config.learned_mean_embed,
-        loaded_embed=loaded_embed,
-        embed_xy=config.if_embed_xy,
-        embed_poi=config.if_embed_poi,
-        poi_dims=config.poi_dim,
-        device=config.device,
-        diffuse_duration=config.if_diffuse_duration,
     )
 
     betas = gaussian_diffusion.get_named_beta_schedule(

@@ -46,6 +46,7 @@ class TrainLoop:
         load_opt=True,
         gradient_clipping=-1.0,
         eval_data=None,
+        rescaling_factor=1,
     ):
         self.model = model
         self.diffusion = diffusion
@@ -70,6 +71,7 @@ class TrainLoop:
         self.master_params = self.model_params
 
         self.checkpoint_path = checkpoint_path
+        self.rescaling_factor = rescaling_factor
 
         # control learning rate
         param_groups = []
@@ -81,7 +83,8 @@ class TrainLoop:
                 param_groups.append({"params": [parameter], "lr": self.lr})
 
         self.opt = AdamW(param_groups, lr=self.lr, weight_decay=weight_decay, eps=1e-5)
-        self.scaler = torch.cuda.amp.GradScaler(growth_interval=4000, init_scale=4096, enabled=self.use_fp16)
+        # self.scaler = torch.cuda.amp.GradScaler(growth_interval=4000, init_scale=4096, enabled=self.use_fp16)
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_fp16)
         # define learning rate schedule
         if load_checkpoint:
             warmup_epochs = 0
@@ -176,10 +179,10 @@ class TrainLoop:
         all_start_time = start_time
         self.opt.zero_grad()
         current_step = 0
-        for i, (batch, cond) in enumerate(self.data):
+        for i, inputs in enumerate(self.data):
             self.step += 1
             current_step += 1
-            self.run_step(batch, cond)
+            self.run_step(inputs)
 
             self.scheduler.step()
 
@@ -200,8 +203,8 @@ class TrainLoop:
         self.ddp_model.eval()
 
         return_loss = []
-        for batch_eval, cond_eval in self.eval_data:
-            return_loss.extend(self.forward_only(batch_eval, cond_eval))
+        for inputs in self.eval_data:
+            return_loss.extend(self.forward_only(inputs))
 
         if is_main_process():
             logger.log("eval on validation set")
@@ -212,26 +215,33 @@ class TrainLoop:
 
         return torch.stack([torch.stack(loss) for loss in gathered_loss]).mean().numpy()
 
-    def run_step(self, batch, cond):
-        self.forward_backward(batch, cond)
+    def run_step(self, inputs):
+        self.forward_backward(inputs)
         self.optimize_normal()
         self.log_step()
 
-    def forward_only(self, batch, cond):
+    def forward_only(self, inputs):
         return_loss = []
+        src, tgt, src_ctx, tgt_cxt = inputs
         with torch.no_grad():
-            for i in range(0, batch.shape[0], self.microbatch):
-                micro = batch[i : i + self.microbatch].to(get_device())
-                micro_cond = {k: v[i : i + self.microbatch].to(get_device()) for k, v in cond.items()}
-                last_batch = (i + self.microbatch) >= batch.shape[0]
-                t, weights = self.schedule_sampler.sample(micro.shape[0], get_device())
+            for i in range(0, src.shape[0], self.microbatch):
+                src_micro = src[i : i + self.microbatch].to(get_device())
+                tgt_micro = tgt[i : i + self.microbatch].to(get_device())
+                src_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in src_ctx.items()}
+                tgt_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in tgt_cxt.items()}
+
+                last_batch = (i + self.microbatch) >= src.shape[0]
+                t, weights = self.schedule_sampler.sample(src_micro.shape[0], get_device())
                 # print(micro_cond.keys())
                 compute_losses = functools.partial(
                     self.diffusion.training_losses,
                     self.ddp_model,
-                    micro,
+                    src_micro,
+                    tgt_micro,
+                    src_ctx_micro,
+                    tgt_ctx_micro,
                     t,
-                    model_kwargs=micro_cond,
+                    self.rescaling_factor,
                 )
 
                 if last_batch or not self.use_ddp:
@@ -245,22 +255,29 @@ class TrainLoop:
 
         return return_loss
 
-    def forward_backward(self, batch, cond):
+    def forward_backward(self, inputs):
         current_device = get_device()
-        for i in range(0, batch.shape[0], self.microbatch):
-            micro = batch[i : i + self.microbatch].to(current_device)
-            micro_cond = {k: v[i : i + self.microbatch].to(current_device) for k, v in cond.items()}
-            last_batch = (i + self.microbatch) >= batch.shape[0]
-            t, weights = self.schedule_sampler.sample(micro.shape[0], current_device)
+        src, tgt, src_ctx, tgt_cxt = inputs
+        for i in range(0, src.shape[0], self.microbatch):
+            src_micro = src[i : i + self.microbatch].to(get_device())
+            tgt_micro = tgt[i : i + self.microbatch].to(get_device())
+            src_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in src_ctx.items()}
+            tgt_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in tgt_cxt.items()}
+
+            last_batch = (i + self.microbatch) >= src.shape[0]
+            t, weights = self.schedule_sampler.sample(src_micro.shape[0], current_device)
             # print(micro_cond.keys())
 
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=self.use_fp16):
                 compute_losses = functools.partial(
                     self.diffusion.training_losses,
                     self.ddp_model,
-                    micro,
+                    src_micro,
+                    tgt_micro,
+                    src_ctx_micro,
+                    tgt_ctx_micro,
                     t,
-                    model_kwargs=micro_cond,
+                    self.rescaling_factor,
                 )
 
                 if last_batch or not self.use_ddp:

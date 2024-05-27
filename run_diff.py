@@ -105,6 +105,7 @@ def main():
         load_opt=config.load_opt,
         gradient_clipping=config.gradient_clipping,
         eval_data=data_valid,
+        rescaling_factor=config.rescaling_factor,
     ).run_loop()
 
 

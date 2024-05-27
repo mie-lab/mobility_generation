@@ -372,13 +372,13 @@ def process_helper_fnc(seq_ls, split):
         ls["input_mask"] = mask
         return ls
 
-    seq_dataset = seq_dataset.map(
-        merge_and_mask,
-        batched=True,
-        num_proc=4,
-        desc="merge and mask",
-        remove_columns=["src", "src_xy", "tgt", "tgt_xy", "src_duration", "tgt_duration"],
-    )
+    # seq_dataset = seq_dataset.map(
+    #     merge_and_mask,
+    #     batched=True,
+    #     num_proc=4,
+    #     desc="merge and mask",
+    #     remove_columns=["src", "src_xy", "tgt", "tgt_xy", "src_duration", "tgt_duration"],
+    # )
 
     raw_datasets = datasets.DatasetDict()
     raw_datasets["train"] = seq_dataset
@@ -394,7 +394,7 @@ def get_sequence(args, split="train"):
 
     sequence_ls = pickle.load(open(path, "rb"))
 
-    processed_dict = {"src": [], "src_xy": [], "src_duration": [], "tgt": [], "tgt_xy": [], "tgt_duration": []}
+    processed_dict = {"src": [], "src_xy": [], "src_duration": [], "tgt": [], "tgt_duration": []}
     for record in sequence_ls:
         processed_dict["src"].append(record["src"])
         processed_dict["src_xy"].append(record["src_xy"])
@@ -403,7 +403,7 @@ def get_sequence(args, split="train"):
         processed_dict["src_duration"].append((record["src_duration"] + 2) / (60 * 24 * 2 + 1))
 
         processed_dict["tgt"].append(record["tgt"])
-        processed_dict["tgt_xy"].append(record["tgt_xy"])
+        # processed_dict["tgt_xy"].append(record["tgt_xy"])
 
         processed_dict["tgt_duration"].append((record["tgt_duration"] + 2) / (60 * 24 * 2 + 1))
 
@@ -435,64 +435,64 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         return self.length
 
     def __getitem__(self, idx):
-        ids = self.text_datasets["train"][idx]["input_ids"]
-        arr = torch.tensor(ids)
+        current_data = self.text_datasets["train"][idx]
 
-        # if self.model_emb is not None:
-        #     with torch.no_grad():
-        #         arr = self.model_emb(arr)
+        src = torch.tensor(current_data["src"])
+        tgt = torch.tensor(current_data["tgt"])
 
-        # arr = np.array(arr, dtype=np.float32)
-        out_kwargs = {}
-        out_kwargs["input_ids"] = torch.tensor(ids)
-        out_kwargs["input_mask"] = torch.tensor(self.text_datasets["train"][idx]["input_mask"])
-
+        src_ctx = {}
+        tgt_cxt = {}
         if self.if_embed_xy:
-            out_kwargs["input_xys"] = torch.tensor(self.text_datasets["train"][idx]["input_xys"])
+            src_ctx["xy"] = torch.tensor(current_data["src_xy"])
 
         # construct the pois
         if self.if_embed_poi:
-            ids = np.array(ids)
+            ids = np.array(current_data["src"])
             pois = np.take(self.poiValues, ids[ids != 1] - 2, axis=0)
-            # insert the seperator
-            pois = np.insert(pois, np.where(ids == 1)[0][0], np.ones(pois.shape[-1]), axis=0)
-            out_kwargs["input_poi"] = torch.tensor(pois)
+            src_ctx["poi"] = torch.tensor(pois)
 
         if self.if_diffuse_duration:
-            out_kwargs["input_durations"] = torch.tensor(self.text_datasets["train"][idx]["input_durations"])
+            src_ctx["duration"] = torch.tensor(current_data["src_duration"])
+            tgt_cxt["duration"] = torch.tensor(current_data["tgt_duration"])
 
-        return arr, out_kwargs
+        return src, tgt, src_ctx, tgt_cxt
 
 
 def collate_fn(batch):
     """function to collate data samples into batch tensors."""
     src_batch = []
+    tgt_batch = []
 
     # get one sample batch
-    dict_batch = {"len": []}
-    # dict_batch = {}
+    src_ctx_batch = {}
+    for key in batch[0][-2]:
+        src_ctx_batch[key] = []
+    tgt_ctx_batch = {}
     for key in batch[0][-1]:
-        dict_batch[key] = []
+        tgt_ctx_batch[key] = []
 
-    for arr_sample, out_kwargs_dict in batch:
-        src_batch.append(arr_sample)
+    for src, tgt, src_ctx, tgt_cxt in batch:
+        src_batch.append(src)
+        tgt_batch.append(tgt)
 
-        dict_batch["len"].append(len(arr_sample))
-        for key in out_kwargs_dict:
-            dict_batch[key].append(out_kwargs_dict[key])
+        for key in src_ctx:
+            src_ctx_batch[key].append(src_ctx[key])
+        for key in tgt_cxt:
+            tgt_ctx_batch[key].append(tgt_cxt[key])
 
     src_batch = pad_sequence(src_batch, padding_value=0, batch_first=True)
+    tgt_batch = pad_sequence(tgt_batch, padding_value=0, batch_first=True)
 
-    dict_batch["len"] = torch.tensor(dict_batch["len"], dtype=torch.int64)
-    # dict_batch["input_ids"] = pad_sequence(dict_batch["input_ids"], padding_value=0, batch_first=True)
-    dict_batch["input_mask"] = pad_sequence(dict_batch["input_mask"], padding_value=1, batch_first=True)
-
-    for key in dict_batch:
-        if key in ["len", "input_mask"]:
+    for key in src_ctx_batch:
+        if key in ["len"]:
             continue
-        dict_batch[key] = pad_sequence(dict_batch[key], padding_value=0, batch_first=True)
+        src_ctx_batch[key] = pad_sequence(src_ctx_batch[key], padding_value=0, batch_first=True)
+    for key in tgt_ctx_batch:
+        if key in ["len"]:
+            continue
+        tgt_ctx_batch[key] = pad_sequence(tgt_ctx_batch[key], padding_value=0, batch_first=True)
 
-    return src_batch, dict_batch
+    return src_batch, tgt_batch, src_ctx_batch, tgt_ctx_batch
 
 
 def is_dist_avail_and_initialized():
