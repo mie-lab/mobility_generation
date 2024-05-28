@@ -135,7 +135,7 @@ class TrainLoop:
 
     def run_loop(self):
         previous_loss = np.inf
-        for epoch in range(self.loaded_epoch + 1, self.max_epochs):
+        for epoch in range(self.loaded_epoch + 1, self.max_epochs + 1):
             self.data.sampler.set_epoch(epoch)
             self.eval_data.sampler.set_epoch(epoch)
 
