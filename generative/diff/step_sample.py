@@ -5,19 +5,19 @@ import torch
 import torch.distributed as dist
 
 
-def create_named_schedule_sampler(name, diffusion):
+def create_named_schedule_sampler(name, diffusion_steps):
     """
     Create a ScheduleSampler from a library of pre-defined samplers.
 
     :param name: the name of the sampler.
-    :param diffusion: the diffusion object to sample for.
+    :param diffusion_steps: the diffusion steps to sample for.
     """
     if name == "uniform":
-        return UniformSampler(diffusion)
+        return UniformSampler(diffusion_steps)
     elif name == "lossaware":
-        return LossSecondMomentResampler(diffusion)
+        return LossSecondMomentResampler(diffusion_steps)
     elif name == "fixstep":
-        return FixSampler(diffusion)
+        return FixSampler(diffusion_steps)
     else:
         raise NotImplementedError(f"unknown schedule sampler: {name}")
 
@@ -61,24 +61,21 @@ class ScheduleSampler(ABC):
 
 
 class UniformSampler(ScheduleSampler):
-    def __init__(self, diffusion):
-        self.diffusion = diffusion
-        self._weights = np.ones([diffusion.num_timesteps])
+    def __init__(self, diffusion_steps):
+        self._weights = np.ones([diffusion_steps])
 
     def weights(self):
         return self._weights
 
 
 class FixSampler(ScheduleSampler):
-    def __init__(self, diffusion):
-        self.diffusion = diffusion
+    def __init__(self, diffusion_steps):
+        self.diffusion_steps = diffusion_steps
 
         ###############################################################
         ### You can custome your own sampling weight of steps here. ###
         ###############################################################
-        self._weights = np.concatenate(
-            [np.ones([diffusion.num_timesteps // 2]), np.zeros([diffusion.num_timesteps // 2]) + 0.5]
-        )
+        self._weights = np.concatenate([np.ones([diffusion_steps // 2]), np.zeros([diffusion_steps // 2]) + 0.5])
 
     def weights(self):
         return self._weights
@@ -136,16 +133,16 @@ class LossAwareSampler(ScheduleSampler):
 
 
 class LossSecondMomentResampler(LossAwareSampler):
-    def __init__(self, diffusion, history_per_term=10, uniform_prob=0.001):
-        self.diffusion = diffusion
+    def __init__(self, diffusion_steps, history_per_term=10, uniform_prob=0.001):
+        self.diffusion_steps = diffusion_steps
         self.history_per_term = history_per_term
         self.uniform_prob = uniform_prob
-        self._loss_history = np.zeros([diffusion.num_timesteps, history_per_term], dtype=np.float64)
-        self._loss_counts = np.zeros([diffusion.num_timesteps], dtype=int)
+        self._loss_history = np.zeros([diffusion_steps, history_per_term], dtype=np.float64)
+        self._loss_counts = np.zeros([diffusion_steps], dtype=int)
 
     def weights(self):
         if not self._warmed_up():
-            return np.ones([self.diffusion.num_timesteps], dtype=np.float64)
+            return np.ones([self.diffusion_steps], dtype=np.float64)
         weights = np.sqrt(np.mean(self._loss_history**2, axis=-1))
         weights /= np.sum(weights)
         weights *= 1 - self.uniform_prob

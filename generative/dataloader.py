@@ -322,63 +322,63 @@ def process_helper_fnc(seq_ls, split):
     seq_dataset = Dataset2.from_dict(seq_ls)
 
     def merge_and_mask(ls):
-        lst = []
-        lst_xy = []
-        durations = []
-        mask = []
+        src_ls = []
+        src_xy_ls = []
+        src_duration_ls = []
+
+        tgt_ls = []
+        tgt_duration_ls = []
 
         for i in range(len(ls["src"])):
             src = ls["src"][i]
             src_xy = ls["src_xy"][i]
             src_duration = ls["src_duration"][i]
             tgt = ls["tgt"][i]
-            tgt_xy = ls["tgt_xy"][i]
             tgt_duration = ls["tgt_duration"][i]
 
+            # for src
+            len_src = len(src)
+            if len_src > 256:
+                src = src[(len_src - 256) :]
+                src_xy = src_xy[(len_src - 256) :]
+                src_duration = src_duration[(len_src - 256) :]
+
+            # for tgt
             if split == "test":
                 ori_len = len(tgt)
                 if ori_len < 50:
                     tgt = tgt + [0] * (50 - ori_len)
 
-                    remain = []
-                    for _ in range(50 - ori_len):
-                        remain.append([0, 0])
-                    tgt_xy = tgt_xy + remain
-
                     tgt_duration = tgt_duration + [0] * (50 - ori_len)
                 else:
                     tgt = tgt[:50]
-                    tgt_xy = tgt_xy[:50]
                     tgt_duration = tgt_duration[:50]
             else:
-                if len(tgt) > 128:
-                    tgt = tgt[:128]
-                    tgt_xy = tgt_xy[:128]
-                    tgt_duration = tgt_duration[:128]
+                if len(tgt) > 256:
+                    tgt = tgt[:256]
+                    tgt_duration = tgt_duration[:256]
 
-            # 1 is reserved for seperation
-            lst.append(src + [1] + tgt)
-            lst_xy.append(src_xy + [[1, 1]] + tgt_xy)
-            durations.append(src_duration + [1] + tgt_duration)
+            src_ls.append(src)
+            src_xy_ls.append(src_xy)
+            src_duration_ls.append(src_duration)
 
-            current_mask = np.ones(len(src + tgt) + 1)
-            current_mask[: (len(src) + 1)] = 0
-            if split == "test":
-                assert current_mask.sum() == 50
-            mask.append(current_mask)
-        ls["input_ids"] = lst
-        ls["input_xys"] = lst_xy
-        ls["input_durations"] = durations
-        ls["input_mask"] = mask
+            tgt_ls.append(tgt)
+            tgt_duration_ls.append(tgt_duration)
+
+        ls["tgt"] = tgt_ls
+        ls["tgt_duration"] = tgt_duration_ls
+
+        ls["src"] = src_ls
+        ls["src_xy"] = src_xy_ls
+        ls["src_duration"] = src_duration_ls
         return ls
 
-    # seq_dataset = seq_dataset.map(
-    #     merge_and_mask,
-    #     batched=True,
-    #     num_proc=4,
-    #     desc="merge and mask",
-    #     remove_columns=["src", "src_xy", "tgt", "tgt_xy", "src_duration", "tgt_duration"],
-    # )
+    seq_dataset = seq_dataset.map(
+        merge_and_mask,
+        batched=True,
+        num_proc=4,
+        desc="merge and mask",
+    )
 
     raw_datasets = datasets.DatasetDict()
     raw_datasets["train"] = seq_dataset

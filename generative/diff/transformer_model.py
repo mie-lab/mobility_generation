@@ -8,6 +8,9 @@ import torch.nn as nn
 import math
 import numpy as np
 
+from improved_diffusion.gaussian_diffusion import GaussianDiffusion, betas_for_alpha_bar
+from improved_diffusion.respace import SpacedDiffusion, space_timesteps
+
 
 def _cal_freq_list(frequency_num, max_radius, min_radius):
     log_timescale_increment = math.log(float(max_radius) / float(min_radius)) / (frequency_num * 1.0 - 1)
@@ -17,6 +20,27 @@ def _cal_freq_list(frequency_num, max_radius, min_radius):
     freq_list = 1.0 / timescales
 
     return freq_list
+
+
+def timestep_embedding(timesteps, dim, max_period=10000):
+    """
+    Create sinusoidal timestep embeddings.
+
+    :param timesteps: a 1-D Tensor of N indices, one per batch element.
+                      These may be fractional.
+    :param dim: the dimension of the output.
+    :param max_period: controls the minimum frequency of the embeddings.
+    :return: an [N x dim] Tensor of positional embeddings.
+    """
+    half = dim // 2
+    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(
+        device=timesteps.device
+    )
+    args = timesteps[:, None].float() * freqs[None]
+    embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+    if dim % 2:
+        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+    return embedding
 
 
 class TheoryGridCellSpatialRelationEncoder(nn.Module):
@@ -154,25 +178,6 @@ class ContextModel(nn.Module):
         return emb
 
 
-class BERTModelWrapper(nn.Module):
-    def __init__(self, dropout, num_encoder_layers, hidden_size, max_position_embeddings, num_attention_heads):
-        super().__init__()
-
-        model_config = BertConfig()
-
-        model_config.hidden_dropout_prob = dropout
-        model_config.num_hidden_layers = num_encoder_layers
-        model_config.hidden_size = hidden_size
-        model_config.intermediate_size = hidden_size * 4
-        model_config.max_position_embeddings = max_position_embeddings  # full dataset requires > 512
-        model_config.num_attention_heads = num_attention_heads
-
-        self.bert_model = BertEncoder(model_config)
-
-    def forward(self, x, padding_mask):
-        return self.bert_model(x, attention_mask=padding_mask[:, None, None, :]).last_hidden_state
-
-
 class TransEncoder(nn.Module):
     def __init__(
         self,
@@ -217,7 +222,7 @@ class TransEncoder(nn.Module):
     def forward(self, src_tokens, context=None):
         x = self.forward_embedding(src_tokens, context)
 
-        # B x T
+        # B x T, True will be ignored
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
 
         # B x T x C -> T x B x C
@@ -348,32 +353,31 @@ class TransformerNetModel(nn.Module):
 
     def __init__(
         self,
-        input_dims,
-        num_layers,
-        max_location,
-        hidden_size=768,
-        num_attention_heads=12,
-        dropout=0,
+        model_args=None,
+        diff_args=None,
     ):
         super().__init__()
+
+        self.model_args = model_args
+        self.diff_args = diff_args
 
         max_positions = 512
 
         # location embedding
-        self.location_embedding = nn.Embedding(max_location, input_dims, padding_idx=0)
-        self.input_up_proj = nn.Linear(input_dims, hidden_size, bias=False)
+        self.location_embedding = nn.Embedding(model_args.max_location, model_args.input_dims, padding_idx=0)
+        self.input_up_proj = nn.Linear(model_args.input_dims, model_args.hidden_size, bias=False)
         # position embedding
-        self.position_embedding = nn.Embedding(max_positions, hidden_size)
+        self.position_embedding = nn.Embedding(max_positions, model_args.hidden_size)
 
         # out
-        self.output_down_proj = nn.Linear(hidden_size, input_dims, bias=False)
+        self.output_down_proj = nn.Linear(model_args.hidden_size, model_args.input_dims, bias=False)
 
         # encoder
         self.encoder = TransEncoder(
-            num_encoder_layers=num_layers,
-            hidden_size=hidden_size,
-            num_attention_heads=num_attention_heads,
-            dropout=dropout,
+            num_encoder_layers=model_args.num_layers,
+            hidden_size=model_args.hidden_size,
+            num_attention_heads=model_args.num_attention_heads,
+            dropout=model_args.dropout,
             location_embedding=self.location_embedding,
             position_embedding=self.position_embedding,
             input_up_proj=self.input_up_proj,
@@ -381,19 +385,45 @@ class TransformerNetModel(nn.Module):
 
         # decoder
         self.decoder = TransDecoder(
-            num_decoder_layers=num_layers,
-            hidden_size=hidden_size,
-            num_attention_heads=num_attention_heads,
-            dropout=dropout,
+            num_decoder_layers=model_args.num_layers,
+            hidden_size=model_args.hidden_size,
+            num_attention_heads=model_args.num_attention_heads,
+            dropout=model_args.dropout,
             location_embedding=self.location_embedding,
             position_embedding=self.position_embedding,
             input_up_proj=self.input_up_proj,
             output_down_proj=self.output_down_proj,
         )
 
-        self.lm_head = nn.Linear(input_dims, max_location)
+        self.lm_head = nn.Linear(model_args.input_dims, model_args.max_location)
         with torch.no_grad():
             self.lm_head.weight = self.location_embedding.weight
+
+        self.training_diffusion = GaussianDiffusion(
+            betas=get_named_beta_schedule(
+                diff_args.noise_schedule,
+                diff_args.diffusion_steps,
+                diff_args.rescaling_factor if diff_args.vp_rf else 1.0,
+            ),
+            model_mean_type=None,
+            model_var_type=None,
+            loss_type=None,
+        )
+
+        # so we have different schedules in training and decoding
+        self.decoding_diffusion = SpacedDiffusion(
+            space_timesteps(diff_args.diffusion_steps, str(diff_args.decoding_steps)),
+            betas=get_named_beta_schedule(
+                diff_args.decoding_noise_schedule,
+                diff_args.diffusion_steps,
+                diff_args.decoding_rescaling_factor if diff_args.decoding_vp_rf else 1.0,
+            ),
+            model_mean_type=None,
+            model_var_type=None,
+            loss_type=None,
+        )
+
+        self.timesteps_scale = (1000.0 / diff_args.diffusion_steps) if diff_args.rescale_timesteps else 1.0
 
     def get_embeds(self, input_ids):
         return self.location_embedding(input_ids)
@@ -401,23 +431,118 @@ class TransformerNetModel(nn.Module):
     def get_logits(self, hidden_repr):
         return self.lm_head(hidden_repr)
 
+    def forward(self, src, tgt, src_ctx, tgt_cxt, t):
+        """Compute training losses"""
 
-def timestep_embedding(timesteps, dim, max_period=10000):
-    """
-    Create sinusoidal timestep embeddings.
+        # encoding
+        encoder_out = self.encoder(src)
 
-    :param timesteps: a 1-D Tensor of N indices, one per batch element.
-                      These may be fractional.
-    :param dim: the dimension of the output.
-    :param max_period: controls the minimum frequency of the embeddings.
-    :return: an [N x dim] Tensor of positional embeddings.
+        # padding_mask B x T
+        mask = tgt.ne(0)
+
+        # diffusion
+        z_0 = self.decoder.forward_embedding(tgt)
+        model_t = t * self.timesteps_scale
+
+        noise = torch.randn_like(z_0) * self.diff_args.rescaling_factor
+        # reparametrization trick
+        z_t = self.training_diffusion.q_sample(z_0, t, noise).type_as(z_0)
+
+        # model use z_t to predict z_0
+        z_0_hat = self.decoder(z_t, model_t, mask, encoder_out)
+        logits = self.get_logits(z_0 if self.diff_args.rounding_loss else z_0_hat)
+
+        terms = {}
+
+        # Lt
+        terms["mse"] = mean_flat((z_0_hat - z_0).square(), mask)
+
+        # Rounding error: embedding regularization
+        decoder_nll = token_discrete_loss(logits, tgt)
+
+        terms["loss"] = terms["mse"] + decoder_nll
+
+        return terms
+
+    def forward_decoder(self, z_t, step, mask, encoder_out, prev_z_0_hat=None):
+        """Sample z_{t-1} given z_t"""
+
+        # rescale timesteps
+        model_t = self.decoding_diffusion.timestep_map[step] * self.timesteps_scale
+        model_t = torch.full([len(z_t)], model_t, device=z_t.device)
+
+        # predict z_0
+        z_0_hat = self.decoder(z_t, model_t, mask, encoder_out)
+
+        # clamping trick
+        if self.diff_args.clamping:
+            tokens = self.get_logits(z_0_hat).argmax(-1)
+            z_0_hat = self.decoder.forward_embedding(tokens)
+
+        # sample z_{t-1}
+        t = torch.tensor(step, device=z_t.device)
+        mean, _, log_variance = self.decoding_diffusion.q_posterior_mean_variance(z_0_hat, z_t, t)
+        noise = torch.randn_like(z_t) * self.diff_args.decoding_rescaling_factor
+
+        z_t = mean + (0.5 * log_variance).exp() * noise
+        z_t = z_t.type_as(z_0_hat)
+
+        return z_t, z_0_hat
+
+    def forward_output_layer(self, z_t):
+        scores, tokens = self.get_logits(z_t).log_softmax(-1).max(-1)
+        return tokens, scores
+
+
+def token_discrete_loss(logits, input_ids, mask=None):
     """
-    half = dim // 2
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(
-        device=timesteps.device
-    )
-    args = timesteps[:, None].float() * freqs[None]
-    embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-    if dim % 2:
-        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
-    return embedding
+    the loss of -log p(w|z_0)
+    :param x_start_mean: word embedding
+    :return: x_0
+    """
+    loss_fct = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=0, label_smoothing=0.1)
+    decoder_nll = loss_fct(logits.view(-1, logits.size(-1)), input_ids.view(-1)).view(input_ids.shape)
+    if mask is not None:
+        decoder_nll *= mask
+        decoder_nll = decoder_nll.sum(dim=-1) / mask.sum(dim=-1)
+    else:
+        decoder_nll = decoder_nll.mean(dim=-1)
+
+    return decoder_nll
+
+
+def mean_flat(tensor, padding_mask=None):
+    """
+    Take the mean over all non-batch dimensions.
+    """
+    if padding_mask is None:
+        return tensor.mean(dim=list(range(1, len(tensor.shape))))
+    else:
+        padding_mask = torch.broadcast_to(padding_mask.unsqueeze(dim=-1), tensor.shape)
+        tensor *= padding_mask
+        return tensor.sum(dim=list(range(1, len(tensor.shape)))) / padding_mask.sum(
+            dim=list(range(1, len(tensor.shape)))
+        )
+
+
+def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, rescaling_factor=1):
+    """
+    Get a pre-defined beta schedule for the given name.
+
+    The beta schedule library consists of beta schedules which remain similar
+    in the limit of num_diffusion_timesteps.
+    Beta schedules may be added, but should not be removed or changed once
+    they are committed to maintain backwards compatibility.
+    """
+
+    if schedule_name == "sqrt":
+        shift = 0.0001
+        alpha_bar = lambda t: 1 - np.sqrt(t + shift)
+
+    else:
+        raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
+
+    f2 = rescaling_factor**2
+    rescaled_alpha_bar = lambda t: alpha_bar(t) / (f2 - (f2 - 1) * alpha_bar(t))
+
+    return betas_for_alpha_bar(num_diffusion_timesteps, rescaled_alpha_bar)

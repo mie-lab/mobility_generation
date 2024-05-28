@@ -19,7 +19,7 @@ from transformers import get_constant_schedule_with_warmup, get_linear_schedule_
 from utils import logger
 from utils.dist_util import get_device, load_state_dict
 
-from generative.diff.step_sample import LossAwareSampler, UniformSampler
+from generative.diff.step_sample import LossAwareSampler
 
 
 class TrainLoop:
@@ -27,7 +27,7 @@ class TrainLoop:
         self,
         *,
         model,
-        diffusion,
+        diff_steps,
         data,
         batch_size,
         microbatch,
@@ -46,10 +46,9 @@ class TrainLoop:
         load_opt=True,
         gradient_clipping=-1.0,
         eval_data=None,
-        rescaling_factor=1,
     ):
         self.model = model
-        self.diffusion = diffusion
+        self.diff_steps = diff_steps
         self.data = data
         self.eval_data = eval_data
         self.batch_size = batch_size
@@ -59,7 +58,7 @@ class TrainLoop:
         self.log_interval = log_interval
         self.decay_epochs = decay_epochs
         self.use_fp16 = use_fp16
-        self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
+        self.schedule_sampler = schedule_sampler
         self.gradient_clipping = gradient_clipping
 
         self.step = 0
@@ -71,7 +70,6 @@ class TrainLoop:
         self.master_params = self.model_params
 
         self.checkpoint_path = checkpoint_path
-        self.rescaling_factor = rescaling_factor
 
         # control learning rate
         param_groups = []
@@ -225,8 +223,8 @@ class TrainLoop:
         src, tgt, src_ctx, tgt_cxt = inputs
         with torch.no_grad():
             for i in range(0, src.shape[0], self.microbatch):
-                src_micro = src[i : i + self.microbatch].to(get_device())
-                tgt_micro = tgt[i : i + self.microbatch].to(get_device())
+                src_micro = src[i : i + self.microbatch].to(get_device()).long()
+                tgt_micro = tgt[i : i + self.microbatch].to(get_device()).long()
                 src_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in src_ctx.items()}
                 tgt_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in tgt_cxt.items()}
 
@@ -234,14 +232,7 @@ class TrainLoop:
                 t, weights = self.schedule_sampler.sample(src_micro.shape[0], get_device())
                 # print(micro_cond.keys())
                 compute_losses = functools.partial(
-                    self.diffusion.training_losses,
-                    self.ddp_model,
-                    src_micro,
-                    tgt_micro,
-                    src_ctx_micro,
-                    tgt_ctx_micro,
-                    t,
-                    self.rescaling_factor,
+                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t
                 )
 
                 if last_batch or not self.use_ddp:
@@ -250,7 +241,7 @@ class TrainLoop:
                     with self.ddp_model.no_sync():
                         losses = compute_losses()
 
-                log_loss_dict(self.diffusion, t, {f"eval_{k}": v * weights for k, v in losses.items()})
+                log_loss_dict(self.diff_steps, t, {f"eval_{k}": v * weights for k, v in losses.items()})
                 return_loss.extend((losses["loss"] * weights).detach().cpu())
 
         return return_loss
@@ -259,8 +250,8 @@ class TrainLoop:
         current_device = get_device()
         src, tgt, src_ctx, tgt_cxt = inputs
         for i in range(0, src.shape[0], self.microbatch):
-            src_micro = src[i : i + self.microbatch].to(get_device())
-            tgt_micro = tgt[i : i + self.microbatch].to(get_device())
+            src_micro = src[i : i + self.microbatch].to(get_device()).long()
+            tgt_micro = tgt[i : i + self.microbatch].to(get_device()).long()
             src_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in src_ctx.items()}
             tgt_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in tgt_cxt.items()}
 
@@ -270,14 +261,7 @@ class TrainLoop:
 
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=self.use_fp16):
                 compute_losses = functools.partial(
-                    self.diffusion.training_losses,
-                    self.ddp_model,
-                    src_micro,
-                    tgt_micro,
-                    src_ctx_micro,
-                    tgt_ctx_micro,
-                    t,
-                    self.rescaling_factor,
+                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t
                 )
 
                 if last_batch or not self.use_ddp:
@@ -290,7 +274,7 @@ class TrainLoop:
                     self.schedule_sampler.update_with_local_losses(t, losses["loss"].detach())
 
                 loss = (losses["loss"] * weights).mean()
-                log_loss_dict(self.diffusion, t, {k: v * weights for k, v in losses.items()})
+                log_loss_dict(self.diff_steps, t, {k: v * weights for k, v in losses.items()})
 
             self.scaler.scale(loss).backward()
 
@@ -379,12 +363,12 @@ def update_ema(target_params, source_params, rate=0.99):
         targ.detach().mul_(rate).add_(src, alpha=1 - rate)
 
 
-def log_loss_dict(diffusion, ts, losses):
+def log_loss_dict(diff_steps, ts, losses):
     for key, values in losses.items():
         logger.logkv_mean(key, values.mean().item())
         # Log the quantiles (four quartiles).
         for sub_t, sub_loss in zip(ts.cpu().numpy(), values.detach().cpu().numpy()):
-            quartile = int(4 * sub_t / diffusion.num_timesteps)
+            quartile = int(4 * sub_t / diff_steps)
             logger.logkv_mean(f"{key}_q{quartile}", sub_loss)
 
 

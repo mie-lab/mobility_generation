@@ -20,8 +20,8 @@ import datetime
 import time
 from tqdm import tqdm
 
-
-from generative.diff.diff_utils import create_model_and_diffusion, denoised_fn_round
+from generative.diff.diff_utils import create_model
+from generative.diff.diff_utils import denoised_fn_round
 from generative.dataloader import load_data_diffusion
 from utils import dist_util, logger
 from utils.utils import setup_seed, load_config, init_save_path
@@ -59,18 +59,21 @@ def main():
     # sys.setdefaultencoding('utf-8')
     with open(config_path, "rb") as f:
         training_args = json.load(f)
-    training_args["batch_size"] = config.batch_size
-    training_args["dataset_variation"] = config.dataset_variation
-    training_args["data_dir"] = config.data_dir
-    training_args["pre_train_embed"] = config.pre_train_embed
-    training_args["save_root"] = config.save_root
-    training_args["split"] = config.split
+    # training_args["batch_size"] = config.batch_size
+    # training_args["dataset_variation"] = config.dataset_variation
+    # training_args["data_dir"] = config.data_dir
+    # training_args["pre_train_embed"] = config.pre_train_embed
+    # training_args["save_root"] = config.save_root
+    # training_args["split"] = config.split
+
+    config = {**training_args, **config}
+
+    # config.__dict__.update(training_args)
     CUDA_VISIBLE_DEVICES = int(os.environ["LOCAL_RANK"])
-    config.__dict__.update(training_args)
     config.device = f"cuda:{CUDA_VISIBLE_DEVICES}"
 
     logger.log("### Creating model and diffusion...")
-    model, diffusion = create_model_and_diffusion(config)
+    model = create_model(config)
 
     checkpoint = dist_util.load_state_dict(
         os.path.join(config.model_path, config.trained_model_name), map_location="cpu"
@@ -109,37 +112,37 @@ def main():
 
     all_test_data = []
 
-    idx = 0
     try:
         while True:
-            _, cond = next(data_valid)
-            # print(batch.shape)
-            if idx % world_size == rank:  # Split data per nodes
-                all_test_data.append(cond)
-            idx += 1
+            inputs = next(data_valid)
+            all_test_data.append(inputs)
 
     except StopIteration:
         print("### End of reading iteration...")
 
     model_emb.to(dist_util.get_device())
 
-    if idx % world_size and rank >= idx % world_size:
-        all_test_data.append({})  # Dummy data for Remainder : for dist.barrier()
-
-    if rank == 0:
-        iterator = tqdm(all_test_data)
-    else:
-        iterator = iter(all_test_data)
-
     device = dist_util.get_device()
-    for cond in iterator:
-        if not cond:  # Barrier for Remainder
-            for i in range(world_size):
-                dist.barrier()
-            continue
+    for inputs in tqdm(all_test_data):
+        src, tgt, src_ctx, tgt_cxt = inputs
+        src = src.to(dist_util.get_device()).long()
+        tgt = tgt.to(dist_util.get_device()).long()
 
-        input_ids = cond.pop("input_ids").to(device)
-        x_start = model.get_embeds(input_ids)
+        encoder_out = model.encoder(src)
+
+        # padding_mask B x T
+        mask = torch.ones_like(tgt) == 1
+
+        # initialize
+        z_0 = model.decoder.forward_embedding(tgt)
+        z_t = torch.randn_like(z_0) * config.decoding_rescaling_factor
+        z_t = z_t.to(encoder_out["encoder_out"])
+
+        prev_z_0_hat = torch.zeros_like(z_t)
+        for step in list(range(config.decoding_steps))[::-1]:
+            z_t, prev_z_0_hat = model.forward_decoder(z_t, step, mask, encoder_out, prev_z_0_hat)
+
+        finalized = model.forward_output_layer(prev_z_0_hat)
 
         # padding_mask
         max_len = input_ids.shape[1]

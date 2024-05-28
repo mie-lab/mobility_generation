@@ -12,9 +12,9 @@ import wandb
 from easydict import EasyDict as edict
 
 from generative.dataloader import load_data_diffusion
-from generative.diff.diff_utils import create_model_and_diffusion
 from generative.diff.step_sample import create_named_schedule_sampler
 from generative.train_diff import TrainLoop
+from generative.diff.diff_utils import create_model
 from utils import logger
 from utils.dist_util import get_device, setup_dist
 from utils.utils import init_save_path, load_config, setup_seed
@@ -59,12 +59,12 @@ def main():
     logger.log("### Creating model and diffusion...")
     # print('#'*30, 'CUDA_VISIBLE_DEVICES', os.environ['CUDA_VISIBLE_DEVICES'])
     config.device = get_device()
-    model, diffusion = create_model_and_diffusion(config)
+    model = create_model(config)
     model.to(get_device())  # DEBUG **
 
     pytorch_total_params = sum(p.numel() for p in model.parameters())
 
-    schedule_sampler = create_named_schedule_sampler(config.schedule_sampler, diffusion)
+    schedule_sampler = create_named_schedule_sampler(config.schedule_sampler, config.diffusion_steps)
 
     config.device = ""
     if ("LOCAL_RANK" not in os.environ) or (int(os.environ["LOCAL_RANK"]) == 0):
@@ -86,7 +86,7 @@ def main():
 
     TrainLoop(
         model=model,
-        diffusion=diffusion,
+        diff_steps=config.diffusion_steps,
         data=data_train,
         batch_size=config.batch_size,
         microbatch=config.microbatch,
@@ -105,7 +105,6 @@ def main():
         load_opt=config.load_opt,
         gradient_clipping=config.gradient_clipping,
         eval_data=data_valid,
-        rescaling_factor=config.rescaling_factor,
     ).run_loop()
 
 
