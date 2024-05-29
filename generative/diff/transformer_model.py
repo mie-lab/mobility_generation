@@ -195,8 +195,7 @@ class TransEncoder(nn.Module):
         self.padding_idx = location_embedding.padding_idx
         self.location_embedding = location_embedding
 
-        embed_dim = location_embedding.embedding_dim
-        self.embed_scale = math.sqrt(embed_dim)
+        self.embed_scale = math.sqrt(location_embedding.embedding_dim)
 
         # up projection (shared)
         self.input_up_proj = input_up_proj
@@ -395,7 +394,7 @@ class TransformerNetModel(nn.Module):
             output_down_proj=self.output_down_proj,
         )
 
-        self.lm_head = nn.Linear(model_args.input_dims, model_args.max_location)
+        self.lm_head = nn.Linear(model_args.input_dims, model_args.max_location, bias=False)
         with torch.no_grad():
             self.lm_head.weight = self.location_embedding.weight
 
@@ -458,7 +457,7 @@ class TransformerNetModel(nn.Module):
         terms["mse"] = mean_flat((z_0_hat - z_0).square(), mask)
 
         # Rounding error: embedding regularization
-        decoder_nll = token_discrete_loss(logits, tgt)
+        decoder_nll = token_discrete_loss(logits, tgt, mask=mask)
 
         terms["loss"] = terms["mse"] + decoder_nll
 

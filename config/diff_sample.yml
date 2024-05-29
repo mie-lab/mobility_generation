@@ -2,25 +2,25 @@ misc:
   dataset: mobis
 
 
-  dataset_variation: small
+  dataset_variation: tiny
   level: "10_13"
   src_min_days: 14
   tgt_min_days: 7
 
   # normal
-  # clip_denoised: False
-  # clamp_step: 500
-  # step: 2000
+  clamping: False
+  decoding_steps: 200
+  decoding_rescaling_factor: 4
   # DPM
-  clip_denoised: False
-  clamp: False
-  step: 20
-  start_n: 0
+  # clip_denoised: False
+  # clamp: False
+  # step: 20
+  # start_n: 0
   # 
   split: test
-  top_p: 0
-  model_path: ./runs/mobis_diffseq_seq2seq
-  trained_model_name: model_ema_40.pt
+
+  model_path: ./runs/mobis_na_base
+  trained_model_name: model_ema_125.pt
   pre_train_embed: None # ./data/matrix/loc_embedding.pk
 
   # seq_len: 512
@@ -30,8 +30,7 @@ misc:
   
   batch_size: 256
   num_workers: 0
-  
-  networkName: diffseq
+
 dataset:
   data_dir: ./data/diff
   save_root: ./runs
