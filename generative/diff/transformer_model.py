@@ -457,7 +457,7 @@ class TransformerNetModel(nn.Module):
         terms["mse"] = mean_flat((z_0_hat - z_0).square(), mask)
 
         # Rounding error: embedding regularization
-        decoder_nll = token_discrete_loss(logits, tgt, mask=mask)
+        decoder_nll = token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0)
 
         terms["loss"] = terms["mse"] + decoder_nll
 
@@ -493,13 +493,13 @@ class TransformerNetModel(nn.Module):
         return tokens, scores
 
 
-def token_discrete_loss(logits, input_ids, mask=None):
+def token_discrete_loss(logits, input_ids, mask=None, label_smoothing=0):
     """
     the loss of -log p(w|z_0)
     :param x_start_mean: word embedding
     :return: x_0
     """
-    loss_fct = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=0, label_smoothing=0.1)
+    loss_fct = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=0, label_smoothing=label_smoothing)
     decoder_nll = loss_fct(logits.view(-1, logits.size(-1)), input_ids.view(-1)).view(input_ids.shape)
     if mask is not None:
         decoder_nll *= mask
