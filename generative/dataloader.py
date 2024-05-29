@@ -348,7 +348,6 @@ def process_helper_fnc(seq_ls, split):
                 ori_len = len(tgt)
                 if ori_len < 50:
                     tgt = tgt + [0] * (50 - ori_len)
-
                     tgt_duration = tgt_duration + [0] * (50 - ori_len)
                 else:
                     tgt = tgt[:50]
@@ -376,7 +375,7 @@ def process_helper_fnc(seq_ls, split):
     seq_dataset = seq_dataset.map(
         merge_and_mask,
         batched=True,
-        num_proc=4,
+        num_proc=1,
         desc="merge and mask",
     )
 

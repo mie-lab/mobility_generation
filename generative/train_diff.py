@@ -15,7 +15,7 @@ torch.autograd.set_detect_anomaly(True)
 
 import pickle as pickle
 
-from transformers import get_constant_schedule_with_warmup, get_linear_schedule_with_warmup
+from transformers import get_constant_schedule_with_warmup, get_cosine_with_hard_restarts_schedule_with_warmup
 from utils import logger
 from utils.dist_util import get_device, load_state_dict
 
@@ -90,10 +90,11 @@ class TrainLoop:
                 self.opt, num_warmup_steps=len(self.data) * warmup_epochs
             )
         else:
-            self.scheduler = get_linear_schedule_with_warmup(
+            self.scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(
                 self.opt,
                 num_warmup_steps=len(self.data) * warmup_epochs,
                 num_training_steps=len(self.data) * self.decay_epochs,
+                num_cycles=3,
             )
 
         self.ema_params = copy.deepcopy(self.master_params)
