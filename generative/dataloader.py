@@ -442,13 +442,13 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         src_ctx = {}
         tgt_cxt = {}
         if self.if_embed_xy:
-            src_ctx["xy"] = torch.tensor(current_data["src_xy"])
+            src_ctx["xy"] = torch.tensor(current_data["src_xy"], dtype=torch.float32)
 
         # construct the pois
         if self.if_embed_poi:
             ids = np.array(current_data["src"])
-            pois = np.take(self.poiValues, ids[ids != 1] - 2, axis=0)
-            src_ctx["poi"] = torch.tensor(pois)
+            pois = np.take(self.poiValues, ids - 2, axis=0)
+            src_ctx["poi"] = torch.tensor(pois, dtype=torch.float32)
 
         if self.if_diffuse_duration:
             src_ctx["duration"] = torch.tensor(current_data["src_duration"])

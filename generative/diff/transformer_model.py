@@ -128,7 +128,7 @@ class TheoryGridCellSpatialRelationEncoder(nn.Module):
 
 
 class ContextModel(nn.Module):
-    def __init__(self, input_dims, hidden_dims, embed_xy, embed_poi, poi_dims=None, device=""):
+    def __init__(self, input_dims, hidden_dims, embed_xy, embed_poi, poi_dim=None, device=""):
         super().__init__()
 
         self.input_dims = input_dims
@@ -136,8 +136,6 @@ class ContextModel(nn.Module):
         self.embed_xy = embed_xy
         self.embed_poi = embed_poi
 
-        # upproject embedding
-        self.input_up_proj = nn.Linear(input_dims, hidden_dims, bias=False)
         # xy embedding
         if embed_xy:
             frequency_num = 16
@@ -153,11 +151,7 @@ class ContextModel(nn.Module):
 
         # poi embedding
         if embed_poi:
-            self.poi_up_proj = nn.Sequential(
-                nn.Linear(poi_dims, input_dims),
-                nn.Tanh(),
-                nn.Linear(input_dims, input_dims),
-            )
+            self.poi_up_proj = nn.Linear(poi_dim, input_dims)
             self.comb_poi = nn.Sequential(
                 nn.Linear(hidden_dims + input_dims, input_dims),
                 nn.LayerNorm(input_dims),
@@ -168,14 +162,13 @@ class ContextModel(nn.Module):
             )
 
     def forward(self, x, context):
-        emb = self.input_up_proj(x)
         if self.embed_xy:
-            res = torch.cat([emb, self.encoder(context["xy"])], dim=-1)
-            emb = emb + self.comb_xy(res)
+            res = torch.cat([x, self.encoder(context["xy"])], dim=-1)
+            x = x + self.comb_xy(res)
         if self.embed_poi:
-            res = torch.cat([emb, self.poi_up_proj(context["poi"])], dim=-1)
-            emb = emb + self.comb_poi(res)
-        return emb
+            res = torch.cat([x, self.poi_up_proj(context["poi"])], dim=-1)
+            x = x + self.comb_poi(res)
+        return x
 
 
 class TransEncoder(nn.Module):
@@ -188,7 +181,10 @@ class TransEncoder(nn.Module):
         location_embedding=None,
         position_embedding=None,
         input_up_proj=None,
-        # device="",
+        embed_xy=False,
+        embed_poi=False,
+        poi_dim=32,
+        device="",
     ):
         super().__init__()
 
@@ -205,10 +201,10 @@ class TransEncoder(nn.Module):
         self.register_buffer("position_ids", torch.arange(max_source_positions).expand((1, -1)))
         self.position_embedding = position_embedding
 
-        # # context model for embedding
-        # self.context_model = ContextModel(
-        #     self.input_dims, self.hidden_size, embed_xy, embed_poi, poi_dims=poi_dims, device=device
-        # )
+        # context model for embedding
+        self.context_model = ContextModel(
+            location_embedding.embedding_dim, hidden_size, embed_xy, embed_poi, poi_dim=poi_dim, device=device
+        )
 
         #
         self.LayerNorm = nn.LayerNorm(hidden_size)
@@ -241,6 +237,9 @@ class TransEncoder(nn.Module):
 
         # up-projection
         x = self.input_up_proj(x)
+
+        # context
+        x = self.context_model(x, context)
 
         # position_embeddings
         seq_length = x.size(1)
@@ -380,6 +379,10 @@ class TransformerNetModel(nn.Module):
             location_embedding=self.location_embedding,
             position_embedding=self.position_embedding,
             input_up_proj=self.input_up_proj,
+            embed_xy=model_args.if_embed_xy,
+            embed_poi=model_args.if_embed_poi,
+            poi_dim=model_args.poi_dim,
+            device=model_args.device,
         )
 
         # decoder
@@ -434,7 +437,7 @@ class TransformerNetModel(nn.Module):
         """Compute training losses"""
 
         # encoding
-        encoder_out = self.encoder(src)
+        encoder_out = self.encoder(src, context=src_ctx)
 
         # padding_mask B x T
         mask = tgt.ne(0)
@@ -457,7 +460,7 @@ class TransformerNetModel(nn.Module):
         terms["mse"] = mean_flat((z_0_hat - z_0).square(), mask)
 
         # Rounding error: embedding regularization
-        decoder_nll = token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0)
+        decoder_nll = token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
 
         terms["loss"] = terms["mse"] + decoder_nll
 

@@ -22,6 +22,10 @@ def create_model(config):
         "hidden_size": config.hidden_size,
         "num_attention_heads": config.num_attention_heads,
         "dropout": config.dropout,
+        "if_embed_xy": config.if_embed_xy,
+        "if_embed_poi": config.if_embed_poi,
+        "poi_dim": config.poi_dim,
+        "device": config.device,
     }
     model_args = edict(model_args)
     diff_args = {
