@@ -61,6 +61,7 @@ def main():
     logger.configure(dir=log_dir)
 
     logger.log("### Creating model and diffusion...")
+    config.device = dist_util.get_device()
     model = create_model(config)
 
     checkpoint = dist_util.load_state_dict(
@@ -103,8 +104,9 @@ def main():
         src, tgt, src_ctx, tgt_cxt = inputs
         src = src.to(device).long()
         tgt = tgt.to(device).long()
+        src_ctx = {k: v.to(device) for k, v in src_ctx.items()}
 
-        encoder_out = model.encoder(src)
+        encoder_out = model.encoder(src, context=src_ctx)
 
         # padding_mask B x T
         mask = torch.ones_like(tgt) == 1

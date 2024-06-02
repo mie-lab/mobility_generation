@@ -141,10 +141,10 @@ class ContextModel(nn.Module):
             frequency_num = 16
             self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
             self.comb_xy = nn.Sequential(
-                nn.Linear(hidden_dims + frequency_num * 6, input_dims),
-                nn.LayerNorm(input_dims),
+                nn.Linear(hidden_dims + frequency_num * 6, hidden_dims),
+                nn.LayerNorm(hidden_dims),
                 nn.ReLU(),
-                nn.Linear(input_dims, hidden_dims),
+                nn.Linear(hidden_dims, hidden_dims),
                 nn.LayerNorm(hidden_dims),
                 nn.Dropout(0.1),
             )
@@ -153,10 +153,10 @@ class ContextModel(nn.Module):
         if embed_poi:
             self.poi_up_proj = nn.Linear(poi_dim, input_dims)
             self.comb_poi = nn.Sequential(
-                nn.Linear(hidden_dims + input_dims, input_dims),
-                nn.LayerNorm(input_dims),
+                nn.Linear(hidden_dims + input_dims, hidden_dims),
+                nn.LayerNorm(hidden_dims),
                 nn.ReLU(),
-                nn.Linear(input_dims, hidden_dims),
+                nn.Linear(hidden_dims, hidden_dims),
                 nn.LayerNorm(hidden_dims),
                 nn.Dropout(0.1),
             )
