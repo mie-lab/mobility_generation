@@ -7,6 +7,7 @@ import torch.nn as nn
 
 import math
 import numpy as np
+from random import random
 
 from improved_diffusion.gaussian_diffusion import GaussianDiffusion, betas_for_alpha_bar
 from improved_diffusion.respace import SpacedDiffusion, space_timesteps
@@ -263,6 +264,7 @@ class TransDecoder(nn.Module):
         position_embedding=None,
         input_up_proj=None,
         output_down_proj=None,
+        self_cond=False,
     ):
         super().__init__()
 
@@ -284,6 +286,15 @@ class TransDecoder(nn.Module):
         self.register_buffer("position_ids", torch.arange(max_source_positions).expand((1, -1)))
         self.position_embedding = position_embedding
 
+        self.self_cond = self_cond
+        if self_cond:
+            self_cond_dim = location_embedding.embedding_dim
+            self.self_cond_proj = nn.Sequential(
+                nn.Linear(self_cond_dim * 2, self_cond_dim),
+                nn.ReLU(),
+                nn.Linear(self_cond_dim, self_cond_dim),
+                nn.Dropout(dropout),
+            )
         #
         self.LayerNorm = nn.LayerNorm(hidden_size)
         self.dropout = nn.Dropout(dropout)
@@ -299,10 +310,14 @@ class TransDecoder(nn.Module):
 
         return embed
 
-    def forward_hidden(self, z_t, t):
+    def forward_hidden(self, z_t, t, prev_z_0_hat=None):
         seq_length = z_t.size(1)
-        #
-        hidden = self.input_up_proj(z_t)
+
+        if self.self_cond:
+            cat_embed = torch.cat((z_t, prev_z_0_hat), dim=-1)
+            hidden = self.input_up_proj(self.self_cond_proj(cat_embed))
+        else:
+            hidden = self.input_up_proj(z_t)
 
         # time embedding
         timestep_embed = timestep_embedding(t, self.hidden_size)
@@ -317,8 +332,8 @@ class TransDecoder(nn.Module):
         hidden = self.dropout(self.LayerNorm(hidden))
         return hidden
 
-    def forward(self, z_t, t, padding_mask, encoder_out):
-        hidden = self.forward_hidden(z_t, t)
+    def forward(self, z_t, t, padding_mask, encoder_out, prev_z_0_hat=None):
+        hidden = self.forward_hidden(z_t, t, prev_z_0_hat)
 
         # B x T x C -> T x B x C
         hidden = hidden.transpose(0, 1)
@@ -395,6 +410,7 @@ class TransformerNetModel(nn.Module):
             position_embedding=self.position_embedding,
             input_up_proj=self.input_up_proj,
             output_down_proj=self.output_down_proj,
+            self_cond=diff_args.self_cond,
         )
 
         self.lm_head = nn.Linear(model_args.input_dims, model_args.max_location, bias=False)
@@ -405,7 +421,7 @@ class TransformerNetModel(nn.Module):
             betas=get_named_beta_schedule(
                 diff_args.noise_schedule,
                 diff_args.diffusion_steps,
-                diff_args.rescaling_factor if diff_args.vp_rf else 1.0,
+                diff_args.rescaling_factor,
             ),
             model_mean_type=None,
             model_var_type=None,
@@ -418,7 +434,7 @@ class TransformerNetModel(nn.Module):
             betas=get_named_beta_schedule(
                 diff_args.decoding_noise_schedule,
                 diff_args.diffusion_steps,
-                diff_args.decoding_rescaling_factor if diff_args.decoding_vp_rf else 1.0,
+                diff_args.decoding_rescaling_factor,
             ),
             model_mean_type=None,
             model_var_type=None,
@@ -450,8 +466,14 @@ class TransformerNetModel(nn.Module):
         # reparametrization trick
         z_t = self.training_diffusion.q_sample(z_0, t, noise).type_as(z_0)
 
+        # self-conditioning
+        prev_z_0_hat = torch.zeros_like(z_0)
+        if self.diff_args.self_cond and random() < 0.5:
+            with torch.no_grad():
+                prev_z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat).detach()
+
         # model use z_t to predict z_0
-        z_0_hat = self.decoder(z_t, model_t, mask, encoder_out)
+        z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat)
         logits = self.get_logits(z_0 if self.diff_args.rounding_loss else z_0_hat)
 
         terms = {}
@@ -474,7 +496,7 @@ class TransformerNetModel(nn.Module):
         model_t = torch.full([len(z_t)], model_t, device=z_t.device)
 
         # predict z_0
-        z_0_hat = self.decoder(z_t, model_t, mask, encoder_out)
+        z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat)
 
         # clamping trick
         if self.diff_args.clamping:

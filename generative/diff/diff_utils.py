@@ -33,12 +33,11 @@ def create_model(config):
         "diffusion_steps": config.diffusion_steps,
         "rescaling_factor": config.rescaling_factor,
         "rescale_timesteps": config.rescale_timesteps,
-        "vp_rf": config.vp_rf,
         "rounding_loss": config.rounding_loss,
+        "self_cond": config.self_cond,
         "decoding_steps": config.decoding_steps,
         "decoding_noise_schedule": config.decoding_noise_schedule,
         "decoding_rescaling_factor": config.decoding_rescaling_factor,
-        "decoding_vp_rf": config.decoding_vp_rf,
         "clamping": config.clamping,
     }
     diff_args = edict(diff_args)

@@ -116,6 +116,7 @@ def main():
         z_t = torch.randn_like(z_0) * config.decoding_rescaling_factor
         z_t = z_t.to(encoder_out["encoder_out"])
 
+        # self-conditioning
         prev_z_0_hat = torch.zeros_like(z_t)
         for step in list(range(config.decoding_steps))[::-1]:
             z_t, prev_z_0_hat = model.forward_decoder(z_t, step, mask, encoder_out, prev_z_0_hat)
