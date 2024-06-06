@@ -121,26 +121,24 @@ def main():
         for step in list(range(config.decoding_steps))[::-1]:
             z_t, prev_z_0_hat = model.forward_decoder(z_t, step, mask, encoder_out, prev_z_0_hat)
 
-        tokens, scores = model.forward_output_layer(prev_z_0_hat)
-
-        sample = tokens
+        samples, scores = model.forward_output_layer(prev_z_0_hat)
 
         pred_ls = []
-        true_ls = []
-        input_ls = []
+        tgt_ls = []
+        src_ls = []
 
-        for seq_pred, seq_src, seq_tgt in zip(sample, src, tgt):
+        for seq_pred, seq_src, seq_tgt in zip(samples, src, tgt):
             pred_ls.append(seq_pred.detach().cpu().numpy())
 
-            true_ls.append(seq_src.detach().cpu().numpy())
-            input_ls.append(seq_tgt.detach().cpu().numpy())
+            tgt_ls.append(seq_src.detach().cpu().numpy())
+            src_ls.append(seq_tgt.detach().cpu().numpy())
 
         for i in range(world_size):
             if i == rank:  # Write files sequentially
                 fout = open(out_path, "a")
-                for recov, src, tgt in zip(pred_ls, input_ls, true_ls):
+                for recov, tgt, src in zip(pred_ls, tgt_ls, src_ls):
                     print(
-                        json.dumps({"recover": recov, "reference": tgt, "source": src}, cls=NumpyArrayEncoder),
+                        json.dumps({"recover": recov, "target": tgt, "source": src}, cls=NumpyArrayEncoder),
                         file=fout,
                     )
                 fout.close()
