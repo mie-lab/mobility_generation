@@ -198,8 +198,8 @@ class TransEncoder(nn.Module):
         self.input_up_proj = input_up_proj
 
         # position embeddings (shared)
-        max_source_positions = 512
-        self.register_buffer("position_ids", torch.arange(max_source_positions).expand((1, -1)))
+        max_positions = 512
+        self.register_buffer("position_ids", torch.arange(max_positions).expand((1, -1)))
         self.position_embedding = position_embedding
 
         # context model for embedding
@@ -282,8 +282,8 @@ class TransDecoder(nn.Module):
             nn.Linear(self.hidden_size * 4, self.hidden_size),
         )
         # position embeddings (shared)
-        max_source_positions = 512
-        self.register_buffer("position_ids", torch.arange(max_source_positions).expand((1, -1)))
+        max_positions = 512
+        self.register_buffer("position_ids", torch.arange(max_positions).expand((1, -1)))
         self.position_embedding = position_embedding
 
         self.self_cond = self_cond

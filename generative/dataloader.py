@@ -322,6 +322,9 @@ def process_helper_fnc(seq_ls, split):
     seq_dataset = Dataset2.from_dict(seq_ls)
 
     def merge_and_mask(ls):
+        MAX_LEN = 512
+        GENERATE_LEN = 50
+
         src_ls = []
         src_xy_ls = []
         src_duration_ls = []
@@ -338,24 +341,24 @@ def process_helper_fnc(seq_ls, split):
 
             # for src
             len_src = len(src)
-            if len_src > 256:
-                src = src[(len_src - 256) :]
-                src_xy = src_xy[(len_src - 256) :]
-                src_duration = src_duration[(len_src - 256) :]
+            if len_src > MAX_LEN:
+                src = src[(len_src - MAX_LEN) :]
+                src_xy = src_xy[(len_src - MAX_LEN) :]
+                src_duration = src_duration[(len_src - MAX_LEN) :]
 
             # for tgt
             if split == "test":
                 ori_len = len(tgt)
-                if ori_len < 50:
-                    tgt = tgt + [0] * (50 - ori_len)
-                    tgt_duration = tgt_duration + [0] * (50 - ori_len)
+                if ori_len < GENERATE_LEN:  # pad with 0s to GENERATE_LEN
+                    tgt = tgt + [0] * (GENERATE_LEN - ori_len)
+                    tgt_duration = tgt_duration + [0] * (GENERATE_LEN - ori_len)
                 else:
-                    tgt = tgt[:50]
-                    tgt_duration = tgt_duration[:50]
+                    tgt = tgt[:GENERATE_LEN]
+                    tgt_duration = tgt_duration[:GENERATE_LEN]
             else:
-                if len(tgt) > 256:
-                    tgt = tgt[:256]
-                    tgt_duration = tgt_duration[:256]
+                if len(tgt) > MAX_LEN:
+                    tgt = tgt[:MAX_LEN]
+                    tgt_duration = tgt_duration[:MAX_LEN]
 
             src_ls.append(src)
             src_xy_ls.append(src_xy)
@@ -389,7 +392,9 @@ def get_sequence(args, split="train"):
     print("#" * 30, "\nLoading dataset {} from {}...".format(args.dataset, args.data_dir))
 
     print(f"### Loading from the {split} set...")
-    path = f"{args.data_dir}/{split}_level{args.level}_{args.src_min_days}_{args.tgt_min_days}_{args.dataset_variation}_continues.pk"
+    path = (
+        f"{args.data_dir}/{split}_level{args.level}_{args.src_min_days}_{args.tgt_min_days}_{args.dataset_variation}.pk"
+    )
 
     sequence_ls = pickle.load(open(path, "rb"))
 
@@ -398,13 +403,12 @@ def get_sequence(args, split="train"):
         processed_dict["src"].append(record["src"])
         processed_dict["src_xy"].append(record["src_xy"])
 
-        # for padding and seperator, add normalization (max 2881 = 60 * 24 * 2 - 1 + 2)
-        processed_dict["src_duration"].append((record["src_duration"] + 2) / (60 * 24 * 2 + 1))
+        # for padding, add normalization (max 2880 = 60 * 24 * 2 - 1 + 1 (padding))
+        processed_dict["src_duration"].append((record["src_duration"] + 1) / 2880)
 
         processed_dict["tgt"].append(record["tgt"])
-        # processed_dict["tgt_xy"].append(record["tgt_xy"])
 
-        processed_dict["tgt_duration"].append((record["tgt_duration"] + 2) / (60 * 24 * 2 + 1))
+        processed_dict["tgt_duration"].append((record["tgt_duration"] + 1) / 2880)
 
     print("### Data samples...\n", processed_dict["src"][0][:5], processed_dict["tgt"][0][:5])
 
@@ -447,7 +451,7 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         # construct the pois
         if self.if_embed_poi:
             ids = np.array(current_data["src"])
-            pois = np.take(self.poiValues, ids - 2, axis=0)
+            pois = np.take(self.poiValues, ids - 1, axis=0)  # -1 for padding
             src_ctx["poi"] = torch.tensor(pois, dtype=torch.float32)
 
         if self.if_diffuse_duration:

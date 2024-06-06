@@ -29,7 +29,6 @@ Generating locations:
         - [10, 14]: 142,575 locations covering Switzerland. Original locations are projected into 28,742 binned locations.
         - [10, 13]: 39,177 locations covering Switzerland. Original locations are projected into 14,881 binned locations.
         
-
 - Definition of activity behavior:
     - Preserve the self-transitions
     - Activity duration: activity duration + the transit duration to reach the location (finished_at - previous finished_at)
@@ -38,13 +37,13 @@ Generating locations:
 
 ### Next location prediction. 
 
-User split 6:2:2 according to time.
+User split 7:2:1 according to time.
 
 - MHSA: 
     - Use GPT2 implementation
     - Use previous 7 days, predict the next location. 
     - hyperparameter: 
-    - Test runs (small) for level 10-14 with features (checked that all features are useful):
+    - Test runs (small) for level 10-14 with features (checked that all features are useful).
 
 - Markov: 
     - Train user model with train and validation (6+2) sequences. 
@@ -66,10 +65,12 @@ TODO:
 
 ### With neural generative models.
 
+User split 7:2:1 according to time.
 Use 4 weeks as input (TODO: Tune weeks)
 
 - SeqGAN (TODO:) 
     - implement
+    
 - moveSim
     - Generator: 
         - Samples from emperical visit frequency
@@ -86,18 +87,11 @@ Use 4 weeks as input (TODO: Tune weeks)
 
 - VOLUNTEER (TODO:)
     - implement
-- DiffSeq-v2
-    - loss shall be < 0.01
-    - We only consider V2 
-        - The mean embedding of V2 shall be initialized from random
-        - pretrain slightly better
-        - layer 2 better than layer 6
+
+- Seq2seq diffSeq:
+    - loss 0.001
     - adding xy coordinate information
         - use geo encoding method
-        - add: learning after epoch 10
-        - complicated mlp for encoding learning leads to overfit (from encode_update)
-        - upprojection for location embedding will destroy the embeding space -> xy feature can only be added after embedding (from encode_up and v2?)
-        - (TODO: take the best performaing xy encoding method and try with non-location embedding pretrain)
 
 
 ## Metrics (TODO: verify)
