@@ -42,11 +42,11 @@ User split 7:2:1 according to time.
 - MHSA: 
     - Use GPT2 implementation
     - Use previous 7 days, predict the next location. 
-    - hyperparameter: 
-    - Test runs (small) for level 10-14 with features (checked that all features are useful).
+    - hyperparameter:
+    - Test runs (small) for level 14 with features (checked that all features are useful).
 
 - Markov: 
-    - Train user model with train and validation (6+2) sequences. 
+    - Train user model with train and validation (7+2) sequences. 
     - Top-k sampling: Each next location is sampled from the top3 most likely locations according to the markov transition matrix. 
         - If no prior knowledge, next location sampled from the top3 overall most visited locations.
 
@@ -59,18 +59,14 @@ TODO:
 ### With mechanistic individual models. 
 
 - EPR
-- DTEPR (TODO:)
 - TimeGeo (TODO:)
 - Container (TODO:)
 
 ### With neural generative models.
 
 User split 7:2:1 according to time.
-Use 4 weeks as input (TODO: Tune weeks)
+Use 4 weeks as input
 
-- SeqGAN (TODO:) 
-    - implement
-    
 - moveSim
     - Generator: 
         - Samples from emperical visit frequency
@@ -81,7 +77,7 @@ Use 4 weeks as input (TODO: Tune weeks)
     - Loss:
         - implemented reward based on rollout
         - Based on CrossEntropyLoss and MSELoss
-        - Included distance loss; decide to not include period loss
+        - Included distance loss, but not including period loss
     - Training:
         Learning signal weak -> Generator capacity low
 
@@ -104,6 +100,3 @@ Use 4 weeks as input (TODO: Tune weeks)
 - TODO: Activity duration
 - TODO: Daily visited locations
 - TODO: motifs distribution
-
-## TODO:
-- Implement classical generation model 

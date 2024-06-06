@@ -561,12 +561,16 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, rescaling_fa
 
     if schedule_name == "sqrt":
         shift = 0.0001
-        alpha_bar = lambda t: 1 - np.sqrt(t + shift)
+
+        def alpha_bar(t):
+            return 1 - np.sqrt(t + shift)
 
     else:
         raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
 
     f2 = rescaling_factor**2
-    rescaled_alpha_bar = lambda t: alpha_bar(t) / (f2 - (f2 - 1) * alpha_bar(t))
+
+    def rescaled_alpha_bar(t):
+        return alpha_bar(t) / (f2 - (f2 - 1) * alpha_bar(t))
 
     return betas_for_alpha_bar(num_diffusion_timesteps, rescaled_alpha_bar)
