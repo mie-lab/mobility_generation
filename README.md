@@ -53,8 +53,7 @@ User split 7:2:1 according to time.
 
 Trained model autoregressively generate 50 locations for each test sequence. 
 
-TODO:
-- hyper-parameter search
+TODO: hyper-parameter search
 
 ### With mechanistic individual models. 
 
@@ -81,8 +80,7 @@ Use 4 weeks as input
     - Training:
         Learning signal weak -> Generator capacity low
 
-- VOLUNTEER (TODO:)
-    - implement
+- VOLUNTEER (TODO: implement)
 
 - Seq2seq diffSeq:
     - loss 0.001
@@ -90,7 +88,7 @@ Use 4 weeks as input
         - use geo encoding method
 
 
-## Metrics (TODO: verify)
+## Metrics (TODO: check more metrics from other studies)
 
 - Travel distance 
 - Radius of Gyration
@@ -99,4 +97,5 @@ Use 4 weeks as input
 - Individual visitation frequency
 - TODO: Activity duration
 - TODO: Daily visited locations
-- TODO: motifs distribution
+- TODO: Motifs distribution
+- TODO: Measure of variability - how does the generation differ in each run?
