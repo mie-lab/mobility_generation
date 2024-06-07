@@ -81,7 +81,7 @@ class TrainLoop:
                 param_groups.append({"params": [parameter], "lr": self.lr})
 
         self.opt = AdamW(param_groups, lr=self.lr, weight_decay=weight_decay, eps=1e-5)
-        self.scaler = torch.cuda.amp.GradScaler(growth_interval=4000, init_scale=256, enabled=self.use_fp16)
+        self.scaler = torch.cuda.amp.GradScaler(growth_interval=5000, init_scale=64, enabled=self.use_fp16)
         # define learning rate schedule
         if load_checkpoint:
             warmup_epochs = 0
@@ -129,7 +129,6 @@ class TrainLoop:
             )
             self.ema_params = self._state_dict_to_master_params(checkpoint["ema"])
             self.model.load_state_dict(checkpoint["model"])
-            self.scaler.load_state_dict(checkpoint["scaler"])
             if load_opt:
                 self.opt.load_state_dict(checkpoint["optimizer"])
                 self.scheduler.load_state_dict(checkpoint["lr_schedule"])
@@ -158,7 +157,6 @@ class TrainLoop:
                     "model": self._master_params_to_state_dict(self.master_params),
                     "ema": self._master_params_to_state_dict(self.ema_params),
                     "optimizer": self.opt.state_dict(),
-                    "scaler": self.scaler.state_dict(),
                     "lr_schedule": self.scheduler.state_dict(),
                 }
                 if is_main_process():
@@ -299,8 +297,8 @@ class TrainLoop:
         self._log_grad_norm()
         self.scaler.step(self.opt)
         self.scaler.update()
-        if self.use_fp16 and self.scaler._scale < 128:
-            self.scaler._scale = torch.tensor(128).to(self.scaler._scale)
+        if self.use_fp16 and self.scaler._scale < 64:
+            self.scaler._scale = torch.tensor(64).to(self.scaler._scale)
 
         self.opt.zero_grad()
         update_ema(self.ema_params, self.master_params, rate=self.ema_rate)
