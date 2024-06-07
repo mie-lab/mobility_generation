@@ -125,8 +125,8 @@ def main():
         for seq_pred, seq_src, seq_tgt in zip(samples, src, tgt):
             pred_ls.append(seq_pred.detach().cpu().numpy())
 
-            tgt_ls.append(seq_src.detach().cpu().numpy())
-            src_ls.append(seq_tgt.detach().cpu().numpy())
+            tgt_ls.append(seq_tgt.detach().cpu().numpy())
+            src_ls.append(seq_src.detach().cpu().numpy())
 
         for i in range(world_size):
             if i == rank:  # Write files sequentially
