@@ -302,8 +302,9 @@ def load_data_diffusion(
             dataset,
             batch_size=batch_size,
             shuffle=False,
-            num_workers=0,
+            num_workers=data_args.num_workers,
             collate_fn=collate_fn,
+            pin_memory=True,
         )
     else:
         sampler = DistributedSampler(dataset, shuffle=shuffle)
@@ -311,8 +312,9 @@ def load_data_diffusion(
             dataset,
             batch_size=batch_size,
             sampler=sampler,
-            num_workers=0,
+            num_workers=data_args.num_workers,
             collate_fn=collate_fn,
+            pin_memory=True,
         )
 
     return data_loader
