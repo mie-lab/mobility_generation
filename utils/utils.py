@@ -99,7 +99,7 @@ def get_train_test(sp, all_locs=None):
     # truncate too long duration, >2 days to 2 days
     sp.loc[sp["act_duration"] > 60 * 24 * 2 - 1, "act_duration"] = 60 * 24 * 2 - 1
 
-    # split the datasets, user dependent 0.6, 0.2, 0.2
+    # split the datasets, user dependent 0.7, 0.2, 0.1
     train_data, vali_data, test_data = _split_dataset(sp)
 
     # encode unseen locations in validation and test into 0
@@ -107,11 +107,11 @@ def get_train_test(sp, all_locs=None):
         all_locs["loc_id"].values.reshape(-1, 1)
     )
     # add 1 to account for 0 padding
-    all_locs["loc_id"] = enc.transform(all_locs["loc_id"].values.reshape(-1, 1)) + 2
+    all_locs["loc_id"] = enc.transform(all_locs["loc_id"].values.reshape(-1, 1)) + 1
 
-    train_data["location_id"] = enc.transform(train_data["location_id"].values.reshape(-1, 1)) + 2
-    vali_data["location_id"] = enc.transform(vali_data["location_id"].values.reshape(-1, 1)) + 2
-    test_data["location_id"] = enc.transform(test_data["location_id"].values.reshape(-1, 1)) + 2
+    train_data["location_id"] = enc.transform(train_data["location_id"].values.reshape(-1, 1)) + 1
+    vali_data["location_id"] = enc.transform(vali_data["location_id"].values.reshape(-1, 1)) + 1
+    test_data["location_id"] = enc.transform(test_data["location_id"].values.reshape(-1, 1)) + 1
 
     return train_data, vali_data, test_data, all_locs
 
@@ -122,8 +122,8 @@ def _split_dataset(totalData):
     def getSplitDaysUser(df):
         """Split the dataset according to the tracked day of each user."""
         maxDay = df["start_day"].max()
-        train_split = maxDay * 0.6
-        vali_split = maxDay * 0.8
+        train_split = maxDay * 0.7
+        vali_split = maxDay * 0.9
 
         df["Dataset"] = "test"
         df.loc[df["start_day"] < train_split, "Dataset"] = "train"

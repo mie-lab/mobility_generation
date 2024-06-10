@@ -7,102 +7,44 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
-from generative.diff import gaussian_diffusion, transformer_model
+
+from easydict import EasyDict as edict
 
 
-def create_model_and_diffusion(config):
-    loaded_embed = None
-    if config.pre_train_embed != "None":
-        loaded_embed = pickle.load(open(config.pre_train_embed, "rb")).astype(np.float32)
-
-    model = transformer_model.TransformerNetModel(
-        input_dims=config.hidden_dim,
-        num_attention_heads=config.num_attention_heads,
-        dropout=config.dropout,
-        hidden_size=config.hidden_size,
-        num_encoder_layers=config.num_encoder_layers,
-        max_location=config.max_location,
-        learned_mean_embed=config.learned_mean_embed,
-        loaded_embed=loaded_embed,
-        embed_xy=config.if_embed_xy,
-        embed_poi=config.if_embed_poi,
-        poi_dims=config.poi_dim,
-        device=config.device,
-        diffuse_duration=config.if_diffuse_duration,
-    )
-
-    betas = gaussian_diffusion.get_named_beta_schedule(
-        config.noise_schedule, config.diffusion_steps, config.rescaling_factor
-    )
-
-    if not config.timestep_respacing:
-        timestep_respacing = [config.diffusion_steps]
-
-    diffusion = gaussian_diffusion.SpacedDiffusion(
-        use_timesteps=space_timesteps(config.diffusion_steps, timestep_respacing),
-        betas=betas,
-        rescale_timesteps=config.rescale_timesteps,
-        predict_xstart=config.predict_xstart,
-        rejection_rate=config.rejection_rate,
-        denoise=config.denoise,
-        denoise_rate=config.denoise_rate,
-        device=config.device,
-        max_T=config.diffusion_steps,
-    )
-
-    return model, diffusion
+from .transformer_model import TransformerNetModel
 
 
-def space_timesteps(num_timesteps, section_counts):
-    """
-    Create a list of timesteps to use from an original diffusion process,
-    given the number of timesteps we want to take from equally-sized portions
-    of the original process.
+def create_model(config):
+    model_args = {
+        "input_dims": config.input_dims,
+        "num_layers": config.num_layers,
+        "max_location": config.max_location,
+        "hidden_size": config.hidden_size,
+        "num_attention_heads": config.num_attention_heads,
+        "dropout": config.dropout,
+        "if_embed_xy": config.if_embed_xy,
+        "if_embed_poi": config.if_embed_poi,
+        "poi_dim": config.poi_dim,
+        "device": config.device,
+    }
+    model_args = edict(model_args)
+    diff_args = {
+        "noise_schedule": config.noise_schedule,
+        "diffusion_steps": config.diffusion_steps,
+        "rescaling_factor": config.rescaling_factor,
+        "rescale_timesteps": config.rescale_timesteps,
+        "rounding_loss": config.rounding_loss,
+        "self_cond": config.self_cond,
+        "decoding_steps": config.decoding_steps,
+        "decoding_noise_schedule": config.decoding_noise_schedule,
+        "decoding_rescaling_factor": config.decoding_rescaling_factor,
+        "clamping": config.clamping,
+    }
+    diff_args = edict(diff_args)
 
-    For example, if there's 300 timesteps and the section counts are [10,15,20]
-    then the first 100 timesteps are strided to be 10 timesteps, the second 100
-    are strided to be 15 timesteps, and the final 100 are strided to be 20.
+    model = TransformerNetModel(model_args=model_args, diff_args=diff_args)
 
-    If the stride is a string starting with "ddim", then the fixed striding
-    from the DDIM paper is used, and only one section is allowed.
-
-    :param num_timesteps: the number of diffusion steps in the original
-                          process to divide up.
-    :param section_counts: either a list of numbers, or a string containing
-                           comma-separated numbers, indicating the step count
-                           per section. As a special case, use "ddimN" where N
-                           is a number of steps to use the striding from the
-                           DDIM paper.
-    :return: a set of diffusion steps from the original process to use.
-    """
-    if isinstance(section_counts, str):
-        if section_counts.startswith("ddim"):
-            desired_count = int(section_counts[len("ddim") :])
-            for i in range(1, num_timesteps):
-                if len(range(0, num_timesteps, i)) == desired_count:
-                    return set(range(0, num_timesteps, i))
-            raise ValueError(f"cannot create exactly {num_timesteps} steps with an integer stride")
-        section_counts = [int(x) for x in section_counts.split(",")]
-    size_per = num_timesteps // len(section_counts)
-    extra = num_timesteps % len(section_counts)
-    start_idx = 0
-    all_steps = []
-    for i, section_count in enumerate(section_counts):
-        size = size_per + (1 if i < extra else 0)
-        if size < section_count:
-            raise ValueError(f"cannot divide section of {size} steps into {section_count}")
-        if section_count <= 1:
-            frac_stride = 1
-        else:
-            frac_stride = (size - 1) / (section_count - 1)
-        cur_idx = 0.0
-        taken_steps = []
-        for _ in range(section_count):
-            taken_steps.append(start_idx + round(cur_idx))
-            cur_idx += frac_stride
-        all_steps += taken_steps
-        start_idx += size
-    return set(all_steps)
+    return model
 
 
 def get_efficient_knn(model_emb, text_emb):

@@ -7,6 +7,10 @@ import torch.nn as nn
 
 import math
 import numpy as np
+from random import random
+
+from improved_diffusion.gaussian_diffusion import GaussianDiffusion, betas_for_alpha_bar
+from improved_diffusion.respace import SpacedDiffusion, space_timesteps
 
 
 def _cal_freq_list(frequency_num, max_radius, min_radius):
@@ -17,6 +21,27 @@ def _cal_freq_list(frequency_num, max_radius, min_radius):
     freq_list = 1.0 / timescales
 
     return freq_list
+
+
+def timestep_embedding(timesteps, dim, max_period=10000):
+    """
+    Create sinusoidal timestep embeddings.
+
+    :param timesteps: a 1-D Tensor of N indices, one per batch element.
+                      These may be fractional.
+    :param dim: the dimension of the output.
+    :param max_period: controls the minimum frequency of the embeddings.
+    :return: an [N x dim] Tensor of positional embeddings.
+    """
+    half = dim // 2
+    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(
+        device=timesteps.device
+    )
+    args = timesteps[:, None].float() * freqs[None]
+    embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+    if dim % 2:
+        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+    return embedding
 
 
 class TheoryGridCellSpatialRelationEncoder(nn.Module):
@@ -104,7 +129,7 @@ class TheoryGridCellSpatialRelationEncoder(nn.Module):
 
 
 class ContextModel(nn.Module):
-    def __init__(self, input_dims, hidden_dims, embed_xy, embed_poi, poi_dims=None, device=""):
+    def __init__(self, input_dims, hidden_dims, embed_xy, embed_poi, poi_dim=None, device=""):
         super().__init__()
 
         self.input_dims = input_dims
@@ -112,65 +137,219 @@ class ContextModel(nn.Module):
         self.embed_xy = embed_xy
         self.embed_poi = embed_poi
 
-        # upproject embedding
-        self.input_up_proj = nn.Linear(input_dims, hidden_dims, bias=False)
         # xy embedding
         if embed_xy:
             frequency_num = 16
             self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
             self.comb_xy = nn.Sequential(
-                nn.Linear(hidden_dims + frequency_num * 6, input_dims),
-                nn.LayerNorm(input_dims),
+                nn.Linear(hidden_dims + frequency_num * 6, hidden_dims),
+                nn.LayerNorm(hidden_dims),
                 nn.ReLU(),
-                nn.Linear(input_dims, hidden_dims),
+                nn.Linear(hidden_dims, hidden_dims),
                 nn.LayerNorm(hidden_dims),
                 nn.Dropout(0.1),
             )
 
         # poi embedding
         if embed_poi:
-            self.poi_up_proj = nn.Sequential(
-                nn.Linear(poi_dims, input_dims),
-                nn.Tanh(),
-                nn.Linear(input_dims, input_dims),
-            )
+            self.poi_up_proj = nn.Linear(poi_dim, input_dims)
             self.comb_poi = nn.Sequential(
-                nn.Linear(hidden_dims + input_dims, input_dims),
-                nn.LayerNorm(input_dims),
+                nn.Linear(hidden_dims + input_dims, hidden_dims),
+                nn.LayerNorm(hidden_dims),
                 nn.ReLU(),
-                nn.Linear(input_dims, hidden_dims),
+                nn.Linear(hidden_dims, hidden_dims),
                 nn.LayerNorm(hidden_dims),
                 nn.Dropout(0.1),
             )
 
     def forward(self, x, context):
-        emb = self.input_up_proj(x)
         if self.embed_xy:
-            res = torch.cat([emb, self.encoder(context["xy"])], dim=-1)
-            emb = emb + self.comb_xy(res)
+            res = torch.cat([x, self.encoder(context["xy"])], dim=-1)
+            x = x + self.comb_xy(res)
         if self.embed_poi:
-            res = torch.cat([emb, self.poi_up_proj(context["poi"])], dim=-1)
-            emb = emb + self.comb_poi(res)
-        return emb
+            res = torch.cat([x, self.poi_up_proj(context["poi"])], dim=-1)
+            x = x + self.comb_poi(res)
+        return x
 
 
-class BERTModelWrapper(nn.Module):
-    def __init__(self, dropout, num_encoder_layers, hidden_size, max_position_embeddings, num_attention_heads):
+class TransEncoder(nn.Module):
+    def __init__(
+        self,
+        num_encoder_layers=2,
+        hidden_size=768,
+        num_attention_heads=12,
+        dropout=0,
+        location_embedding=None,
+        position_embedding=None,
+        input_up_proj=None,
+        embed_xy=False,
+        embed_poi=False,
+        poi_dim=32,
+        device="",
+    ):
         super().__init__()
 
-        model_config = BertConfig()
+        self.padding_idx = location_embedding.padding_idx
+        self.location_embedding = location_embedding
 
-        model_config.hidden_dropout_prob = dropout
-        model_config.num_hidden_layers = num_encoder_layers
-        model_config.hidden_size = hidden_size
-        model_config.intermediate_size = hidden_size * 4
-        model_config.max_position_embeddings = max_position_embeddings  # full dataset requires > 512
-        model_config.num_attention_heads = num_attention_heads
+        self.embed_scale = math.sqrt(location_embedding.embedding_dim)
 
-        self.bert_model = BertEncoder(model_config)
+        # up projection (shared)
+        self.input_up_proj = input_up_proj
 
-    def forward(self, x, padding_mask):
-        return self.bert_model(x, attention_mask=padding_mask[:, None, None, :]).last_hidden_state
+        # position embeddings (shared)
+        max_positions = 512
+        self.register_buffer("position_ids", torch.arange(max_positions).expand((1, -1)))
+        self.position_embedding = position_embedding
+
+        # context model for embedding
+        self.context_model = ContextModel(
+            location_embedding.embedding_dim, hidden_size, embed_xy, embed_poi, poi_dim=poi_dim, device=device
+        )
+
+        #
+        self.LayerNorm = nn.LayerNorm(hidden_size)
+        self.dropout = nn.Dropout(dropout)
+
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=num_attention_heads)
+        encoder_norm = nn.LayerNorm(hidden_size)
+        self.model = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers, norm=encoder_norm)
+
+    def forward(self, src_tokens, context=None):
+        x = self.forward_embedding(src_tokens, context)
+
+        # B x T, True will be ignored
+        encoder_padding_mask = src_tokens.eq(self.padding_idx)
+
+        # B x T x C -> T x B x C
+        x = x.transpose(0, 1)
+
+        # decoder model
+        hidden = self.model(x, src_key_padding_mask=encoder_padding_mask)
+
+        return {
+            "encoder_out": hidden,  # T x B x C
+            "encoder_padding_mask": encoder_padding_mask,  # B x T
+        }
+
+    def forward_embedding(self, src_tokens, context=None):
+        token_embedding = self.location_embedding(src_tokens)
+        x = self.embed_scale * token_embedding
+
+        # up-projection
+        x = self.input_up_proj(x)
+
+        # context
+        x = self.context_model(x, context)
+
+        # position_embeddings
+        seq_length = x.size(1)
+        position_ids = self.position_ids[:, :seq_length]
+        x = x + self.position_embedding(position_ids)
+
+        #
+        x = self.dropout(self.LayerNorm(x))
+
+        return x
+
+
+class TransDecoder(nn.Module):
+    def __init__(
+        self,
+        num_decoder_layers=2,
+        hidden_size=768,
+        num_attention_heads=12,
+        dropout=0,
+        location_embedding=None,
+        position_embedding=None,
+        input_up_proj=None,
+        output_down_proj=None,
+        self_cond=False,
+    ):
+        super().__init__()
+
+        # up projection (shared)
+        self.input_up_proj = input_up_proj
+        self.output_down_proj = output_down_proj
+
+        self.location_embedding = location_embedding
+        self.embed_scale = math.sqrt(location_embedding.embedding_dim)
+
+        self.hidden_size = hidden_size
+        self.time_embed = nn.Sequential(
+            nn.Linear(self.hidden_size, self.hidden_size * 4),
+            nn.ReLU(),
+            nn.Linear(self.hidden_size * 4, self.hidden_size),
+        )
+        # position embeddings (shared)
+        max_positions = 512
+        self.register_buffer("position_ids", torch.arange(max_positions).expand((1, -1)))
+        self.position_embedding = position_embedding
+
+        self.self_cond = self_cond
+        if self_cond:
+            self_cond_dim = location_embedding.embedding_dim
+            self.self_cond_proj = nn.Sequential(
+                nn.Linear(self_cond_dim * 2, self_cond_dim),
+                nn.ReLU(),
+                nn.Linear(self_cond_dim, self_cond_dim),
+                nn.Dropout(dropout),
+            )
+        #
+        self.LayerNorm = nn.LayerNorm(hidden_size)
+        self.dropout = nn.Dropout(dropout)
+
+        #
+        decoder_layer = nn.TransformerDecoderLayer(d_model=hidden_size, nhead=num_attention_heads)
+        decoder_norm = nn.LayerNorm(hidden_size)
+        self.model = nn.TransformerDecoder(decoder_layer, num_layers=num_decoder_layers, norm=decoder_norm)
+
+    def forward_embedding(self, tgt_tokens):
+        # up-projection
+        embed = self.embed_scale * self.location_embedding(tgt_tokens)
+
+        return embed
+
+    def forward_hidden(self, z_t, t, prev_z_0_hat=None):
+        seq_length = z_t.size(1)
+
+        if self.self_cond:
+            cat_embed = torch.cat((z_t, prev_z_0_hat), dim=-1)
+            hidden = self.input_up_proj(self.self_cond_proj(cat_embed))
+        else:
+            hidden = self.input_up_proj(z_t)
+
+        # time embedding
+        timestep_embed = timestep_embedding(t, self.hidden_size)
+        emb_t = self.time_embed(timestep_embed)
+        hidden = hidden + emb_t.unsqueeze(1).expand(-1, seq_length, -1)
+
+        # position embedding
+        position_ids = self.position_ids[:, :seq_length]
+        hidden = hidden + self.position_embedding(position_ids)
+
+        # embedding normalization
+        hidden = self.dropout(self.LayerNorm(hidden))
+        return hidden
+
+    def forward(self, z_t, t, padding_mask, encoder_out, prev_z_0_hat=None):
+        hidden = self.forward_hidden(z_t, t, prev_z_0_hat)
+
+        # B x T x C -> T x B x C
+        hidden = hidden.transpose(0, 1)
+
+        hidden = self.model(
+            tgt=hidden,
+            memory=encoder_out["encoder_out"],
+            tgt_key_padding_mask=~padding_mask,
+            memory_key_padding_mask=encoder_out["encoder_padding_mask"],
+        )
+
+        # T x B x C -> B x T x C
+        hidden = hidden.transpose(0, 1)
+
+        hidden = self.output_down_proj(hidden)
+        return hidden
 
 
 class TransformerNetModel(nn.Module):
@@ -187,174 +366,211 @@ class TransformerNetModel(nn.Module):
 
     def __init__(
         self,
-        input_dims,
-        num_encoder_layers,
-        hidden_size=768,
-        num_attention_heads=12,
-        dropout=0,
-        max_location=None,
-        learned_mean_embed=False,
-        loaded_embed=None,
-        embed_xy=False,
-        embed_poi=False,
-        poi_dims=32,
-        diffuse_duration=False,
-        device="",
+        model_args=None,
+        diff_args=None,
     ):
         super().__init__()
 
-        max_position_embeddings = 768
+        self.model_args = model_args
+        self.diff_args = diff_args
 
-        self.input_dims = input_dims
-        self.output_dims = input_dims
-        self.hidden_size = hidden_size
-        self.diffuse_duration = diffuse_duration
+        max_positions = 512
 
-        # context model for embedding
-        self.context_model = ContextModel(
-            self.input_dims, self.hidden_size, embed_xy, embed_poi, poi_dims=poi_dims, device=device
+        # location embedding
+        self.location_embedding = nn.Embedding(model_args.max_location, model_args.input_dims, padding_idx=0)
+        self.input_up_proj = nn.Linear(model_args.input_dims, model_args.hidden_size, bias=False)
+        # position embedding
+        self.position_embedding = nn.Embedding(max_positions, model_args.hidden_size)
+
+        # out
+        self.output_down_proj = nn.Linear(model_args.hidden_size, model_args.input_dims, bias=False)
+
+        # encoder
+        self.encoder = TransEncoder(
+            num_encoder_layers=model_args.num_layers,
+            hidden_size=model_args.hidden_size,
+            num_attention_heads=model_args.num_attention_heads,
+            dropout=model_args.dropout,
+            location_embedding=self.location_embedding,
+            position_embedding=self.position_embedding,
+            input_up_proj=self.input_up_proj,
+            embed_xy=model_args.if_embed_xy,
+            embed_poi=model_args.if_embed_poi,
+            poi_dim=model_args.poi_dim,
+            device=model_args.device,
         )
-        # main model
-        self.loc_bert = BERTModelWrapper(
-            dropout, num_encoder_layers, hidden_size, max_position_embeddings, num_attention_heads
+
+        # decoder
+        self.decoder = TransDecoder(
+            num_decoder_layers=model_args.num_layers,
+            hidden_size=model_args.hidden_size,
+            num_attention_heads=model_args.num_attention_heads,
+            dropout=model_args.dropout,
+            location_embedding=self.location_embedding,
+            position_embedding=self.position_embedding,
+            input_up_proj=self.input_up_proj,
+            output_down_proj=self.output_down_proj,
+            self_cond=diff_args.self_cond,
         )
-        if self.diffuse_duration:
-            self.duration_up = nn.Sequential(nn.Linear(1, input_dims), nn.Tanh(), nn.Linear(input_dims, 128))
-            self.dur_time_embed = nn.Sequential(
-                nn.Linear(input_dims, input_dims * 4), nn.SiLU(), nn.Linear(input_dims * 4, 128)
-            )
-            self.dur_position_embed = nn.Embedding(max_position_embeddings, 128)
-            self.dur_LN = nn.LayerNorm(128)
-            self.dur_drop = nn.Dropout(dropout)
 
-            self.duration_bert = BERTModelWrapper(
-                dropout,
-                num_encoder_layers=2,
-                hidden_size=128,
-                max_position_embeddings=max_position_embeddings,
-                num_attention_heads=8,
-            )
-            self.mha_dur = nn.MultiheadAttention(128, 8, batch_first=True)
-            self.comb_dur = nn.Sequential(
-                nn.Linear(256, 128),
-                nn.LayerNorm(128),
-                nn.ReLU(),
-                nn.Linear(128, 128),
-                nn.LayerNorm(128),
-                nn.Dropout(0.1),
-            )
-            self.mha_loc = nn.MultiheadAttention(128, 8, batch_first=True)
-            self.comb_loc = nn.Sequential(
-                nn.Linear(256, 128),
-                nn.LayerNorm(128),
-                nn.ReLU(),
-                nn.Linear(128, 128),
-                nn.LayerNorm(128),
-                nn.Dropout(0.1),
-            )
-            self.duration_head = nn.Linear(128, 1)
-
-        # embed input
-        # timestep embedding
-        self.time_embed = nn.Linear(input_dims, self.hidden_size, bias=False)
-        self.register_buffer("position_ids", torch.arange(max_position_embeddings).expand((1, -1)))
-        self.position_embeddings = nn.Embedding(max_position_embeddings, self.hidden_size)
-        self.LayerNorm = nn.LayerNorm(self.hidden_size)
-        self.dropout = nn.Dropout(dropout)
-
-        self.output_down_proj = nn.Linear(self.hidden_size, input_dims, bias=False)
-
-        # embeds and heads
-        if loaded_embed is not None:
-            self.token_embedding = nn.Embedding.from_pretrained(torch.tensor(loaded_embed))
-        else:
-            self.token_embedding = nn.Embedding(max_location, self.input_dims)
-        self.lm_head = nn.Linear(self.input_dims, max_location)
+        self.lm_head = nn.Linear(model_args.input_dims, model_args.max_location, bias=False)
         with torch.no_grad():
-            self.lm_head.weight = self.token_embedding.weight
+            self.lm_head.weight = self.location_embedding.weight
 
-        if learned_mean_embed:
-            self.mean_embed = nn.Parameter(torch.randn(input_dims))
-            nn.init.normal_(self.mean_embed, mean=0, std=input_dims**-0.5)
-        else:
-            self.mean_embed = None
+        self.training_diffusion = GaussianDiffusion(
+            betas=get_named_beta_schedule(
+                diff_args.noise_schedule,
+                diff_args.diffusion_steps,
+                diff_args.rescaling_factor,
+            ),
+            model_mean_type=None,
+            model_var_type=None,
+            loss_type=None,
+        )
+
+        # so we have different schedules in training and decoding
+        self.decoding_diffusion = SpacedDiffusion(
+            space_timesteps(diff_args.diffusion_steps, str(diff_args.decoding_steps)),
+            betas=get_named_beta_schedule(
+                diff_args.decoding_noise_schedule,
+                diff_args.diffusion_steps,
+                diff_args.decoding_rescaling_factor,
+            ),
+            model_mean_type=None,
+            model_var_type=None,
+            loss_type=None,
+        )
+
+        self.timesteps_scale = (1000.0 / diff_args.diffusion_steps) if diff_args.rescale_timesteps else 1.0
 
     def get_embeds(self, input_ids):
-        return self.token_embedding(input_ids)
+        return self.location_embedding(input_ids)
 
     def get_logits(self, hidden_repr):
         return self.lm_head(hidden_repr)
 
-    def forward(self, x, context, timesteps, padding_mask):
-        """
-        Apply the model to an input batch.
+    def forward(self, src, tgt, src_ctx, tgt_cxt, t):
+        """Compute training losses"""
 
-        :param x: an [N x C x ...] Tensor of inputs.
-        :param timesteps: a 1-D batch of timesteps.
-        :return: an [N x C x ...] Tensor of outputs.
-        """
-        timestep_embed = timestep_embedding(timesteps, self.input_dims)
-        emb_t = self.time_embed(timestep_embed)
+        # encoding
+        encoder_out = self.encoder(src, context=src_ctx)
 
-        # combine x and context (xy and poi)
-        emb_x = self.context_model(x, context)
+        # padding_mask B x T
+        mask = tgt.ne(0)
 
-        seq_length = x.size(1)
-        position_ids = self.position_ids[:, :seq_length]
-        #
-        emb_inputs = self.position_embeddings(position_ids) + emb_x + emb_t.unsqueeze(1).expand(-1, seq_length, -1)
-        emb_inputs = self.dropout(self.LayerNorm(emb_inputs))
+        # diffusion
+        z_0 = self.decoder.forward_embedding(tgt)
+        model_t = t * self.timesteps_scale
 
-        # the model
-        input_trans_hidden_states = self.loc_bert(emb_inputs, padding_mask)
+        noise = torch.randn_like(z_0) * self.diff_args.rescaling_factor
+        # reparametrization trick
+        z_t = self.training_diffusion.q_sample(z_0, t, noise).type_as(z_0)
 
-        loc = self.output_down_proj(input_trans_hidden_states)
+        # self-conditioning
+        prev_z_0_hat = torch.zeros_like(z_0)
+        if self.diff_args.self_cond and random() < 0.5:
+            with torch.no_grad():
+                prev_z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat).detach()
 
-        if self.diffuse_duration:
-            # input
-            dur_inputs = self.duration_up(context["duration"])
-            dur_inputs = (
-                self.dur_position_embed(position_ids)
-                + dur_inputs
-                + self.dur_time_embed(timestep_embed).unsqueeze(1).expand(-1, seq_length, -1)
-            )
-            dur_inputs = self.dur_drop(self.dur_LN(dur_inputs))
-            # model
-            dur_hidden = self.duration_bert(dur_inputs, padding_mask)
-            # cross attention
-            attn_loc, _ = self.mha_loc(loc, dur_hidden, dur_hidden, key_padding_mask=(1 - padding_mask).to(bool))
-            loc = loc + self.comb_loc(torch.cat([loc, attn_loc], dim=-1))
+        # model use z_t to predict z_0
+        z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat)
+        logits = self.get_logits(z_0 if self.diff_args.rounding_loss else z_0_hat)
 
-            attn_dur, _ = self.mha_dur(dur_hidden, loc, loc, key_padding_mask=(1 - padding_mask).to(bool))
-            dur_hidden = dur_hidden + self.comb_dur(torch.cat([dur_hidden, attn_dur], dim=-1))
+        terms = {}
 
-            # prediction
-            dur = self.duration_head(dur_hidden)
+        # Lt
+        terms["mse"] = mean_flat((z_0_hat - z_0).square(), mask)
 
-            dur = dur.type(x.dtype)
-            loc = loc.type(x.dtype)
-            return loc, dur
-        else:
-            loc = loc.type(x.dtype)
-            return loc
+        # Rounding error: embedding regularization
+        decoder_nll = token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
+
+        terms["loss"] = terms["mse"] + decoder_nll
+
+        return terms
+
+    def forward_decoder(self, z_t, step, mask, encoder_out, prev_z_0_hat=None):
+        """Sample z_{t-1} given z_t"""
+
+        # rescale timesteps
+        model_t = self.decoding_diffusion.timestep_map[step] * self.timesteps_scale
+        model_t = torch.full([len(z_t)], model_t, device=z_t.device)
+
+        # predict z_0
+        z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat)
+
+        # clamping trick
+        if self.diff_args.clamping:
+            tokens = self.get_logits(z_0_hat).argmax(-1)
+            z_0_hat = self.decoder.forward_embedding(tokens)
+
+        # sample z_{t-1}
+        t = torch.tensor(step, device=z_t.device)
+        mean, _, log_variance = self.decoding_diffusion.q_posterior_mean_variance(z_0_hat, z_t, t)
+        noise = torch.randn_like(z_t) * self.diff_args.decoding_rescaling_factor
+
+        z_t = mean + (0.5 * log_variance).exp() * noise
+        z_t = z_t.type_as(z_0_hat)
+
+        return z_t, z_0_hat
+
+    def forward_output_layer(self, z_t):
+        scores, tokens = self.get_logits(z_t).log_softmax(-1).max(-1)
+        return tokens, scores
 
 
-def timestep_embedding(timesteps, dim, max_period=10000):
+def token_discrete_loss(logits, input_ids, mask=None, label_smoothing=0):
     """
-    Create sinusoidal timestep embeddings.
-
-    :param timesteps: a 1-D Tensor of N indices, one per batch element.
-                      These may be fractional.
-    :param dim: the dimension of the output.
-    :param max_period: controls the minimum frequency of the embeddings.
-    :return: an [N x dim] Tensor of positional embeddings.
+    the loss of -log p(w|z_0)
+    :param x_start_mean: word embedding
+    :return: x_0
     """
-    half = dim // 2
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(
-        device=timesteps.device
-    )
-    args = timesteps[:, None].float() * freqs[None]
-    embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-    if dim % 2:
-        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
-    return embedding
+    loss_fct = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=0, label_smoothing=label_smoothing)
+    decoder_nll = loss_fct(logits.view(-1, logits.size(-1)), input_ids.view(-1)).view(input_ids.shape)
+    if mask is not None:
+        decoder_nll *= mask
+        decoder_nll = decoder_nll.sum(dim=-1) / mask.sum(dim=-1)
+    else:
+        decoder_nll = decoder_nll.mean(dim=-1)
+
+    return decoder_nll
+
+
+def mean_flat(tensor, padding_mask=None):
+    """
+    Take the mean over all non-batch dimensions.
+    """
+    if padding_mask is None:
+        return tensor.mean(dim=list(range(1, len(tensor.shape))))
+    else:
+        padding_mask = torch.broadcast_to(padding_mask.unsqueeze(dim=-1), tensor.shape)
+        tensor *= padding_mask
+        return tensor.sum(dim=list(range(1, len(tensor.shape)))) / padding_mask.sum(
+            dim=list(range(1, len(tensor.shape)))
+        )
+
+
+def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, rescaling_factor=1):
+    """
+    Get a pre-defined beta schedule for the given name.
+
+    The beta schedule library consists of beta schedules which remain similar
+    in the limit of num_diffusion_timesteps.
+    Beta schedules may be added, but should not be removed or changed once
+    they are committed to maintain backwards compatibility.
+    """
+
+    if schedule_name == "sqrt":
+        shift = 0.0001
+
+        def alpha_bar(t):
+            return 1 - np.sqrt(t + shift)
+
+    else:
+        raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
+
+    f2 = rescaling_factor**2
+
+    def rescaled_alpha_bar(t):
+        return alpha_bar(t) / (f2 - (f2 - 1) * alpha_bar(t))
+
+    return betas_for_alpha_bar(num_diffusion_timesteps, rescaled_alpha_bar)

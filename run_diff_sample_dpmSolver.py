@@ -108,8 +108,8 @@ def main():
 
     try:
         while True:
-            _, cond = next(data_valid)
-            all_test_data.append(cond)
+            inputs = next(data_valid)
+            all_test_data.append(inputs)
 
     except StopIteration:
         print("### End of reading iteration...")
@@ -157,41 +157,18 @@ def main():
     else:
         dpm_solver = DPM_Solver(model_fn, noise_schedule, algorithm_type="dpmsolver++")
 
-    for cond in tqdm(all_test_data):
-        input_ids_x = cond.pop("input_ids").to(dist_util.get_device())
+    for inputs in tqdm(all_test_data):
+        src, tgt, src_ctx, tgt_cxt = inputs
+        src = src.to(dist_util.get_device()).long()
+        tgt = tgt.to(dist_util.get_device()).long()
 
-        x_start = model.get_embeds(input_ids_x)
+        encoder_out = model.encoder(src)
 
-        # padding_mask
-        max_len = input_ids_x.shape[1]
-        lens = cond.pop("len").to(dist_util.get_device()).int()
-        padding_mask = (
-            th.arange(max_len).expand(len(lens), max_len).to(dist_util.get_device()) < lens.unsqueeze(1)
-        ) * 1
-        # padding_mask = (input_ids_x != 0) * 1
+        # padding_mask B x T
+        mask = tgt.ne(0)
 
-        input_ids_mask = cond.pop("input_mask")
-        input_ids_mask_ori = input_ids_mask
-
-        # noise input_xys
-        context = {}
-        if "input_xys" in cond:
-            input_xys = cond.pop("input_xys").to(dist_util.get_device()).float()
-            zeros = th.zeros_like(input_xys)
-            xy_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(dist_util.get_device())
-            context["xy"] = th.where(xy_mask == 0, input_xys, zeros)
-
-        if "input_poi" in cond:
-            input_poi = cond.pop("input_poi").to(dist_util.get_device()).float()
-
-            noise = th.randn_like(input_poi)
-            poi_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_poi.shape).to(dist_util.get_device())
-            context["poi"] = th.where(poi_mask == 0, input_poi, noise)
-
-        # noise x_start
-        noise = th.randn_like(x_start)
-        x_mask = th.broadcast_to(input_ids_mask.unsqueeze(dim=-1), x_start.shape).to(dist_util.get_device())
-        x_noised = th.where(x_mask == 0, x_start, noise)
+        z_0 = model.decoder.forward_embedding(tgt)
+        noise = th.randn_like(z_0) * config.rescaling_factor
 
         # adding or not does not influence the results
         # if model.mean_embed is not None:
@@ -204,15 +181,13 @@ def main():
         ## And steps = 20 can almost converge.
         with autocast():
             x_sample = dpm_solver.sample(
-                x_noised,
-                x_context=context,
+                noise,
+                encoder_out=encoder_out,
                 steps=SOLVER_STEP,
-                order=2,
+                order=1,
                 skip_type="time_uniform",
                 method="multistep",
-                input_mask=input_ids_mask,
-                x_start=x_start,
-                padding_mask=padding_mask,
+                padding_mask=mask,
             )
         # print(x_sample[0].shape) # samples for each step [128, 128]
 
@@ -232,24 +207,22 @@ def main():
         logits = model.get_logits(reshaped_x_t)  # bsz, seqlen, vocab
         cands = th.topk(logits, k=1, dim=-1).indices
 
-        loc_ls_pred = []
-        loc_ls_true = []
-        loc_ls_input = []
+        pred_ls = []
+        true_ls = []
+        input_ls = []
 
-        curr_seq_len = x_start.shape[1]
-        for seq_pred, seq_ref, input_mask in zip(cands, input_ids_x, input_ids_mask_ori):
-            len_x = int(curr_seq_len - sum(input_mask).tolist())
-            loc_ls_pred.append(seq_pred[len_x:].detach().cpu().numpy())
+        for seq_pred, seq_src, seq_tgt in zip(cands, src, tgt):
+            pred_ls.append(seq_pred.detach().cpu().numpy())
 
-            loc_ls_true.append(seq_ref[len_x:].detach().cpu().numpy())
-            loc_ls_input.append(seq_ref[:len_x].detach().cpu().numpy())
+            true_ls.append(seq_src.detach().cpu().numpy())
+            input_ls.append(seq_tgt.detach().cpu().numpy())
 
         for i in range(world_size):
             if i == rank:  # Write files sequentially
                 fout = open(out_path, "a")
-                for recov, ref, src in zip(loc_ls_pred, loc_ls_true, loc_ls_input):
+                for recov, src, tgt in zip(pred_ls, input_ls, true_ls):
                     print(
-                        json.dumps({"recover": recov, "reference": ref, "source": src}, cls=NumpyArrayEncoder),
+                        json.dumps({"recover": recov, "reference": tgt, "source": src}, cls=NumpyArrayEncoder),
                         file=fout,
                     )
                 fout.close()

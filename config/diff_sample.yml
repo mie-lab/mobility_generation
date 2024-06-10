@@ -2,36 +2,35 @@ misc:
   dataset: mobis
 
 
-  dataset_variation: small
-  level: "10_13"
+  dataset_variation: all
+  level: 13
   src_min_days: 14
   tgt_min_days: 7
 
   # normal
-  # clip_denoised: False
-  # clamp_step: 500
-  # step: 2000
+  clamping: True
+  decoding_steps: 200
+  decoding_rescaling_factor: 1
   # DPM
-  clip_denoised: False
-  clamp: False
-  step: 20
-  start_n: 0
+  # clip_denoised: False
+  # clamp: False
+  # step: 20
+  # start_n: 0
   # 
   split: test
-  top_p: 0
-  model_path: ./runs/mobis_diffseq_base_v2_103
-  trained_model_name: model_ema_70.pt
+
+  model_path: ./runs/mobis_na_all_layer6_cond_13
+  trained_model_name: model_ema_150.pt
   pre_train_embed: None # ./data/matrix/loc_embedding.pk
 
   # seq_len: 512
-  max_location: 14883
+  # max_location: 14883
 
   seed: 101
   
-  batch_size: 128
+  batch_size: 256
   num_workers: 0
-  
-  networkName: diffseq
+
 dataset:
   data_dir: ./data/diff
   save_root: ./runs

@@ -1,8 +1,3 @@
-"""
-Generate a large batch of image samples from a model and save them as a large
-numpy array. This can be used to produce samples for FID evaluation.
-"""
-
 import argparse
 import os
 import json
@@ -20,8 +15,7 @@ import datetime
 import time
 from tqdm import tqdm
 
-
-from generative.diff.diff_utils import create_model_and_diffusion, denoised_fn_round
+from generative.diff.diff_utils import create_model
 from generative.dataloader import load_data_diffusion
 from utils import dist_util, logger
 from utils.utils import setup_seed, load_config, init_save_path
@@ -41,6 +35,14 @@ def main():
     args = parser.parse_args()
     config = load_config(args.config)
     config = edict(config)
+    # load configurations.
+    config_path = os.path.join(os.path.join(config.model_path, "training_args.json"))
+    print(config_path)
+    # sys.setdefaultencoding('utf-8')
+    with open(config_path, "rb") as f:
+        training_args = json.load(f)
+    config = {**training_args, **config}
+    config = edict(config)
 
     setup_seed(config.seed)
     dist_util.setup_dist()
@@ -53,44 +55,19 @@ def main():
 
     logger.configure(dir=log_dir)
 
-    # load configurations.
-    config_path = os.path.join(os.path.join(config.model_path, "training_args.json"))
-    print(config_path)
-    # sys.setdefaultencoding('utf-8')
-    with open(config_path, "rb") as f:
-        training_args = json.load(f)
-    training_args["batch_size"] = config.batch_size
-    training_args["dataset_variation"] = config.dataset_variation
-    training_args["data_dir"] = config.data_dir
-    training_args["pre_train_embed"] = config.pre_train_embed
-    training_args["save_root"] = config.save_root
-    training_args["split"] = config.split
-    CUDA_VISIBLE_DEVICES = int(os.environ["LOCAL_RANK"])
-    config.__dict__.update(training_args)
-    config.device = f"cuda:{CUDA_VISIBLE_DEVICES}"
-
     logger.log("### Creating model and diffusion...")
-    model, diffusion = create_model_and_diffusion(config)
+    config.device = dist_util.get_device()
+    model = create_model(config)
 
     checkpoint = dist_util.load_state_dict(
         os.path.join(config.model_path, config.trained_model_name), map_location="cpu"
     )
-    model.load_state_dict(checkpoint["model"])
+    model.load_state_dict(checkpoint["ema"])
 
     pytorch_total_params = sum(p.numel() for p in model.parameters())
     logger.log(f"### The parameter count is {pytorch_total_params}")
 
     model.eval().requires_grad_(False).to(dist_util.get_device())
-
-    model_emb = (
-        torch.nn.Embedding(
-            num_embeddings=config.max_location,
-            embedding_dim=config.hidden_dim,
-            _weight=model.token_embedding.weight.clone().cpu(),
-        )
-        .eval()
-        .requires_grad_(False)
-    )
 
     print("### Sampling...on", config.split)
 
@@ -105,118 +82,58 @@ def main():
 
     start_t = time.time()
 
-    out_path = os.path.join(log_dir, f"seed{config.seed}_step{config.clamp_step}.json")
+    out_path = os.path.join(log_dir, f"seed{config.seed}_step{config.decoding_steps}.json")
 
     all_test_data = []
 
-    idx = 0
     try:
         while True:
-            _, cond = next(data_valid)
-            # print(batch.shape)
-            if idx % world_size == rank:  # Split data per nodes
-                all_test_data.append(cond)
-            idx += 1
+            inputs = next(data_valid)
+            all_test_data.append(inputs)
 
     except StopIteration:
         print("### End of reading iteration...")
 
-    model_emb.to(dist_util.get_device())
-
-    if idx % world_size and rank >= idx % world_size:
-        all_test_data.append({})  # Dummy data for Remainder : for dist.barrier()
-
-    if rank == 0:
-        iterator = tqdm(all_test_data)
-    else:
-        iterator = iter(all_test_data)
-
     device = dist_util.get_device()
-    for cond in iterator:
-        if not cond:  # Barrier for Remainder
-            for i in range(world_size):
-                dist.barrier()
-            continue
+    for inputs in tqdm(all_test_data):
+        src, tgt, src_ctx, tgt_cxt = inputs
+        src = src.to(device).long()
+        tgt = tgt.to(device).long()
+        src_ctx = {k: v.to(device) for k, v in src_ctx.items()}
 
-        input_ids = cond.pop("input_ids").to(device)
-        x_start = model.get_embeds(input_ids)
+        encoder_out = model.encoder(src, context=src_ctx)
 
-        # padding_mask
-        max_len = input_ids.shape[1]
-        lens = cond.pop("len").to(device).int()
-        padding_mask = (torch.arange(max_len).expand(len(lens), max_len).to(device) < lens.unsqueeze(1)) * 1
+        # padding_mask B x T
+        mask = torch.ones_like(tgt) == 1
 
-        input_ids_mask = cond.pop("input_mask").to(device)
-        input_ids_mask_ori = input_ids_mask
+        # initialize
+        z_0 = model.decoder.forward_embedding(tgt)
+        z_t = torch.randn_like(z_0) * config.decoding_rescaling_factor
+        z_t = z_t.to(encoder_out["encoder_out"])
 
-        context = {}
-        # noise input_xys
-        if "input_xys" in cond:
-            input_xys = cond.pop("input_xys").to(device).float()
-            noise = torch.randn_like(input_xys)
-            xy_mask = torch.broadcast_to(input_ids_mask.unsqueeze(dim=-1), input_xys.shape).to(device)
-            context["xy"] = torch.where(xy_mask == 0, input_xys, noise)
+        # self-conditioning
+        prev_z_0_hat = torch.zeros_like(z_t)
+        for step in list(range(config.decoding_steps))[::-1]:
+            z_t, prev_z_0_hat = model.forward_decoder(z_t, step, mask, encoder_out, prev_z_0_hat)
 
-        # noise x_start
-        noise = torch.randn_like(x_start)
-        x_mask = torch.broadcast_to(input_ids_mask.unsqueeze(dim=-1), x_start.shape).to(device)
-        x_noised = torch.where(x_mask == 0, x_start, noise)
+        samples, scores = model.forward_output_layer(prev_z_0_hat)
 
-        model_kwargs = {}
+        pred_ls = []
+        tgt_ls = []
+        src_ls = []
 
-        if config.step == config.diffusion_steps:
-            config.use_ddim = False
-            step_gap = 1
-        else:
-            config.use_ddim = True
-            step_gap = config.diffusion_steps // config.step
+        for seq_pred, seq_src, seq_tgt in zip(samples, src, tgt):
+            pred_ls.append(seq_pred.detach().cpu().numpy())
 
-        sample_fn = diffusion.p_sample_loop
-
-        # [batch, seq_len, hidden_dim]
-        curr_seq_len = x_start.shape[1]
-        sample_shape = (x_start.shape[0], curr_seq_len, config.hidden_dim)
-
-        with autocast():
-            samples = sample_fn(
-                model,
-                context,
-                sample_shape,
-                noise=x_noised,
-                clip_denoised=config.clip_denoised,
-                denoised_fn=partial(denoised_fn_round, config, model_emb),
-                model_kwargs=model_kwargs,
-                top_p=config.top_p,
-                clamp_step=config.clamp_step,
-                clamp_first=False,
-                mask=input_ids_mask,
-                padding_mask=padding_mask,
-                x_start=x_start,
-                gap=step_gap,
-            )
-        # only get the latest timestep ()
-        sample = samples[-1]
-
-        logits = model.get_logits(sample)  # bsz, seqlen, vocab
-        cands = torch.topk(logits, k=1, dim=-1).indices
-
-        loc_ls_pred = []
-        loc_ls_true = []
-        loc_ls_input = []
-
-        for seq_pred, seq_ref, input_mask in zip(cands, input_ids, input_ids_mask_ori):
-            len_x = int(curr_seq_len - sum(input_mask).tolist())
-            loc_ls_pred.append(seq_pred[len_x:].detach().cpu().numpy())
-
-            loc_ls_true.append(seq_ref[len_x:].detach().cpu().numpy())
-            loc_ls_input.append(seq_ref[:len_x].detach().cpu().numpy())
+            tgt_ls.append(seq_tgt.detach().cpu().numpy())
+            src_ls.append(seq_src.detach().cpu().numpy())
 
         for i in range(world_size):
             if i == rank:  # Write files sequentially
                 fout = open(out_path, "a")
-                for recov, ref, src in zip(loc_ls_pred, loc_ls_true, loc_ls_input):
+                for recov, tgt, src in zip(pred_ls, tgt_ls, src_ls):
                     print(
-                        json.dumps({"recover": recov, "reference": ref, "source": src}, cls=NumpyArrayEncoder),
+                        json.dumps({"recover": recov, "target": tgt, "source": src}, cls=NumpyArrayEncoder),
                         file=fout,
                     )
                 fout.close()

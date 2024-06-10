@@ -3,25 +3,25 @@ misc:
 
   wandb_name: test
   split: train
-  dataset_variation: tiny
-  level: "10_13"
+  dataset_variation: tiny 
+  level: 13
   src_min_days: 14
   tgt_min_days: 7
 
   # seq_len: 512
-  # 14882 + 1 (28743 + 1) for seperation
-  max_location: 14883 # 28744, 14883
+  # 14882 (28743)
+  max_location: 14882 # 28743, 14882
 
   seed: 101
   # 
-  if_embed_xy: False
-  if_embed_poi: False
+  if_embed_xy: True
+  if_embed_poi: True
   if_diffuse_duration: False
   
   batch_size: 512
-  microbatch: 32
-  log_interval: 10
-  num_workers: 16
+  microbatch: 64
+  log_interval: 100
+  num_workers: 24
   
 fp16:
   use_fp16: True
@@ -29,55 +29,53 @@ fp16:
 
 embedding:
   pre_train_embed: None #./data/matrix/loc_embedding.pk
-  hidden_dim: 128
+  input_dims: 128
   poi_dim: 32
 
+sampler:
+  schedule_sampler: lossaware
+
 diffusion:
-  networkName: diffseq
-  predict_xstart: True
+  networkName: na
   rescale_timesteps: True
   diffusion_steps: 2000
   noise_schedule: sqrt
-  schedule_sampler: lossaware
-  rescaling_factor: 4
+  rescaling_factor: 1
 
-  learned_mean_embed: False
-  emb_scale_factor: 1.0
-  denoise: False
-  denoise_rate: 0.5
-  rejection_rate: 0.0
-  reg_rate: 0.0
-  device: ""
-  data_split_num: 0
+  rounding_loss: True
+  self_cond: True
 
-  timestep_respacing: ""
+  decoding_steps: 20
+  decoding_noise_schedule: sqrt
+  decoding_rescaling_factor: 1
+  clamping: False
 
 model:
   # 
-  num_encoder_layers: 2
-  hidden_size: 768
-  num_attention_heads: 12
+  num_layers: 2
+  hidden_size: 512
+  num_attention_heads: 8
   dropout: 0.1
 
 
 
 optimiser:
-  lr: 0.0005
+  lr: 0.001
   weight_decay: 0.01
   ema_rate: 0.9999
-  gradient_clipping: 3
+  gradient_clipping: 1
 
   # for warmup
   warmup_epochs: 3
-  decay_epochs: 0
+  decay_epochs: 150
 
   # training
-  max_epochs: 120
-  save_epochs: 2
+  max_epochs: 150
+  save_epochs: 5
 
   # 
   load_checkpoint: False
-  checkpoint_path: ./runs/mobis_diffseq_17165500
+  checkpoint_path: ./runs/mobis_na_all_layer2_cond_13
   load_opt: True
 
 dataset:

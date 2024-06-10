@@ -302,8 +302,9 @@ def load_data_diffusion(
             dataset,
             batch_size=batch_size,
             shuffle=False,
-            num_workers=0,
+            num_workers=data_args.num_workers,
             collate_fn=collate_fn,
+            pin_memory=True,
         )
     else:
         sampler = DistributedSampler(dataset, shuffle=shuffle)
@@ -311,8 +312,9 @@ def load_data_diffusion(
             dataset,
             batch_size=batch_size,
             sampler=sampler,
-            num_workers=0,
+            num_workers=data_args.num_workers,
             collate_fn=collate_fn,
+            pin_memory=True,
         )
 
     return data_loader
@@ -322,62 +324,64 @@ def process_helper_fnc(seq_ls, split):
     seq_dataset = Dataset2.from_dict(seq_ls)
 
     def merge_and_mask(ls):
-        lst = []
-        lst_xy = []
-        durations = []
-        mask = []
+        MAX_LEN = 512
+        GENERATE_LEN = 50
+
+        src_ls = []
+        src_xy_ls = []
+        src_duration_ls = []
+
+        tgt_ls = []
+        tgt_duration_ls = []
 
         for i in range(len(ls["src"])):
             src = ls["src"][i]
             src_xy = ls["src_xy"][i]
             src_duration = ls["src_duration"][i]
             tgt = ls["tgt"][i]
-            tgt_xy = ls["tgt_xy"][i]
             tgt_duration = ls["tgt_duration"][i]
 
+            # for src
+            len_src = len(src)
+            if len_src > MAX_LEN:
+                src = src[(len_src - MAX_LEN) :]
+                src_xy = src_xy[(len_src - MAX_LEN) :]
+                src_duration = src_duration[(len_src - MAX_LEN) :]
+
+            # for tgt
             if split == "test":
                 ori_len = len(tgt)
-                if ori_len < 50:
-                    tgt = tgt + [0] * (50 - ori_len)
-
-                    remain = []
-                    for _ in range(50 - ori_len):
-                        remain.append([0, 0])
-                    tgt_xy = tgt_xy + remain
-
-                    tgt_duration = tgt_duration + [0] * (50 - ori_len)
+                if ori_len < GENERATE_LEN:  # pad with 0s to GENERATE_LEN
+                    tgt = tgt + [0] * (GENERATE_LEN - ori_len)
+                    tgt_duration = tgt_duration + [0] * (GENERATE_LEN - ori_len)
                 else:
-                    tgt = tgt[:50]
-                    tgt_xy = tgt_xy[:50]
-                    tgt_duration = tgt_duration[:50]
+                    tgt = tgt[:GENERATE_LEN]
+                    tgt_duration = tgt_duration[:GENERATE_LEN]
             else:
-                if len(tgt) > 128:
-                    tgt = tgt[:128]
-                    tgt_xy = tgt_xy[:128]
-                    tgt_duration = tgt_duration[:128]
+                if len(tgt) > MAX_LEN:
+                    tgt = tgt[:MAX_LEN]
+                    tgt_duration = tgt_duration[:MAX_LEN]
 
-            # 1 is reserved for seperation
-            lst.append(src + [1] + tgt)
-            lst_xy.append(src_xy + [[1, 1]] + tgt_xy)
-            durations.append(src_duration + [1] + tgt_duration)
+            src_ls.append(src)
+            src_xy_ls.append(src_xy)
+            src_duration_ls.append(src_duration)
 
-            current_mask = np.ones(len(src + tgt) + 1)
-            current_mask[: (len(src) + 1)] = 0
-            if split == "test":
-                assert current_mask.sum() == 50
-            mask.append(current_mask)
-        ls["input_ids"] = lst
-        ls["input_xys"] = lst_xy
-        ls["input_durations"] = durations
-        ls["input_mask"] = mask
+            tgt_ls.append(tgt)
+            tgt_duration_ls.append(tgt_duration)
+
+        ls["tgt"] = tgt_ls
+        ls["tgt_duration"] = tgt_duration_ls
+
+        ls["src"] = src_ls
+        ls["src_xy"] = src_xy_ls
+        ls["src_duration"] = src_duration_ls
         return ls
 
     seq_dataset = seq_dataset.map(
         merge_and_mask,
         batched=True,
-        num_proc=4,
+        num_proc=1,
         desc="merge and mask",
-        remove_columns=["src", "src_xy", "tgt", "tgt_xy", "src_duration", "tgt_duration"],
     )
 
     raw_datasets = datasets.DatasetDict()
@@ -390,22 +394,23 @@ def get_sequence(args, split="train"):
     print("#" * 30, "\nLoading dataset {} from {}...".format(args.dataset, args.data_dir))
 
     print(f"### Loading from the {split} set...")
-    path = f"{args.data_dir}/{split}_level{args.level}_{args.src_min_days}_{args.tgt_min_days}_{args.dataset_variation}_continues.pk"
+    path = (
+        f"{args.data_dir}/{split}_level{args.level}_{args.src_min_days}_{args.tgt_min_days}_{args.dataset_variation}.pk"
+    )
 
     sequence_ls = pickle.load(open(path, "rb"))
 
-    processed_dict = {"src": [], "src_xy": [], "src_duration": [], "tgt": [], "tgt_xy": [], "tgt_duration": []}
+    processed_dict = {"src": [], "src_xy": [], "src_duration": [], "tgt": [], "tgt_duration": []}
     for record in sequence_ls:
         processed_dict["src"].append(record["src"])
         processed_dict["src_xy"].append(record["src_xy"])
 
-        # for padding and seperator, add normalization (max 2881 = 60 * 24 * 2 - 1 + 2)
-        processed_dict["src_duration"].append((record["src_duration"] + 2) / (60 * 24 * 2 + 1))
+        # for padding, add normalization (max 2880 = 60 * 24 * 2 - 1 + 1 (padding))
+        processed_dict["src_duration"].append((record["src_duration"] + 1) / 2880)
 
         processed_dict["tgt"].append(record["tgt"])
-        processed_dict["tgt_xy"].append(record["tgt_xy"])
 
-        processed_dict["tgt_duration"].append((record["tgt_duration"] + 2) / (60 * 24 * 2 + 1))
+        processed_dict["tgt_duration"].append((record["tgt_duration"] + 1) / 2880)
 
     print("### Data samples...\n", processed_dict["src"][0][:5], processed_dict["tgt"][0][:5])
 
@@ -435,64 +440,64 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         return self.length
 
     def __getitem__(self, idx):
-        ids = self.text_datasets["train"][idx]["input_ids"]
-        arr = torch.tensor(ids)
+        current_data = self.text_datasets["train"][idx]
 
-        # if self.model_emb is not None:
-        #     with torch.no_grad():
-        #         arr = self.model_emb(arr)
+        src = torch.tensor(current_data["src"])
+        tgt = torch.tensor(current_data["tgt"])
 
-        # arr = np.array(arr, dtype=np.float32)
-        out_kwargs = {}
-        out_kwargs["input_ids"] = torch.tensor(ids)
-        out_kwargs["input_mask"] = torch.tensor(self.text_datasets["train"][idx]["input_mask"])
-
+        src_ctx = {}
+        tgt_cxt = {}
         if self.if_embed_xy:
-            out_kwargs["input_xys"] = torch.tensor(self.text_datasets["train"][idx]["input_xys"])
+            src_ctx["xy"] = torch.tensor(current_data["src_xy"], dtype=torch.float32)
 
         # construct the pois
         if self.if_embed_poi:
-            ids = np.array(ids)
-            pois = np.take(self.poiValues, ids[ids != 1] - 2, axis=0)
-            # insert the seperator
-            pois = np.insert(pois, np.where(ids == 1)[0][0], np.ones(pois.shape[-1]), axis=0)
-            out_kwargs["input_poi"] = torch.tensor(pois)
+            ids = np.array(current_data["src"])
+            pois = np.take(self.poiValues, ids - 1, axis=0)  # -1 for padding
+            src_ctx["poi"] = torch.tensor(pois, dtype=torch.float32)
 
         if self.if_diffuse_duration:
-            out_kwargs["input_durations"] = torch.tensor(self.text_datasets["train"][idx]["input_durations"])
+            src_ctx["duration"] = torch.tensor(current_data["src_duration"])
+            tgt_cxt["duration"] = torch.tensor(current_data["tgt_duration"])
 
-        return arr, out_kwargs
+        return src, tgt, src_ctx, tgt_cxt
 
 
 def collate_fn(batch):
     """function to collate data samples into batch tensors."""
     src_batch = []
+    tgt_batch = []
 
     # get one sample batch
-    dict_batch = {"len": []}
-    # dict_batch = {}
+    src_ctx_batch = {}
+    for key in batch[0][-2]:
+        src_ctx_batch[key] = []
+    tgt_ctx_batch = {}
     for key in batch[0][-1]:
-        dict_batch[key] = []
+        tgt_ctx_batch[key] = []
 
-    for arr_sample, out_kwargs_dict in batch:
-        src_batch.append(arr_sample)
+    for src, tgt, src_ctx, tgt_cxt in batch:
+        src_batch.append(src)
+        tgt_batch.append(tgt)
 
-        dict_batch["len"].append(len(arr_sample))
-        for key in out_kwargs_dict:
-            dict_batch[key].append(out_kwargs_dict[key])
+        for key in src_ctx:
+            src_ctx_batch[key].append(src_ctx[key])
+        for key in tgt_cxt:
+            tgt_ctx_batch[key].append(tgt_cxt[key])
 
     src_batch = pad_sequence(src_batch, padding_value=0, batch_first=True)
+    tgt_batch = pad_sequence(tgt_batch, padding_value=0, batch_first=True)
 
-    dict_batch["len"] = torch.tensor(dict_batch["len"], dtype=torch.int64)
-    # dict_batch["input_ids"] = pad_sequence(dict_batch["input_ids"], padding_value=0, batch_first=True)
-    dict_batch["input_mask"] = pad_sequence(dict_batch["input_mask"], padding_value=1, batch_first=True)
-
-    for key in dict_batch:
-        if key in ["len", "input_mask"]:
+    for key in src_ctx_batch:
+        if key in ["len"]:
             continue
-        dict_batch[key] = pad_sequence(dict_batch[key], padding_value=0, batch_first=True)
+        src_ctx_batch[key] = pad_sequence(src_ctx_batch[key], padding_value=0, batch_first=True)
+    for key in tgt_ctx_batch:
+        if key in ["len"]:
+            continue
+        tgt_ctx_batch[key] = pad_sequence(tgt_ctx_batch[key], padding_value=0, batch_first=True)
 
-    return src_batch, dict_batch
+    return src_batch, tgt_batch, src_ctx_batch, tgt_ctx_batch
 
 
 def is_dist_avail_and_initialized():

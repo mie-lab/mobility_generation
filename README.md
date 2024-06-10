@@ -29,7 +29,6 @@ Generating locations:
         - [10, 14]: 142,575 locations covering Switzerland. Original locations are projected into 28,742 binned locations.
         - [10, 13]: 39,177 locations covering Switzerland. Original locations are projected into 14,881 binned locations.
         
-
 - Definition of activity behavior:
     - Preserve the self-transitions
     - Activity duration: activity duration + the transit duration to reach the location (finished_at - previous finished_at)
@@ -38,38 +37,35 @@ Generating locations:
 
 ### Next location prediction. 
 
-User split 6:2:2 according to time.
+User split 7:2:1 according to time.
 
 - MHSA: 
     - Use GPT2 implementation
     - Use previous 7 days, predict the next location. 
-    - hyperparameter: 
-    - Test runs (small) for level 10-14 with features (checked that all features are useful):
+    - hyperparameter:
+    - Test runs (small) for level 14 with features (checked that all features are useful).
 
 - Markov: 
-    - Train user model with train and validation (6+2) sequences. 
+    - Train user model with train and validation (7+2) sequences. 
     - Top-k sampling: Each next location is sampled from the top3 most likely locations according to the markov transition matrix. 
         - If no prior knowledge, next location sampled from the top3 overall most visited locations.
 
 
 Trained model autoregressively generate 50 locations for each test sequence. 
 
-TODO:
-- hyper-parameter search
+TODO: hyper-parameter search
 
 ### With mechanistic individual models. 
 
 - EPR
-- DTEPR (TODO:)
 - TimeGeo (TODO:)
 - Container (TODO:)
 
 ### With neural generative models.
 
-Use 4 weeks as input (TODO: Tune weeks)
+User split 7:2:1 according to time.
+Use 4 weeks as input
 
-- SeqGAN (TODO:) 
-    - implement
 - moveSim
     - Generator: 
         - Samples from emperical visit frequency
@@ -80,27 +76,19 @@ Use 4 weeks as input (TODO: Tune weeks)
     - Loss:
         - implemented reward based on rollout
         - Based on CrossEntropyLoss and MSELoss
-        - Included distance loss; decide to not include period loss
+        - Included distance loss, but not including period loss
     - Training:
         Learning signal weak -> Generator capacity low
 
-- VOLUNTEER (TODO:)
-    - implement
-- DiffSeq-v2
-    - loss shall be < 0.01
-    - We only consider V2 
-        - The mean embedding of V2 shall be initialized from random
-        - pretrain slightly better
-        - layer 2 better than layer 6
+- VOLUNTEER (TODO: implement)
+
+- Seq2seq diffSeq:
+    - loss 0.001
     - adding xy coordinate information
         - use geo encoding method
-        - add: learning after epoch 10
-        - complicated mlp for encoding learning leads to overfit (from encode_update)
-        - upprojection for location embedding will destroy the embeding space -> xy feature can only be added after embedding (from encode_up and v2?)
-        - (TODO: take the best performaing xy encoding method and try with non-location embedding pretrain)
 
 
-## Metrics (TODO: verify)
+## Metrics (TODO: check more metrics from other studies)
 
 - Travel distance 
 - Radius of Gyration
@@ -109,7 +97,5 @@ Use 4 weeks as input (TODO: Tune weeks)
 - Individual visitation frequency
 - TODO: Activity duration
 - TODO: Daily visited locations
-- TODO: motifs distribution
-
-## TODO:
-- Implement classical generation model 
+- TODO: Motifs distribution
+- TODO: Measure of variability - how does the generation differ in each run?

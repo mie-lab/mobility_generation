@@ -15,11 +15,11 @@ torch.autograd.set_detect_anomaly(True)
 
 import pickle as pickle
 
-from transformers import get_constant_schedule_with_warmup, get_linear_schedule_with_warmup
+from transformers import get_constant_schedule_with_warmup, get_cosine_with_hard_restarts_schedule_with_warmup
 from utils import logger
 from utils.dist_util import get_device, load_state_dict
 
-from generative.diff.step_sample import LossAwareSampler, UniformSampler
+from generative.diff.step_sample import LossAwareSampler
 
 
 class TrainLoop:
@@ -27,7 +27,7 @@ class TrainLoop:
         self,
         *,
         model,
-        diffusion,
+        diff_steps,
         data,
         batch_size,
         microbatch,
@@ -48,7 +48,7 @@ class TrainLoop:
         eval_data=None,
     ):
         self.model = model
-        self.diffusion = diffusion
+        self.diff_steps = diff_steps
         self.data = data
         self.eval_data = eval_data
         self.batch_size = batch_size
@@ -58,7 +58,7 @@ class TrainLoop:
         self.log_interval = log_interval
         self.decay_epochs = decay_epochs
         self.use_fp16 = use_fp16
-        self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
+        self.schedule_sampler = schedule_sampler
         self.gradient_clipping = gradient_clipping
 
         self.step = 0
@@ -81,7 +81,9 @@ class TrainLoop:
                 param_groups.append({"params": [parameter], "lr": self.lr})
 
         self.opt = AdamW(param_groups, lr=self.lr, weight_decay=weight_decay, eps=1e-5)
-        self.scaler = torch.cuda.amp.GradScaler(growth_interval=4000, init_scale=4096, enabled=self.use_fp16)
+        self.scaler = torch.cuda.amp.GradScaler(
+            growth_interval=5000, init_scale=64, growth_factor=1.5, enabled=self.use_fp16
+        )
         # define learning rate schedule
         if load_checkpoint:
             warmup_epochs = 0
@@ -90,10 +92,11 @@ class TrainLoop:
                 self.opt, num_warmup_steps=len(self.data) * warmup_epochs
             )
         else:
-            self.scheduler = get_linear_schedule_with_warmup(
+            self.scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(
                 self.opt,
                 num_warmup_steps=len(self.data) * warmup_epochs,
                 num_training_steps=len(self.data) * self.decay_epochs,
+                num_cycles=3,
             )
 
         self.ema_params = copy.deepcopy(self.master_params)
@@ -107,7 +110,7 @@ class TrainLoop:
                 output_device=get_device(),
                 broadcast_buffers=False,
                 bucket_cap_mb=128,
-                find_unused_parameters=False,
+                find_unused_parameters=True,
             )
         else:
             if dist.get_world_size() > 1:
@@ -128,14 +131,13 @@ class TrainLoop:
             )
             self.ema_params = self._state_dict_to_master_params(checkpoint["ema"])
             self.model.load_state_dict(checkpoint["model"])
-            self.scaler.load_state_dict(checkpoint["scaler"])
             if load_opt:
                 self.opt.load_state_dict(checkpoint["optimizer"])
                 self.scheduler.load_state_dict(checkpoint["lr_schedule"])
 
     def run_loop(self):
         previous_loss = np.inf
-        for epoch in range(self.loaded_epoch + 1, self.max_epochs):
+        for epoch in range(self.loaded_epoch + 1, self.max_epochs + 1):
             self.data.sampler.set_epoch(epoch)
             self.eval_data.sampler.set_epoch(epoch)
 
@@ -157,7 +159,6 @@ class TrainLoop:
                     "model": self._master_params_to_state_dict(self.master_params),
                     "ema": self._master_params_to_state_dict(self.ema_params),
                     "optimizer": self.opt.state_dict(),
-                    "scaler": self.scaler.state_dict(),
                     "lr_schedule": self.scheduler.state_dict(),
                 }
                 if is_main_process():
@@ -176,10 +177,10 @@ class TrainLoop:
         all_start_time = start_time
         self.opt.zero_grad()
         current_step = 0
-        for i, (batch, cond) in enumerate(self.data):
+        for i, inputs in enumerate(self.data):
             self.step += 1
             current_step += 1
-            self.run_step(batch, cond)
+            self.run_step(inputs)
 
             self.scheduler.step()
 
@@ -200,8 +201,8 @@ class TrainLoop:
         self.ddp_model.eval()
 
         return_loss = []
-        for batch_eval, cond_eval in self.eval_data:
-            return_loss.extend(self.forward_only(batch_eval, cond_eval))
+        for inputs in self.eval_data:
+            return_loss.extend(self.forward_only(inputs))
 
         if is_main_process():
             logger.log("eval on validation set")
@@ -212,26 +213,26 @@ class TrainLoop:
 
         return torch.stack([torch.stack(loss) for loss in gathered_loss]).mean().numpy()
 
-    def run_step(self, batch, cond):
-        self.forward_backward(batch, cond)
+    def run_step(self, inputs):
+        self.forward_backward(inputs)
         self.optimize_normal()
         self.log_step()
 
-    def forward_only(self, batch, cond):
+    def forward_only(self, inputs):
         return_loss = []
+        src, tgt, src_ctx, tgt_cxt = inputs
         with torch.no_grad():
-            for i in range(0, batch.shape[0], self.microbatch):
-                micro = batch[i : i + self.microbatch].to(get_device())
-                micro_cond = {k: v[i : i + self.microbatch].to(get_device()) for k, v in cond.items()}
-                last_batch = (i + self.microbatch) >= batch.shape[0]
-                t, weights = self.schedule_sampler.sample(micro.shape[0], get_device())
+            for i in range(0, src.shape[0], self.microbatch):
+                src_micro = src[i : i + self.microbatch].to(get_device()).long()
+                tgt_micro = tgt[i : i + self.microbatch].to(get_device()).long()
+                src_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in src_ctx.items()}
+                tgt_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in tgt_cxt.items()}
+
+                last_batch = (i + self.microbatch) >= src.shape[0]
+                t, weights = self.schedule_sampler.sample(src_micro.shape[0], get_device())
                 # print(micro_cond.keys())
                 compute_losses = functools.partial(
-                    self.diffusion.training_losses,
-                    self.ddp_model,
-                    micro,
-                    t,
-                    model_kwargs=micro_cond,
+                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t
                 )
 
                 if last_batch or not self.use_ddp:
@@ -240,27 +241,27 @@ class TrainLoop:
                     with self.ddp_model.no_sync():
                         losses = compute_losses()
 
-                log_loss_dict(self.diffusion, t, {f"eval_{k}": v * weights for k, v in losses.items()})
+                log_loss_dict(self.diff_steps, t, {f"eval_{k}": v * weights for k, v in losses.items()})
                 return_loss.extend((losses["loss"] * weights).detach().cpu())
 
         return return_loss
 
-    def forward_backward(self, batch, cond):
+    def forward_backward(self, inputs):
         current_device = get_device()
-        for i in range(0, batch.shape[0], self.microbatch):
-            micro = batch[i : i + self.microbatch].to(current_device)
-            micro_cond = {k: v[i : i + self.microbatch].to(current_device) for k, v in cond.items()}
-            last_batch = (i + self.microbatch) >= batch.shape[0]
-            t, weights = self.schedule_sampler.sample(micro.shape[0], current_device)
+        src, tgt, src_ctx, tgt_cxt = inputs
+        for i in range(0, src.shape[0], self.microbatch):
+            src_micro = src[i : i + self.microbatch].to(get_device()).long()
+            tgt_micro = tgt[i : i + self.microbatch].to(get_device()).long()
+            src_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in src_ctx.items()}
+            tgt_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in tgt_cxt.items()}
+
+            last_batch = (i + self.microbatch) >= src.shape[0]
+            t, weights = self.schedule_sampler.sample(src_micro.shape[0], current_device)
             # print(micro_cond.keys())
 
             with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=self.use_fp16):
                 compute_losses = functools.partial(
-                    self.diffusion.training_losses,
-                    self.ddp_model,
-                    micro,
-                    t,
-                    model_kwargs=micro_cond,
+                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t
                 )
 
                 if last_batch or not self.use_ddp:
@@ -273,7 +274,7 @@ class TrainLoop:
                     self.schedule_sampler.update_with_local_losses(t, losses["loss"].detach())
 
                 loss = (losses["loss"] * weights).mean()
-                log_loss_dict(self.diffusion, t, {k: v * weights for k, v in losses.items()})
+                log_loss_dict(self.diff_steps, t, {k: v * weights for k, v in losses.items()})
 
             self.scaler.scale(loss).backward()
 
@@ -298,8 +299,8 @@ class TrainLoop:
         self._log_grad_norm()
         self.scaler.step(self.opt)
         self.scaler.update()
-        if self.use_fp16 and self.scaler._scale < 128:
-            self.scaler._scale = torch.tensor(128).to(self.scaler._scale)
+        if self.use_fp16 and self.scaler._scale < 64:
+            self.scaler._scale = torch.tensor(64).to(self.scaler._scale)
 
         self.opt.zero_grad()
         update_ema(self.ema_params, self.master_params, rate=self.ema_rate)
@@ -362,12 +363,12 @@ def update_ema(target_params, source_params, rate=0.99):
         targ.detach().mul_(rate).add_(src, alpha=1 - rate)
 
 
-def log_loss_dict(diffusion, ts, losses):
+def log_loss_dict(diff_steps, ts, losses):
     for key, values in losses.items():
         logger.logkv_mean(key, values.mean().item())
         # Log the quantiles (four quartiles).
         for sub_t, sub_loss in zip(ts.cpu().numpy(), values.detach().cpu().numpy()):
-            quartile = int(4 * sub_t / diffusion.num_timesteps)
+            quartile = int(4 * sub_t / diff_steps)
             logger.logkv_mean(f"{key}_q{quartile}", sub_loss)
 
 
