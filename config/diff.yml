@@ -4,24 +4,24 @@ misc:
   wandb_name: test
   split: train
   dataset_variation: tiny 
-  level: "10_13"
+  level: 13
   src_min_days: 14
   tgt_min_days: 7
 
   # seq_len: 512
-  # 14882 + 1 (28743 + 1) for seperation
-  max_location: 14883 # 28744, 14883
+  # 14882 (28743)
+  max_location: 14882 # 28743, 14882
 
   seed: 101
   # 
-  if_embed_xy: False
-  if_embed_poi: False
+  if_embed_xy: True
+  if_embed_poi: True
   if_diffuse_duration: False
   
-  batch_size: 256
+  batch_size: 512
   microbatch: 64
-  log_interval: 10
-  num_workers: 16
+  log_interval: 100
+  num_workers: 24
   
 fp16:
   use_fp16: True
@@ -40,20 +40,19 @@ diffusion:
   rescale_timesteps: True
   diffusion_steps: 2000
   noise_schedule: sqrt
-  rescaling_factor: 4
-  vp_rf: True
+  rescaling_factor: 1
 
-  rounding_loss: False
+  rounding_loss: True
+  self_cond: True
 
   decoding_steps: 20
   decoding_noise_schedule: sqrt
   decoding_rescaling_factor: 1
-  decoding_vp_rf: True
   clamping: False
 
 model:
   # 
-  num_layers: 4
+  num_layers: 2
   hidden_size: 512
   num_attention_heads: 8
   dropout: 0.1
@@ -68,15 +67,15 @@ optimiser:
 
   # for warmup
   warmup_epochs: 3
-  decay_epochs: 200
+  decay_epochs: 150
 
   # training
-  max_epochs: 120
-  save_epochs: 2
+  max_epochs: 150
+  save_epochs: 5
 
   # 
   load_checkpoint: False
-  checkpoint_path: ./runs/mobis_diffseq_17165500
+  checkpoint_path: ./runs/mobis_na_all_layer2_cond_13
   load_opt: True
 
 dataset:
