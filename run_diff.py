@@ -11,6 +11,8 @@ import numpy as np
 import wandb
 from easydict import EasyDict as edict
 
+import torch
+
 from generative.dataloader import load_data_diffusion
 from generative.diff.step_sample import create_named_schedule_sampler
 from generative.train_diff import TrainLoop
@@ -61,6 +63,9 @@ def main():
     config.device = get_device()
     model = create_model(config)
     model.to(get_device())  # DEBUG **
+
+    # for cluster
+    # model = torch.compile(model)
 
     pytorch_total_params = sum(p.numel() for p in model.parameters())
 

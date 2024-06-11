@@ -81,9 +81,6 @@ class TrainLoop:
                 param_groups.append({"params": [parameter], "lr": self.lr})
 
         self.opt = AdamW(param_groups, lr=self.lr, weight_decay=weight_decay, eps=1e-5)
-        self.scaler = torch.cuda.amp.GradScaler(
-            growth_interval=5000, init_scale=64, growth_factor=1.5, enabled=self.use_fp16
-        )
         # define learning rate schedule
         if load_checkpoint:
             warmup_epochs = 0
@@ -259,7 +256,7 @@ class TrainLoop:
             t, weights = self.schedule_sampler.sample(src_micro.shape[0], current_device)
             # print(micro_cond.keys())
 
-            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=self.use_fp16):
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.use_fp16):
                 compute_losses = functools.partial(
                     self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t
                 )
@@ -276,7 +273,7 @@ class TrainLoop:
                 loss = (losses["loss"] * weights).mean()
                 log_loss_dict(self.diff_steps, t, {k: v * weights for k, v in losses.items()})
 
-            self.scaler.scale(loss).backward()
+            loss.backward()
 
     def grad_clip(self):
         max_grad_norm = self.gradient_clipping  # 3.0
@@ -294,14 +291,9 @@ class TrainLoop:
 
     def optimize_normal(self):
         if self.gradient_clipping > 0:
-            self.scaler.unscale_(self.opt)
             self.grad_clip()
         self._log_grad_norm()
-        self.scaler.step(self.opt)
-        self.scaler.update()
-        if self.use_fp16 and self.scaler._scale < 64:
-            self.scaler._scale = torch.tensor(64).to(self.scaler._scale)
-
+        self.opt.step()
         self.opt.zero_grad()
         update_ema(self.ema_params, self.master_params, rate=self.ema_rate)
 
@@ -312,8 +304,6 @@ class TrainLoop:
             if p.grad is not None:
                 sqsum += (p.grad**2).sum().item()
         logger.logkv_mean("grad_norm", np.sqrt(sqsum))
-        if self.use_fp16:
-            logger.logkv("scaler scale", self.scaler._scale)
 
     def log_step(self):
         logger.logkv("step", self.step)

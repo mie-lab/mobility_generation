@@ -2,12 +2,13 @@
 
 ## Design choices
 
-Preprocessing sp (4,811,539):
-- Filter duplicates: remove sps or tpls that have overlapping timeline (4,804,194). 
+Preprocessing sp (4,811,539) and tpls (6,391,628):
+- Filter duplicates: remove sps or tpls that have overlapping timeline (sp: 4,804,194, tpls: 6,381,957). 
 - Activity definition (activity: 3,589,215, non-activity: 1,214,979):
     - waiting
     - "unknown" and duration < 25min
--  User filtering (users: 2,113. sp: 1,578,245):
+- Generate trips: gap_threshold=25 (trips: 3,466,359)
+- User filtering (users: 2,113. sp: 1,578,245, tpls: 2,133,677, trips: 1,124,205):
     - tracked for more than 50 days
     - quality during tracking: quality for every 5 week shall have min quality > 0.5 and mean quality > 0.6 
 - Spatial filter: Only sp within Switzerland (sp: 1,460,189).
