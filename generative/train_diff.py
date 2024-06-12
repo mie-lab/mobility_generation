@@ -172,11 +172,12 @@ class TrainLoop:
         self.opt.zero_grad()
         current_step = 0
         for i, inputs in enumerate(self.data):
+            self.step += 1
+            current_step += 1
+
             self.run_step(inputs)
             self.scheduler.step()
 
-            self.step += 1
-            current_step += 1
             # log
             if current_step % self.log_interval == 0:
                 logger.dumpkvs()

@@ -64,10 +64,6 @@ def main():
     model = create_model(config)
     model.to(get_device())  # DEBUG **
 
-    # for cluster
-    if config.cluster:
-        model = torch.compile(model)
-
     torch.set_float32_matmul_precision("high")
 
     pytorch_total_params = sum(p.numel() for p in model.parameters())
