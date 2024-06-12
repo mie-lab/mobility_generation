@@ -51,8 +51,11 @@ class TrainLoop:
         self.diff_steps = diff_steps
         self.data = data
         self.eval_data = eval_data
+
         self.batch_size = batch_size
         self.microbatch = microbatch if microbatch > 0 else batch_size
+        self.grad_accum_steps = self.batch_size / (self.microbatch)
+
         self.lr = lr
         self.ema_rate = ema_rate
         self.log_interval = log_interval
@@ -72,15 +75,9 @@ class TrainLoop:
         self.checkpoint_path = checkpoint_path
 
         # control learning rate
-        param_groups = []
-        name_group = ["lm_head", "token_embedding"]
-        for name, parameter in self.model.named_parameters():
-            if np.any([n in name for n in name_group]):
-                param_groups.append({"params": [parameter], "lr": self.lr})
-            else:
-                param_groups.append({"params": [parameter], "lr": self.lr})
-
-        self.opt = AdamW(param_groups, lr=self.lr, weight_decay=weight_decay, eps=1e-5)
+        self.opt = self.model.configure_optimizers(
+            weight_decay=weight_decay, learning_rate=self.lr, betas=(0.9, 0.98), device_type="cuda"
+        )
         # define learning rate schedule
         if load_checkpoint:
             warmup_epochs = 0
@@ -175,21 +172,18 @@ class TrainLoop:
         self.opt.zero_grad()
         current_step = 0
         for i, inputs in enumerate(self.data):
-            self.step += 1
-            current_step += 1
             self.run_step(inputs)
-
             self.scheduler.step()
-
             # log
             if current_step % self.log_interval == 0:
                 logger.dumpkvs()
-
                 if is_main_process():
                     logger.log(
                         "Epoch {}, {:.1f}% took: {:.2f}s".format(epoch, 100 * i / n_batches, time.time() - start_time)
                     )
                 start_time = time.time()
+            self.step += 1
+            current_step += 1
         logger.dumpkvs()
         if is_main_process():
             logger.log("Epoch {} took: {:.2f}s".format(epoch, time.time() - all_start_time))
@@ -267,43 +261,28 @@ class TrainLoop:
                     with self.ddp_model.no_sync():
                         losses = compute_losses()
 
-                if isinstance(self.schedule_sampler, LossAwareSampler):
-                    self.schedule_sampler.update_with_local_losses(t, losses["loss"].detach())
+            if isinstance(self.schedule_sampler, LossAwareSampler):
+                self.schedule_sampler.update_with_local_losses(t, losses["loss"].detach())
 
-                loss = (losses["loss"] * weights).mean()
-                log_loss_dict(self.diff_steps, t, {k: v * weights for k, v in losses.items()})
+            loss = (losses["loss"] * weights).mean() / self.grad_accum_steps
+            log_loss_dict(self.diff_steps, t, {k: v * weights for k, v in losses.items()})
 
             loss.backward()
 
     def grad_clip(self):
         max_grad_norm = self.gradient_clipping  # 3.0
-        if hasattr(self.opt, "clip_grad_norm"):
-            # Some optimizers (like the sharded optimizer) have a specific way to do gradient clipping
-            self.opt.clip_grad_norm(max_grad_norm)
-        else:
-            # Revert to normal clipping otherwise, handling Apex or full precision
-            total_norm = torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(),  # amp.master_params(self.opt) if self.use_apex else
-                max_grad_norm,
-            )
-            if torch.logical_or(total_norm.isnan(), total_norm.isinf()):
-                logger.log("nan encountered")
+        total_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
+        return total_norm
 
     def optimize_normal(self):
-        if self.gradient_clipping > 0:
-            self.grad_clip()
-        self._log_grad_norm()
+        total_norm = self.grad_clip()
+        self._log_grad_norm(total_norm)
         self.opt.step()
         self.opt.zero_grad()
         update_ema(self.ema_params, self.master_params, rate=self.ema_rate)
 
-    def _log_grad_norm(self):
-        sqsum = 0.0
-        # cnt = 0
-        for p in self.master_params:
-            if p.grad is not None:
-                sqsum += (p.grad**2).sum().item()
-        logger.logkv_mean("grad_norm", np.sqrt(sqsum))
+    def _log_grad_norm(self, total_norm):
+        logger.logkv_mean("grad_norm", total_norm)
 
     def log_step(self):
         logger.logkv("step", self.step)
