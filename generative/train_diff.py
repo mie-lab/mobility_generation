@@ -174,6 +174,9 @@ class TrainLoop:
         for i, inputs in enumerate(self.data):
             self.run_step(inputs)
             self.scheduler.step()
+
+            self.step += 1
+            current_step += 1
             # log
             if current_step % self.log_interval == 0:
                 logger.dumpkvs()
@@ -182,8 +185,7 @@ class TrainLoop:
                         "Epoch {}, {:.1f}% took: {:.2f}s".format(epoch, 100 * i / n_batches, time.time() - start_time)
                     )
                 start_time = time.time()
-            self.step += 1
-            current_step += 1
+
         logger.dumpkvs()
         if is_main_process():
             logger.log("Epoch {} took: {:.2f}s".format(epoch, time.time() - all_start_time))

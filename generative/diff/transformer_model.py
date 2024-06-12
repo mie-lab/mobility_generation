@@ -212,7 +212,7 @@ class TransEncoder(nn.Module):
         self.LayerNorm = nn.LayerNorm(hidden_size)
         self.dropout = nn.Dropout(dropout)
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=num_attention_heads)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=num_attention_heads, batch_first=True)
         encoder_norm = nn.LayerNorm(hidden_size)
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers, norm=encoder_norm)
 
@@ -222,14 +222,11 @@ class TransEncoder(nn.Module):
         # B x T, True will be ignored
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
 
-        # B x T x C -> T x B x C
-        x = x.transpose(0, 1)
-
         # decoder model
         hidden = self.model(x, src_key_padding_mask=encoder_padding_mask)
 
         return {
-            "encoder_out": hidden,  # T x B x C
+            "encoder_out": hidden,  # B x T x C
             "encoder_padding_mask": encoder_padding_mask,  # B x T
         }
 
@@ -301,7 +298,7 @@ class TransDecoder(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         #
-        decoder_layer = nn.TransformerDecoderLayer(d_model=hidden_size, nhead=num_attention_heads)
+        decoder_layer = nn.TransformerDecoderLayer(d_model=hidden_size, nhead=num_attention_heads, batch_first=True)
         decoder_norm = nn.LayerNorm(hidden_size)
         self.model = nn.TransformerDecoder(decoder_layer, num_layers=num_decoder_layers, norm=decoder_norm)
 
@@ -336,18 +333,12 @@ class TransDecoder(nn.Module):
     def forward(self, z_t, t, padding_mask, encoder_out, prev_z_0_hat=None):
         hidden = self.forward_hidden(z_t, t, prev_z_0_hat)
 
-        # B x T x C -> T x B x C
-        hidden = hidden.transpose(0, 1)
-
         hidden = self.model(
-            tgt=hidden,
-            memory=encoder_out["encoder_out"],
+            tgt=hidden,  # B x T x C
+            memory=encoder_out["encoder_out"],  # B x T x C
             tgt_key_padding_mask=~padding_mask,
-            memory_key_padding_mask=encoder_out["encoder_padding_mask"],
+            memory_key_padding_mask=encoder_out["encoder_padding_mask"],  # B x T
         )
-
-        # T x B x C -> B x T x C
-        hidden = hidden.transpose(0, 1)
 
         hidden = self.output_down_proj(hidden)
         return hidden
