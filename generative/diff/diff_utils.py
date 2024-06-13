@@ -19,6 +19,7 @@ def create_model(config):
         "input_dims": config.input_dims,
         "num_layers": config.num_layers,
         "max_location": config.max_location,
+        "max_mode": config.max_mode,
         "hidden_size": config.hidden_size,
         "num_attention_heads": config.num_attention_heads,
         "dropout": config.dropout,
@@ -26,6 +27,7 @@ def create_model(config):
         "if_embed_poi": config.if_embed_poi,
         "poi_dim": config.poi_dim,
         "if_include_duration": config.if_include_duration,
+        "if_include_mode": config.if_include_mode,
         "device": config.device,
     }
     model_args = edict(model_args)

@@ -181,6 +181,7 @@ class TransEncoder(nn.Module):
         num_attention_heads=12,
         dropout=0,
         location_embedding=None,
+        mode_embedding=None,
         duration_embedding=None,
         position_embedding=None,
         input_up_proj=None,
@@ -192,10 +193,13 @@ class TransEncoder(nn.Module):
         super().__init__()
 
         self.padding_idx = location_embedding.padding_idx
+
         self.location_embedding = location_embedding
         self.embed_scale = math.sqrt(location_embedding.embedding_dim)
         #
         self.duration_embedding = duration_embedding
+        #
+        self.mode_embedding = mode_embedding
 
         # up projection (shared)
         self.input_up_proj = input_up_proj
@@ -246,6 +250,9 @@ class TransEncoder(nn.Module):
         if self.duration_embedding is not None:
             x += self.duration_embedding(context["duration"].unsqueeze(-1))
 
+        if self.mode_embedding is not None:
+            x += self.mode_embedding(context["mode"])
+
         # up-projection
         x = self.input_up_proj(x)
 
@@ -271,6 +278,7 @@ class TransDecoder(nn.Module):
         num_attention_heads=12,
         dropout=0,
         location_embedding=None,
+        mode_embedding=None,
         duration_embedding=None,
         position_embedding=None,
         input_up_proj=None,
@@ -289,6 +297,9 @@ class TransDecoder(nn.Module):
 
         #
         self.duration_embedding = duration_embedding
+
+        #
+        self.mode_embedding = mode_embedding
 
         self.hidden_size = hidden_size
         self.time_embed = nn.Sequential(
@@ -323,8 +334,12 @@ class TransDecoder(nn.Module):
 
     def forward_embedding(self, tgt_tokens, tgt_cxt):
         embed = self.embed_scale * self.location_embedding(tgt_tokens)
+
         if self.duration_embedding is not None:
             embed += self.duration_embedding(tgt_cxt["duration"].unsqueeze(-1))
+
+        if self.mode_embedding is not None:
+            embed += self.mode_embedding(tgt_cxt["mode"])
 
         return embed
 
@@ -390,18 +405,26 @@ class TransformerNetModel(nn.Module):
 
         # location embedding
         self.location_embedding = nn.Embedding(model_args.max_location, model_args.input_dims, padding_idx=0)
-        self.input_up_proj = nn.Linear(model_args.input_dims, model_args.hidden_size, bias=False)
+
         # duration embedding
         self.if_include_duration = model_args.if_include_duration
+        self.duration_embedding = None
         if self.if_include_duration:
-            duration_embedding = nn.Linear(1, model_args.input_dims, bias=False)
-        else:
-            duration_embedding = None
+            self.duration_embedding = nn.Linear(1, model_args.input_dims, bias=False)
+
+        # mode embedding
+        self.if_include_mode = model_args.if_include_mode
+        self.mode_embedding = None
+        if self.if_include_mode:
+            self.mode_embedding = nn.Embedding(model_args.max_mode, model_args.input_dims, padding_idx=0)
+
+        # up
+        self.input_up_proj = nn.Linear(model_args.input_dims, model_args.hidden_size, bias=False)
 
         # position embedding
         self.position_embedding = nn.Embedding(max_positions, model_args.hidden_size)
 
-        # out
+        # down
         self.output_down_proj = nn.Linear(model_args.hidden_size, model_args.input_dims, bias=False)
 
         # encoder
@@ -411,7 +434,8 @@ class TransformerNetModel(nn.Module):
             num_attention_heads=model_args.num_attention_heads,
             dropout=model_args.dropout,
             location_embedding=self.location_embedding,
-            duration_embedding=duration_embedding,
+            mode_embedding=self.mode_embedding,
+            duration_embedding=self.duration_embedding,
             position_embedding=self.position_embedding,
             input_up_proj=self.input_up_proj,
             embed_xy=model_args.if_embed_xy,
@@ -427,17 +451,27 @@ class TransformerNetModel(nn.Module):
             num_attention_heads=model_args.num_attention_heads,
             dropout=model_args.dropout,
             location_embedding=self.location_embedding,
-            duration_embedding=duration_embedding,
+            mode_embedding=self.mode_embedding,
+            duration_embedding=self.duration_embedding,
             position_embedding=self.position_embedding,
             input_up_proj=self.input_up_proj,
             output_down_proj=self.output_down_proj,
             self_cond=diff_args.self_cond,
         )
 
+        # location head
         self.lm_head = nn.Linear(model_args.input_dims, model_args.max_location, bias=False)
         # weight sharing
         with torch.no_grad():
             self.lm_head.weight = self.location_embedding.weight
+
+        # mode head
+        if self.if_include_mode:
+            self.lm_head_mode = nn.Linear(model_args.input_dims, model_args.max_mode, bias=False)
+            # weight sharing
+            with torch.no_grad():
+                self.lm_head_mode.weight = self.mode_embedding.weight
+
         # duration head
         if self.if_include_duration:
             self.lm_head_duration = nn.Linear(model_args.input_dims, 1, bias=False)
@@ -477,6 +511,9 @@ class TransformerNetModel(nn.Module):
     def get_duration_prediction(self, hidden_repr):
         return self.lm_head_duration(hidden_repr)
 
+    def get_mode_prediction(self, hidden_repr):
+        return self.lm_head_mode(hidden_repr)
+
     def forward(self, src, tgt, src_ctx, tgt_cxt, t):
         """Compute training losses"""
 
@@ -514,6 +551,11 @@ class TransformerNetModel(nn.Module):
 
         terms["loss"] = terms["mse"] + terms["head_nll"]
 
+        if self.if_include_mode:
+            mode_pred = self.get_mode_prediction(z_0)
+            terms["head_mode"] = token_discrete_loss(mode_pred, tgt_cxt["mode"], mask=mask, label_smoothing=0.1)
+            terms["loss"] += terms["head_mode"]
+
         if self.if_include_duration:
             duration_pred = self.get_duration_prediction(z_0)
             terms["head_mse"] = prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
@@ -548,7 +590,10 @@ class TransformerNetModel(nn.Module):
 
     def forward_output_layer(self, z_t):
         scores, tokens = self.get_logits(z_t).log_softmax(-1).max(-1)
-        return tokens, scores
+        durations = self.get_duration_prediction(z_t).squeeze(-1)
+        _, modes = self.get_mode_prediction(z_t).log_softmax(-1).max(-1)
+
+        return tokens, durations, modes, scores
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters

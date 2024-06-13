@@ -330,16 +330,20 @@ def process_helper_fnc(seq_ls, split):
         src_ls = []
         src_xy_ls = []
         src_duration_ls = []
+        src_mode_ls = []
 
         tgt_ls = []
         tgt_duration_ls = []
+        tgt_mode_ls = []
 
         for i in range(len(ls["src"])):
             src = ls["src"][i]
             src_xy = ls["src_xy"][i]
             src_duration = ls["src_duration"][i]
+            src_mode = ls["src_mode"][i]
             tgt = ls["tgt"][i]
             tgt_duration = ls["tgt_duration"][i]
+            tgt_mode = ls["tgt_mode"][i]
 
             # for src
             len_src = len(src)
@@ -347,6 +351,7 @@ def process_helper_fnc(seq_ls, split):
                 src = src[(len_src - MAX_LEN) :]
                 src_xy = src_xy[(len_src - MAX_LEN) :]
                 src_duration = src_duration[(len_src - MAX_LEN) :]
+                src_mode = src_mode[(len_src - MAX_LEN) :]
 
             # for tgt
             if split == "test":
@@ -354,27 +359,34 @@ def process_helper_fnc(seq_ls, split):
                 if ori_len < GENERATE_LEN:  # pad with 0s to GENERATE_LEN
                     tgt = tgt + [0] * (GENERATE_LEN - ori_len)
                     tgt_duration = tgt_duration + [0] * (GENERATE_LEN - ori_len)
+                    tgt_mode = tgt_mode + [0] * (GENERATE_LEN - ori_len)
                 else:
                     tgt = tgt[:GENERATE_LEN]
                     tgt_duration = tgt_duration[:GENERATE_LEN]
+                    tgt_mode = tgt_mode[:GENERATE_LEN]
             else:
                 if len(tgt) > MAX_LEN:
                     tgt = tgt[:MAX_LEN]
                     tgt_duration = tgt_duration[:MAX_LEN]
+                    tgt_mode = tgt_mode[:MAX_LEN]
 
             src_ls.append(src)
             src_xy_ls.append(src_xy)
             src_duration_ls.append(src_duration)
+            src_mode_ls.append(src_mode)
 
             tgt_ls.append(tgt)
             tgt_duration_ls.append(tgt_duration)
+            tgt_mode_ls.append(tgt_mode)
 
         ls["tgt"] = tgt_ls
         ls["tgt_duration"] = tgt_duration_ls
+        ls["tgt_mode"] = tgt_mode_ls
 
         ls["src"] = src_ls
         ls["src_xy"] = src_xy_ls
         ls["src_duration"] = src_duration_ls
+        ls["src_mode"] = src_mode_ls
         return ls
 
     seq_dataset = seq_dataset.map(
@@ -400,17 +412,26 @@ def get_sequence(args, split="train"):
 
     sequence_ls = pickle.load(open(path, "rb"))
 
-    processed_dict = {"src": [], "src_xy": [], "src_duration": [], "tgt": [], "tgt_duration": []}
+    processed_dict = {
+        "src": [],
+        "src_xy": [],
+        "src_duration": [],
+        "src_mode": [],
+        "tgt": [],
+        "tgt_duration": [],
+        "tgt_mode": [],
+    }
     for record in sequence_ls:
         processed_dict["src"].append(record["src"])
         processed_dict["src_xy"].append(record["src_xy"])
+        processed_dict["src_mode"].append(record["src_mode"])
 
         # for padding, add normalization (max 2880 = 60 * 24 * 2 - 1 + 1 (padding))
         processed_dict["src_duration"].append((record["src_duration"] + 1) / 2880)
 
         processed_dict["tgt"].append(record["tgt"])
-
         processed_dict["tgt_duration"].append((record["tgt_duration"] + 1) / 2880)
+        processed_dict["tgt_mode"].append(record["tgt_mode"])
 
     print("### Data samples...\n", processed_dict["src"][0][:5], processed_dict["tgt"][0][:5])
 
@@ -430,6 +451,7 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         self.if_embed_xy = data_args.if_embed_xy
 
         self.if_include_duration = data_args.if_include_duration
+        self.if_include_mode = data_args.if_include_mode
 
         if self.if_embed_poi:
             poi_file_path = f"{data_args.data_dir}/poi_level{data_args.level}.npy"
@@ -459,6 +481,10 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         if self.if_include_duration:
             src_ctx["duration"] = torch.tensor(current_data["src_duration"])
             tgt_cxt["duration"] = torch.tensor(current_data["tgt_duration"])
+
+        if self.if_include_mode:
+            src_ctx["mode"] = torch.tensor(current_data["src_mode"])
+            tgt_cxt["mode"] = torch.tensor(current_data["tgt_mode"])
 
         return src, tgt, src_ctx, tgt_cxt
 
