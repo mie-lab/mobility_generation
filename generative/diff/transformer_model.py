@@ -576,7 +576,12 @@ class TransformerNetModel(nn.Module):
         # clamping trick
         if self.diff_args.clamping:
             tokens = self.get_logits(z_0_hat).argmax(-1)
-            z_0_hat = self.decoder.forward_embedding(tokens)
+            #
+            ctx = {}
+            ctx["duration"] = self.get_duration_prediction(z_0_hat).squeeze(-1)
+            ctx["mode"] = self.get_mode_prediction(z_0_hat).argmax(-1)
+            #
+            z_0_hat = self.decoder.forward_embedding(tokens, tgt_cxt=ctx)
 
         # sample z_{t-1}
         t = torch.tensor(step, device=z_t.device)
