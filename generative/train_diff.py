@@ -90,7 +90,7 @@ class TrainLoop:
                 self.opt,
                 num_warmup_steps=len(self.data) * warmup_epochs,
                 num_training_steps=len(self.data) * self.decay_epochs,
-                num_cycles=3,
+                num_cycles=2,
             )
 
         self.ema_params = copy.deepcopy(self.master_params)
