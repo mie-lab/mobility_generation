@@ -429,7 +429,7 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         self.if_embed_poi = data_args.if_embed_poi
         self.if_embed_xy = data_args.if_embed_xy
 
-        self.if_diffuse_duration = data_args.if_diffuse_duration
+        self.if_include_duration = data_args.if_include_duration
 
         if self.if_embed_poi:
             poi_file_path = f"{data_args.data_dir}/poi_level{data_args.level}.npy"
@@ -456,7 +456,7 @@ class DiffSeqDataset(torch.utils.data.Dataset):
             pois = np.take(self.poiValues, ids - 1, axis=0)  # -1 for padding
             src_ctx["poi"] = torch.tensor(pois, dtype=torch.float32)
 
-        if self.if_diffuse_duration:
+        if self.if_include_duration:
             src_ctx["duration"] = torch.tensor(current_data["src_duration"])
             tgt_cxt["duration"] = torch.tensor(current_data["tgt_duration"])
 

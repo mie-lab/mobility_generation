@@ -25,6 +25,7 @@ def create_model(config):
         "if_embed_xy": config.if_embed_xy,
         "if_embed_poi": config.if_embed_poi,
         "poi_dim": config.poi_dim,
+        "if_include_duration": config.if_include_duration,
         "device": config.device,
     }
     model_args = edict(model_args)

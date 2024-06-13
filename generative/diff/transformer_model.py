@@ -186,6 +186,7 @@ class TransEncoder(nn.Module):
         embed_xy=False,
         embed_poi=False,
         poi_dim=32,
+        include_duration=False,
         device="",
     ):
         super().__init__()
@@ -205,7 +206,12 @@ class TransEncoder(nn.Module):
 
         # context model for embedding
         self.context_model = ContextModel(
-            location_embedding.embedding_dim, hidden_size, embed_xy, embed_poi, poi_dim=poi_dim, device=device
+            location_embedding.embedding_dim,
+            hidden_size,
+            embed_xy,
+            embed_poi,
+            poi_dim=poi_dim,
+            device=device,
         )
 
         #
@@ -259,6 +265,7 @@ class TransDecoder(nn.Module):
         num_attention_heads=12,
         dropout=0,
         location_embedding=None,
+        duration_embedding=None,
         position_embedding=None,
         input_up_proj=None,
         output_down_proj=None,
@@ -270,8 +277,12 @@ class TransDecoder(nn.Module):
         self.input_up_proj = input_up_proj
         self.output_down_proj = output_down_proj
 
+        #
         self.location_embedding = location_embedding
         self.embed_scale = math.sqrt(location_embedding.embedding_dim)
+
+        #
+        self.duration_embedding = duration_embedding
 
         self.hidden_size = hidden_size
         self.time_embed = nn.Sequential(
@@ -302,9 +313,10 @@ class TransDecoder(nn.Module):
         decoder_norm = nn.LayerNorm(hidden_size)
         self.model = nn.TransformerDecoder(decoder_layer, num_layers=num_decoder_layers, norm=decoder_norm)
 
-    def forward_embedding(self, tgt_tokens):
-        # up-projection
+    def forward_embedding(self, tgt_tokens, tgt_cxt):
         embed = self.embed_scale * self.location_embedding(tgt_tokens)
+        if self.duration_embedding is not None:
+            embed += self.duration_embedding(tgt_cxt["duration"])
 
         return embed
 
@@ -371,6 +383,13 @@ class TransformerNetModel(nn.Module):
         # location embedding
         self.location_embedding = nn.Embedding(model_args.max_location, model_args.input_dims, padding_idx=0)
         self.input_up_proj = nn.Linear(model_args.input_dims, model_args.hidden_size, bias=False)
+        # duration embedding
+        self.if_include_duration = model_args.if_include_duration
+        if self.if_include_duration:
+            duration_embedding = nn.Linear(1, model_args.input_dims, bias=False)
+        else:
+            duration_embedding = None
+
         # position embedding
         self.position_embedding = nn.Embedding(max_positions, model_args.hidden_size)
 
@@ -399,6 +418,7 @@ class TransformerNetModel(nn.Module):
             num_attention_heads=model_args.num_attention_heads,
             dropout=model_args.dropout,
             location_embedding=self.location_embedding,
+            duration_embedding=duration_embedding,
             position_embedding=self.position_embedding,
             input_up_proj=self.input_up_proj,
             output_down_proj=self.output_down_proj,
@@ -451,7 +471,7 @@ class TransformerNetModel(nn.Module):
         mask = tgt.ne(0)
 
         # diffusion
-        z_0 = self.decoder.forward_embedding(tgt)
+        z_0 = self.decoder.forward_embedding(tgt, tgt_cxt)
         model_t = t * self.timesteps_scale
 
         noise = torch.randn_like(z_0) * self.diff_args.rescaling_factor
@@ -470,7 +490,7 @@ class TransformerNetModel(nn.Module):
 
         terms = {}
 
-        # Lt
+        #
         terms["mse"] = mean_flat((z_0_hat - z_0).square(), mask)
 
         # Rounding error: embedding regularization
@@ -514,6 +534,7 @@ class TransformerNetModel(nn.Module):
         param_dict = {pn: p for pn, p in self.named_parameters()}
         # filter out those that do not require grad
         param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+
         # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
         # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
         decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
@@ -526,6 +547,7 @@ class TransformerNetModel(nn.Module):
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
         print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
         print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == "cuda"
