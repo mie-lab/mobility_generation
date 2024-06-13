@@ -181,20 +181,21 @@ class TransEncoder(nn.Module):
         num_attention_heads=12,
         dropout=0,
         location_embedding=None,
+        duration_embedding=None,
         position_embedding=None,
         input_up_proj=None,
         embed_xy=False,
         embed_poi=False,
         poi_dim=32,
-        include_duration=False,
         device="",
     ):
         super().__init__()
 
         self.padding_idx = location_embedding.padding_idx
         self.location_embedding = location_embedding
-
         self.embed_scale = math.sqrt(location_embedding.embedding_dim)
+        #
+        self.duration_embedding = duration_embedding
 
         # up projection (shared)
         self.input_up_proj = input_up_proj
@@ -218,7 +219,9 @@ class TransEncoder(nn.Module):
         self.LayerNorm = nn.LayerNorm(hidden_size)
         self.dropout = nn.Dropout(dropout)
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=num_attention_heads, batch_first=True)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_size, nhead=num_attention_heads, activation="gelu", batch_first=True
+        )
         encoder_norm = nn.LayerNorm(hidden_size)
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers, norm=encoder_norm)
 
@@ -239,6 +242,9 @@ class TransEncoder(nn.Module):
     def forward_embedding(self, src_tokens, context=None):
         token_embedding = self.location_embedding(src_tokens)
         x = self.embed_scale * token_embedding
+
+        if self.duration_embedding is not None:
+            x += self.duration_embedding(context["duration"].unsqueeze(-1))
 
         # up-projection
         x = self.input_up_proj(x)
@@ -309,14 +315,16 @@ class TransDecoder(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         #
-        decoder_layer = nn.TransformerDecoderLayer(d_model=hidden_size, nhead=num_attention_heads, batch_first=True)
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=hidden_size, nhead=num_attention_heads, activation="gelu", batch_first=True
+        )
         decoder_norm = nn.LayerNorm(hidden_size)
         self.model = nn.TransformerDecoder(decoder_layer, num_layers=num_decoder_layers, norm=decoder_norm)
 
     def forward_embedding(self, tgt_tokens, tgt_cxt):
         embed = self.embed_scale * self.location_embedding(tgt_tokens)
         if self.duration_embedding is not None:
-            embed += self.duration_embedding(tgt_cxt["duration"])
+            embed += self.duration_embedding(tgt_cxt["duration"].unsqueeze(-1))
 
         return embed
 
@@ -403,6 +411,7 @@ class TransformerNetModel(nn.Module):
             num_attention_heads=model_args.num_attention_heads,
             dropout=model_args.dropout,
             location_embedding=self.location_embedding,
+            duration_embedding=duration_embedding,
             position_embedding=self.position_embedding,
             input_up_proj=self.input_up_proj,
             embed_xy=model_args.if_embed_xy,
@@ -426,8 +435,12 @@ class TransformerNetModel(nn.Module):
         )
 
         self.lm_head = nn.Linear(model_args.input_dims, model_args.max_location, bias=False)
+        # weight sharing
         with torch.no_grad():
             self.lm_head.weight = self.location_embedding.weight
+        # duration head
+        if self.if_include_duration:
+            self.lm_head_duration = nn.Linear(model_args.input_dims, 1, bias=False)
 
         self.training_diffusion = GaussianDiffusion(
             betas=get_named_beta_schedule(
@@ -460,6 +473,9 @@ class TransformerNetModel(nn.Module):
 
     def get_logits(self, hidden_repr):
         return self.lm_head(hidden_repr)
+
+    def get_duration_prediction(self, hidden_repr):
+        return self.lm_head_duration(hidden_repr)
 
     def forward(self, src, tgt, src_ctx, tgt_cxt, t):
         """Compute training losses"""
@@ -494,9 +510,14 @@ class TransformerNetModel(nn.Module):
         terms["mse"] = mean_flat((z_0_hat - z_0).square(), mask)
 
         # Rounding error: embedding regularization
-        decoder_nll = token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
+        terms["head_nll"] = token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
 
-        terms["loss"] = terms["mse"] + decoder_nll
+        terms["loss"] = terms["mse"] + terms["head_nll"]
+
+        if self.if_include_duration:
+            duration_pred = self.get_duration_prediction(z_0)
+            terms["head_mse"] = prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
+            terms["loss"] += terms["head_mse"]
 
         return terms
 
@@ -566,6 +587,18 @@ def token_discrete_loss(logits, input_ids, mask=None, label_smoothing=0):
     """
     loss_fct = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=0, label_smoothing=label_smoothing)
     decoder_nll = loss_fct(logits.view(-1, logits.size(-1)), input_ids.view(-1)).view(input_ids.shape)
+    if mask is not None:
+        decoder_nll *= mask
+        decoder_nll = decoder_nll.sum(dim=-1) / mask.sum(dim=-1)
+    else:
+        decoder_nll = decoder_nll.mean(dim=-1)
+
+    return decoder_nll
+
+
+def prediction_mse_loss(pred, true_tgt, mask=None):
+    loss_fct = torch.nn.MSELoss(reduction="none")
+    decoder_nll = loss_fct(pred.squeeze(-1), true_tgt).view(true_tgt.shape)
     if mask is not None:
         decoder_nll *= mask
         decoder_nll = decoder_nll.sum(dim=-1) / mask.sum(dim=-1)
