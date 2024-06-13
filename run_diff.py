@@ -62,7 +62,7 @@ def main():
     # print('#'*30, 'CUDA_VISIBLE_DEVICES', os.environ['CUDA_VISIBLE_DEVICES'])
     config.device = get_device()
     model = create_model(config)
-    model.to(get_device())  # DEBUG **
+    model.to(get_device())
 
     torch.set_float32_matmul_precision("high")
 

@@ -4,13 +4,13 @@ misc:
   wandb_name: test
   split: train
   dataset_variation: tiny 
-  level: 13
+  level: 14
   src_min_days: 14
   tgt_min_days: 7
 
   # seq_len: 512
-  # 14882 (28743)
-  max_location: 14882 # 28743, 14882
+  # 14882 -> 14976 (28743 -> 28800)
+  max_location: 28800 # 28800, 14976
 
   seed: 101
   # 
@@ -52,7 +52,7 @@ diffusion:
 
 model:
   # 
-  num_layers: 2
+  num_layers: 4
   hidden_size: 512
   num_attention_heads: 8
   dropout: 0.1
