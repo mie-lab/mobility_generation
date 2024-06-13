@@ -212,7 +212,9 @@ class TransEncoder(nn.Module):
         self.LayerNorm = nn.LayerNorm(hidden_size)
         self.dropout = nn.Dropout(dropout)
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_size, nhead=num_attention_heads, batch_first=True)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_size, nhead=num_attention_heads, activation="gelu", batch_first=True
+        )
         encoder_norm = nn.LayerNorm(hidden_size)
         self.model = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers, norm=encoder_norm)
 
@@ -298,7 +300,9 @@ class TransDecoder(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         #
-        decoder_layer = nn.TransformerDecoderLayer(d_model=hidden_size, nhead=num_attention_heads, batch_first=True)
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=hidden_size, activation="gelu", nhead=num_attention_heads, batch_first=True
+        )
         decoder_norm = nn.LayerNorm(hidden_size)
         self.model = nn.TransformerDecoder(decoder_layer, num_layers=num_decoder_layers, norm=decoder_norm)
 
