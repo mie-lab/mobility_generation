@@ -427,10 +427,12 @@ def get_sequence(args, split="train"):
         processed_dict["src_mode"].append(record["src_mode"])
 
         # for padding, add normalization (max 2880 = 60 * 24 * 2 - 1 + 1 (padding))
-        processed_dict["src_duration"].append((record["src_duration"] + 1) / 2880)
+        dur = (2 * (record["src_duration"] + 1) / 2880) - 1
+        processed_dict["src_duration"].append(dur)
 
         processed_dict["tgt"].append(record["tgt"])
-        processed_dict["tgt_duration"].append((record["tgt_duration"] + 1) / 2880)
+        dur = (2 * (record["tgt_duration"] + 1) / 2880) - 1
+        processed_dict["tgt_duration"].append(dur)
         processed_dict["tgt_mode"].append(record["tgt_mode"])
 
     print("### Data samples...\n", processed_dict["src"][0][:5], processed_dict["tgt"][0][:5])

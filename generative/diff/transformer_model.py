@@ -244,14 +244,15 @@ class TransEncoder(nn.Module):
         }
 
     def forward_embedding(self, src_tokens, context=None):
-        token_embedding = self.location_embedding(src_tokens)
-        x = self.embed_scale * token_embedding
+        x = self.location_embedding(src_tokens)
 
         if self.duration_embedding is not None:
             x += self.duration_embedding(context["duration"].unsqueeze(-1))
 
         if self.mode_embedding is not None:
             x += self.mode_embedding(context["mode"])
+
+        x = self.embed_scale * x
 
         # up-projection
         x = self.input_up_proj(x)
@@ -333,7 +334,7 @@ class TransDecoder(nn.Module):
         self.model = nn.TransformerDecoder(decoder_layer, num_layers=num_decoder_layers, norm=decoder_norm)
 
     def forward_embedding(self, tgt_tokens, tgt_cxt):
-        embed = self.embed_scale * self.location_embedding(tgt_tokens)
+        embed = self.location_embedding(tgt_tokens)
 
         if self.duration_embedding is not None:
             embed += self.duration_embedding(tgt_cxt["duration"].unsqueeze(-1))
@@ -341,6 +342,7 @@ class TransDecoder(nn.Module):
         if self.mode_embedding is not None:
             embed += self.mode_embedding(tgt_cxt["mode"])
 
+        embed = self.embed_scale * embed
         return embed
 
     def forward_hidden(self, z_t, t, prev_z_0_hat=None):
@@ -578,7 +580,7 @@ class TransformerNetModel(nn.Module):
             tokens = self.get_logits(z_0_hat).argmax(-1)
             #
             ctx = {}
-            ctx["duration"] = self.get_duration_prediction(z_0_hat).squeeze(-1)
+            ctx["duration"] = torch.clamp(self.get_duration_prediction(z_0_hat).squeeze(-1), min=-1, max=1)
             ctx["mode"] = self.get_mode_prediction(z_0_hat).argmax(-1)
             #
             z_0_hat = self.decoder.forward_embedding(tokens, tgt_cxt=ctx)
@@ -596,6 +598,8 @@ class TransformerNetModel(nn.Module):
     def forward_output_layer(self, z_t):
         scores, tokens = self.get_logits(z_t).log_softmax(-1).max(-1)
         durations = self.get_duration_prediction(z_t).squeeze(-1)
+        durations = (torch.clamp(durations, min=-1, max=1) + 1) / 2 * 2880
+
         _, modes = self.get_mode_prediction(z_t).log_softmax(-1).max(-1)
 
         return tokens, durations, modes, scores

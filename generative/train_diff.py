@@ -28,24 +28,21 @@ def _get_sqrt_schedule_with_warmup_lr_lambda(
     current_step: int,
     *,
     num_warmup_steps: int,
-    num_decay_steps: int,
     min_decay: float,
     num_training_steps: int,
     num_cycles: float,
 ):
     if current_step < num_warmup_steps:
         return float(current_step) / float(max(1, num_warmup_steps))
-    if current_step > num_decay_steps:
-        return min_decay
     progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
-    return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
+    lr_lambda = max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
+    return min(lr_lambda, min_decay)
 
 
 def get_sqrt_schedule_with_warmup(
     optimizer: Optimizer,
     num_warmup_steps: int,
     num_training_steps: int,
-    num_decay_steps: int,
     min_decay: float,
     num_cycles: float = 0.5,
     last_epoch: int = -1,
@@ -57,7 +54,6 @@ def get_sqrt_schedule_with_warmup(
         num_training_steps=num_training_steps,
         num_cycles=num_cycles,
         min_decay=min_decay,
-        num_decay_steps=num_decay_steps,
     )
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
@@ -127,14 +123,13 @@ class TrainLoop:
             self.opt,
             num_warmup_steps=len(self.data) * warmup_epochs,
             num_training_steps=len(self.data) * self.decay_epochs,
-            num_decay_steps=len(self.data) * (self.decay_epochs - 20),
             num_cycles=1,
-            min_decay=1e-3,
+            min_decay=5e-3,
         )
 
         self.ema_params = copy.deepcopy(self.master_params)
 
-        if torch.cuda.is_available():  # DEBUG **
+        if torch.cuda.is_available():
             self.use_ddp = True
             print(get_device())
             self.ddp_model = DDP(

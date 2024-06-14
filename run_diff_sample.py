@@ -126,7 +126,12 @@ def main():
         dur_ls = []
         mode_ls = []
 
-        for seq_pred, pred_duration, pred_mode, seq_src, seq_tgt in zip(tokens, durations, modes, src, tgt):
+        tgt_dur_ls = []
+        tgt_mode_ls = []
+
+        for seq_pred, pred_duration, pred_mode, seq_src, seq_tgt, tgt_dur, tgt_mode in zip(
+            tokens, durations, modes, src, tgt, tgt_cxt["duration"], tgt_cxt["mode"]
+        ):
             pred_ls.append(seq_pred.detach().cpu().numpy())
             dur_ls.append(pred_duration.detach().cpu().numpy())
             mode_ls.append(pred_mode.detach().cpu().numpy())
@@ -134,13 +139,26 @@ def main():
             tgt_ls.append(seq_tgt.detach().cpu().numpy())
             src_ls.append(seq_src.detach().cpu().numpy())
 
+            tgt_dur_ls.append(tgt_dur.detach().cpu().numpy())
+            tgt_mode_ls.append(tgt_mode.detach().cpu().numpy())
+
         for i in range(world_size):
             if i == rank:  # Write files sequentially
                 fout = open(out_path, "a")
-                for recov, tgt, src, duration, mode in zip(pred_ls, tgt_ls, src_ls, dur_ls, mode_ls):
+                for recov, tgt, src, duration, mode, tgt_dur, tgt_mode in zip(
+                    pred_ls, tgt_ls, src_ls, dur_ls, mode_ls, tgt_dur_ls, tgt_mode_ls
+                ):
                     print(
                         json.dumps(
-                            {"recover": recov, "target": tgt, "source": src, "duration": duration, "mode": mode},
+                            {
+                                "recover": recov,
+                                "target": tgt,
+                                "source": src,
+                                "duration": duration,
+                                "mode": mode,
+                                "tgt_dur": tgt_dur,
+                                "tgt_mode": tgt_mode,
+                            },
                             cls=NumpyArrayEncoder,
                         ),
                         file=fout,
