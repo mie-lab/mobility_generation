@@ -556,12 +556,12 @@ class TransformerNetModel(nn.Module):
         if self.if_include_mode:
             mode_pred = self.get_mode_prediction(z_0)
             terms["head_mode"] = token_discrete_loss(mode_pred, tgt_cxt["mode"], mask=mask, label_smoothing=0.1)
-            terms["loss"] += terms["head_mode"]
+            terms["loss"] += 0.5 * terms["head_mode"] / (terms["head_mode"] / terms["head_nll"]).detach()
 
         if self.if_include_duration:
             duration_pred = self.get_duration_prediction(z_0)
             terms["head_mse"] = prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
-            terms["loss"] += terms["head_mse"]
+            terms["loss"] += 0.5 * terms["head_mse"] / (terms["head_mse"] / terms["head_nll"]).detach()
 
         return terms
 
