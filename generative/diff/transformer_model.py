@@ -476,7 +476,11 @@ class TransformerNetModel(nn.Module):
 
         # duration head
         if self.if_include_duration:
-            self.lm_head_duration = nn.Linear(model_args.input_dims, 1, bias=False)
+            self.lm_head_duration = nn.Sequential(
+                nn.Linear(model_args.input_dims, model_args.input_dims),
+                nn.ReLU(),
+                nn.Linear(model_args.input_dims, 1),
+            )
 
         self.training_diffusion = GaussianDiffusion(
             betas=get_named_beta_schedule(
@@ -556,12 +560,14 @@ class TransformerNetModel(nn.Module):
         if self.if_include_mode:
             mode_pred = self.get_mode_prediction(z_0)
             terms["head_mode"] = token_discrete_loss(mode_pred, tgt_cxt["mode"], mask=mask, label_smoothing=0.1)
-            terms["loss"] += 0.5 * terms["head_mode"] / (terms["head_mode"] / terms["head_nll"]).detach()
+            # terms["loss"] += 0.1 * terms["head_mode"] / (terms["head_mode"] / terms["head_nll"]).detach()
+            terms["loss"] += terms["head_mode"]
 
         if self.if_include_duration:
             duration_pred = self.get_duration_prediction(z_0)
             terms["head_mse"] = prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
-            terms["loss"] += 0.5 * terms["head_mse"] / (terms["head_mse"] / terms["head_nll"]).detach()
+            # terms["loss"] += 0.1 * terms["head_mse"] / (terms["head_mse"] / terms["head_nll"]).detach()
+            terms["loss"] += terms["head_mse"]
 
         return terms
 
@@ -597,6 +603,7 @@ class TransformerNetModel(nn.Module):
 
     def forward_output_layer(self, z_t):
         scores, tokens = self.get_logits(z_t).log_softmax(-1).max(-1)
+
         durations = self.get_duration_prediction(z_t).squeeze(-1)
         durations = (torch.clamp(durations, min=-1, max=1) + 1) / 2 * 2880
 
