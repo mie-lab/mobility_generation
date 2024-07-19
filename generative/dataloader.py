@@ -442,10 +442,10 @@ def get_sequence(args, split="train"):
 
 
 class DiffSeqDataset(torch.utils.data.Dataset):
-    def __init__(self, text_datasets, data_args, model_emb=None):
+    def __init__(self, datasets, data_args, model_emb=None):
         super().__init__()
-        self.text_datasets = text_datasets
-        self.length = len(self.text_datasets["train"])
+        self.datasets = datasets
+        self.length = len(self.datasets["train"])
         self.data_args = data_args
         self.model_emb = model_emb
 
@@ -464,7 +464,7 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         return self.length
 
     def __getitem__(self, idx):
-        current_data = self.text_datasets["train"][idx]
+        current_data = self.datasets["train"][idx]
 
         src = torch.tensor(current_data["src"])
         tgt = torch.tensor(current_data["tgt"])
