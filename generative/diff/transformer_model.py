@@ -478,8 +478,8 @@ class TransformerNetModel(nn.Module):
         if self.if_include_duration:
             self.lm_head_duration = nn.Sequential(
                 nn.Linear(model_args.input_dims, model_args.input_dims),
-                nn.ReLU(),
-                nn.Linear(model_args.input_dims, 1),
+                nn.GELU(approximate="tanh"),
+                nn.Linear(model_args.input_dims, 1, bias=False),
             )
 
         self.training_diffusion = GaussianDiffusion(
