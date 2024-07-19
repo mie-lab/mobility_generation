@@ -1,8 +1,8 @@
 misc:
   dataset: mobis
 
-  dataset_variation: small
-  level: "10_13"
+  dataset_variation: all
+  level: 13
   src_min_days: 14
   tgt_min_days: 7
 
@@ -14,6 +14,11 @@ misc:
   verbose: True
 
   seed: 101
+  # 
+  if_embed_xy: False
+  if_embed_poi: False
+  if_include_duration: False
+  if_include_mode: False
 
 model:
   networkName: markov
