@@ -145,28 +145,38 @@ def get_sequence(args, split="train"):
     processed_dict = {
         "src": [],
         "user": [],
-        "src_xy": [],
-        "src_duration": [],
-        "src_mode": [],
+        "src_time": [],
+        # "src_duration": [],
+        "src_weekday": [],
+        # "src_mode": [],
         "tgt": [],
-        "tgt_duration": [],
-        "tgt_mode": [],
+        # "tgt_duration": [],
+        # "tgt_mode": [],
     }
 
     for record in sequence_ls:
         processed_dict["src"].append(record["src"])
-        processed_dict["user"].append(record["src_user"])
-        processed_dict["src_xy"].append(record["src_xy"])
-        processed_dict["src_mode"].append(record["src_mode"])
-
-        # for padding, add normalization (max 2880 = 60 * 24 * 2 - 1 + 1 (padding))
-        dur = (2 * (record["src_duration"] + 1) / 2880) - 1
-        processed_dict["src_duration"].append(dur)
-
         processed_dict["tgt"].append(record["tgt"][0])
-        dur = (2 * (record["tgt_duration"][0] + 1) / 2880) - 1
-        processed_dict["tgt_duration"].append(dur)
-        processed_dict["tgt_mode"].append(record["tgt_mode"][0])
+
+        # Markov and mhsa
+        processed_dict["user"].append(record["src_user"])
+
+        # from original mhsa paper
+        # binned into 15 min, add 1 for padding
+        processed_dict["src_time"].append(record["src_startmin"] // 15 + 1)
+        # add 1 for padding
+        processed_dict["src_weekday"].append(record["src_weekday"] + 1)
+
+        # attributes as input
+        # processed_dict["src_mode"].append(record["src_mode"])
+        # for padding, add normalization to [-1, 1] (max 2880 = 60 * 24 * 2 - 1 + 1 (padding))
+        # dur = (2 * (record["src_duration"] + 1) / 2880) - 1
+        # processed_dict["src_duration"].append(dur)
+
+        # attributes as output
+        # dur = (2 * (record["tgt_duration"][0] + 1) / 2880) - 1
+        # processed_dict["tgt_duration"].append(dur)
+        # processed_dict["tgt_mode"].append(record["tgt_mode"][0])
 
     print("### Data samples...\n", processed_dict["src"][0][:5], processed_dict["tgt"][0])
 
@@ -182,8 +192,8 @@ class PredictionDataset(torch.utils.data.Dataset):
         self.datasets = datasets
         self.length = len(self.datasets["data"])
 
+        self.if_embed_time = data_args.if_embed_time
         self.if_embed_poi = data_args.if_embed_poi
-        self.if_embed_xy = data_args.if_embed_xy
 
         self.if_include_duration = data_args.if_include_duration
         self.if_include_mode = data_args.if_include_mode
@@ -204,10 +214,11 @@ class PredictionDataset(torch.utils.data.Dataset):
         src_ctx = {}
         tgt_cxt = {}
 
-        src_ctx["user"] = torch.tensor(selected["user"])
+        src_ctx["user"] = torch.tensor(selected["user"], dtype=torch.int64)
 
-        if self.if_embed_xy:
-            src_ctx["xy"] = torch.tensor(selected["src_xy"], dtype=torch.float32)
+        if self.if_embed_time:
+            src_ctx["time"] = torch.tensor(selected["src_time"], dtype=torch.int64)
+            src_ctx["weekday"] = torch.tensor(selected["src_weekday"], dtype=torch.int64)
 
         # construct the pois
         if self.if_embed_poi:

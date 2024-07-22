@@ -89,16 +89,18 @@ class AllEmbedding(nn.Module):
         # location embedding
         self.emb_loc = nn.Embedding(config.max_location, d_input)
 
+        # Attributes
+        self.if_include_duration = config.if_include_duration
+        self.if_include_mode = config.if_include_mode
+        if self.if_include_duration:
+            self.duration_embedding = nn.Linear(1, d_input, bias=False)
+        if self.if_include_mode:
+            self.mode_embedding = nn.Embedding(config.max_mode, d_input, padding_idx=0)
+
         # time is in minutes, possible time for each day is 60 * 24 // 15
         self.if_include_time = config.if_embed_time
         if self.if_include_time:
             self.temporal_embedding = TemporalEmbedding(d_input, emb_info)
-
-        # duration is in minutes, possible duration for two days is 60 * 24 * 2 // 30
-        self.if_include_duration = config.if_embed_duration
-        if self.if_include_duration:
-            # add 1 for padding
-            self.emb_duration = nn.Embedding((60 * 24 * 2) // 30 + 1, d_input)
 
         # poi
         self.if_include_poi = config.if_embed_poi
@@ -113,11 +115,14 @@ class AllEmbedding(nn.Module):
     def forward(self, src, context_dict) -> Tensor:
         emb = self.emb_loc(src)
 
+        # Attributes
+        if self.if_include_duration:
+            emb += self.duration_embedding(context_dict["duration"].unsqueeze(-1))
+        if self.if_include_mode:
+            emb += self.mode_embedding(context_dict["mode"])
+
         if self.if_include_time:
             emb = emb + self.temporal_embedding(context_dict["time"], context_dict["weekday"])
-
-        if self.if_include_duration:
-            emb = emb + self.emb_duration(context_dict["duration"])
 
         if self.if_include_poi:
             emb = emb + self.poi_net(context_dict["poi"])

@@ -43,8 +43,9 @@ User split 7:2:1 according to time.
 - MHSA: 
     - Use GPT2 implementation
     - Use previous 7 days, predict the next location. 
-    - hyperparameter:
     - Test runs (small) for level 14 with features (checked that all features are useful).
+    - hyperparameter:
+        - 4508672 (training time ~124 min)
 
 - Markov: 
     - Train user model with train and validation (7+2) sequences. 

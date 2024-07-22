@@ -227,7 +227,7 @@ def single_train(
     n_batches = len(train_loader)
 
     CEL = torch.nn.CrossEntropyLoss(reduction="mean", ignore_index=0)
-    MSE = torch.nn.MSELoss(reduction="mean")
+    # MSE = torch.nn.MSELoss(reduction="mean")
 
     # define start time
     start_time = time.time()
@@ -238,11 +238,13 @@ def single_train(
         x, y, x_dict, y_dict = send_to_device(inputs, device, config)
 
         with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=config.use_fp16):
-            logits, dur_pred = model(x, x_dict)
+            # logits, dur_pred = model(x, x_dict)
+            logits = model(x, x_dict)
 
             loc_loss_size = CEL(logits, y.reshape(-1))
-            dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
-            loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
+            # dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
+            # loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
+            loss = loc_loss_size
 
         scaler.scale(loss).backward()
 
@@ -293,18 +295,20 @@ def single_validate(config, model, data_loader, device):
 
     result_arr = np.array([0, 0, 0, 0, 0, 0], dtype=np.float32)
     CEL = torch.nn.CrossEntropyLoss(reduction="mean", ignore_index=0)
-    MSE = torch.nn.MSELoss(reduction="mean")
+    # MSE = torch.nn.MSELoss(reduction="mean")
     # change to validation mode
     model.eval()
     with torch.no_grad():
         for inputs in data_loader:
             x, y, x_dict, y_dict = send_to_device(inputs, device, config)
 
-            logits, dur_pred = model(x, x_dict)
+            logits = model(x, x_dict)
+            # logits, dur_pred = model(x, x_dict)
 
             loc_loss_size = CEL(logits, y.reshape(-1))
-            dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
-            loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
+            # dur_loss_size = MSE(dur_pred.reshape(-1), y_dict["duration"].reshape(-1))
+            # loss = loc_loss_size + config.loss_weight * dur_loss_size / (dur_loss_size / loc_loss_size).detach()
+            loss = loc_loss_size
 
             total_val_loss += loss.item()
 
@@ -355,7 +359,8 @@ def single_test(config, model, data_loader, device):
         for inputs in data_loader:
             x, y, x_dict, _ = send_to_device(inputs, device, config)
 
-            logits, _ = model(x, x_dict)
+            # logits, _ = model(x, x_dict)
+            logits = model(x, x_dict)
 
             batch_result_arr, batch_true, batch_top1 = calculate_correct_total_prediction(logits, y)
             result_arr += batch_result_arr
@@ -396,9 +401,10 @@ def generate(config, model, data_loader, device):
 
             len_before = x_dict["len"].detach().clone()
             for _ in range(config.generate_len):
-                logits, dur_pred = model(x, x_dict)
+                # logits, dur_pred = model(x, x_dict)
+                logits = model(x, x_dict)
 
-                pred_loc = top_k_top_p_filtering(logits, top_k=0, top_p=0.99, filter_value=-float("Inf"))
+                pred_loc = top_k_top_p_filtering(logits, top_k=500, top_p=0.99, filter_value=-float("Inf"))
 
                 # append to the end of sequence for next prediction
                 x = torch.stack(

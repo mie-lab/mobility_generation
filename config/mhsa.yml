@@ -1,24 +1,26 @@
 misc:
   dataset: mobis
 
-  dataset_variation: small
-  level: "10_13"
+  dataset_variation: all
+  level: 13
   src_min_days: 14
   tgt_min_days: 7
 
   split: test
   use_pretrain: True
-  pretrain_filepath: mobis_mhsa_1712332379
-  model_name: model_14.pt
+  pretrain_filepath: mobis_mhsa_1721648926
+  model_name: model_15.pt
   generate_len: 50
   # 
   if_embed_time: False
-  if_embed_user: False
   if_embed_poi: False
-  if_embed_duration: False
+  # attributes
+  if_include_duration: False
+  if_include_mode: False
 
-  # 14882 + 1 for seperation
-  max_location: 14883
+  # 14882 -> 14976 (28743 -> 28800)
+  max_location: 14976  # 28800, 14976
+  max_mode: 8  # 7+1 padding
 
   verbose: True
   debug: False
@@ -32,7 +34,7 @@ misc:
 
 embedding:
   base_emb_size: 128
-  poi_original_size: 16
+  poi_original_size: 32
   
 
 model:
