@@ -61,7 +61,7 @@ TODO: hyper-parameter search
 
 - EPR
 - TimeGeo (TODO:)
-- Container (TODO:)
+- Container
 
 ### With neural generative models.
 
