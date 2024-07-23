@@ -69,6 +69,7 @@ User split 7:2:1 according to time.
 Use 4 weeks as input
 
 - moveSim
+    - included duration simulation
     - Generator: 
         - Samples from emperical visit frequency
         - Inputs Physical distance, function similarity, and historical transition matrices

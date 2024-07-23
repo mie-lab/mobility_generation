@@ -146,11 +146,11 @@ def get_sequence(args, split="train"):
         "src": [],
         "user": [],
         "src_time": [],
-        # "src_duration": [],
+        "src_duration": [],
         "src_weekday": [],
         # "src_mode": [],
         "tgt": [],
-        # "tgt_duration": [],
+        "tgt_duration": [],
         # "tgt_mode": [],
     }
 
@@ -173,9 +173,16 @@ def get_sequence(args, split="train"):
         # dur = (2 * (record["src_duration"] + 1) / 2880) - 1
         # processed_dict["src_duration"].append(dur)
 
+        # for GAN
+        processed_dict["src_duration"].append(record["src_duration"] // 30 + 1)
+
         # attributes as output
         # dur = (2 * (record["tgt_duration"][0] + 1) / 2880) - 1
         # processed_dict["tgt_duration"].append(dur)
+
+        # for GAN
+        processed_dict["tgt_duration"].append(record["tgt_duration"][0] // 30 + 1)
+
         # processed_dict["tgt_mode"].append(record["tgt_mode"][0])
 
     print("### Data samples...\n", processed_dict["src"][0][:5], processed_dict["tgt"][0])
