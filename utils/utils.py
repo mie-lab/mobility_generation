@@ -28,6 +28,7 @@ def load_data(sp, loc):
     sp["finished_at"] = pd.to_datetime(sp["finished_at"], format="mixed", yearfirst=True, utc=True).dt.tz_localize(None)
 
     def _get_time_info(df):
+        # TODO: check with activity duration calculation and correct
         min_day = pd.to_datetime(df["started_at"].min().date())
 
         df["start_day"] = (df["started_at"] - min_day).dt.days
@@ -97,7 +98,7 @@ def get_train_test(sp, all_locs=None):
     sp["user_id"] = enc.fit_transform(sp["user_id"].values.reshape(-1, 1)) + 1
 
     # truncate too long duration, >2 days to 2 days
-    sp.loc[sp["act_duration"] > 60 * 24 * 2 - 1, "act_duration"] = 60 * 24 * 2 - 1
+    sp.loc[sp["act_duration"] > 60 * 24 * 2, "act_duration"] = 60 * 24 * 2
 
     # split the datasets, user dependent 0.7, 0.2, 0.1
     train_data, vali_data, test_data = _split_dataset(sp)

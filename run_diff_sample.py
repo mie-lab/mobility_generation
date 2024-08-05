@@ -119,50 +119,40 @@ def main():
 
         tokens, durations, modes, scores = model.forward_output_layer(prev_z_0_hat)
 
-        pred_ls = []
-        tgt_ls = []
-        src_ls = []
+        res_dict_ls = []
 
-        dur_ls = []
-        mode_ls = []
-
-        tgt_dur_ls = []
-        tgt_mode_ls = []
-
-        for seq_pred, pred_duration, pred_mode, seq_src, seq_tgt, tgt_dur, tgt_mode in zip(
-            tokens, durations, modes, src, tgt, tgt_cxt["duration"], tgt_cxt["mode"]
+        for seq_pred, pred_duration, pred_mode, seq_src, seq_tgt, seq_time, src_dur, src_mode, tgt_dur, tgt_mode in zip(
+            tokens,
+            durations,
+            modes,
+            src,
+            tgt,
+            src_ctx["time"],
+            src_ctx["duration"],
+            src_ctx["mode"],
+            tgt_cxt["duration"],
+            tgt_cxt["mode"],
         ):
-            pred_ls.append(seq_pred.detach().cpu().numpy())
-            dur_ls.append(pred_duration.detach().cpu().numpy())
-            mode_ls.append(pred_mode.detach().cpu().numpy())
+            res_dict = {
+                "recover": seq_pred.detach().cpu().numpy(),
+                "target": seq_tgt.detach().cpu().numpy(),
+                "source": seq_src.detach().cpu().numpy(),
+                "seq_time": seq_time.detach().cpu().numpy(),
+                "duration": pred_duration.detach().cpu().numpy(),
+                "mode": pred_mode.detach().cpu().numpy(),
+                "tgt_dur": tgt_dur.detach().cpu().numpy(),
+                "tgt_mode": tgt_mode.detach().cpu().numpy(),
+                "src_dur": src_dur.detach().cpu().numpy(),
+                "src_mode": src_mode.detach().cpu().numpy(),
+            }
 
-            tgt_ls.append(seq_tgt.detach().cpu().numpy())
-            src_ls.append(seq_src.detach().cpu().numpy())
-
-            tgt_dur_ls.append(tgt_dur.detach().cpu().numpy())
-            tgt_mode_ls.append(tgt_mode.detach().cpu().numpy())
+            res_dict_ls.append(res_dict)
 
         for i in range(world_size):
             if i == rank:  # Write files sequentially
                 fout = open(out_path, "a")
-                for recov, tgt, src, duration, mode, tgt_dur, tgt_mode in zip(
-                    pred_ls, tgt_ls, src_ls, dur_ls, mode_ls, tgt_dur_ls, tgt_mode_ls
-                ):
-                    print(
-                        json.dumps(
-                            {
-                                "recover": recov,
-                                "target": tgt,
-                                "source": src,
-                                "duration": duration,
-                                "mode": mode,
-                                "tgt_dur": tgt_dur,
-                                "tgt_mode": tgt_mode,
-                            },
-                            cls=NumpyArrayEncoder,
-                        ),
-                        file=fout,
-                    )
+                for res_dict in res_dict_ls:
+                    print(json.dumps(res_dict, cls=NumpyArrayEncoder), file=fout)
                 fout.close()
             dist.barrier()
 

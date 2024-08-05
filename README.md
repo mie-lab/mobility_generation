@@ -89,15 +89,16 @@ Use 4 weeks as input
     - loss 0.001
     - adding xy coordinate information
         - use geo encoding method
+    - TODO: include time as feature 
 
 
 ## Metrics (TODO: check more metrics from other studies)
 
 - Travel distance 
-- Radius of Gyration
 - Number of repetitive locations
 - Overall visitation frequency
 - Individual visitation frequency
+
 - TODO: Activity duration
 - TODO: Daily visited locations
 - TODO: Motifs distribution

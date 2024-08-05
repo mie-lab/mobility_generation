@@ -52,6 +52,7 @@ class traj_dataset(torch.utils.data.Dataset):
             return_dict["poi"] = torch.tensor(np.stack(selected["poiValues"].values[:-1]), dtype=torch.float32)
 
         # predict without padding, need to add padding in autoregressive prediction
+        # TODO: check with embedding, regression or classification?
         y_dict["duration"] = selected["act_duration"].values[-1] // 30
         return x, y, return_dict, y_dict
 

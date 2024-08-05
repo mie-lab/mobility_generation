@@ -477,8 +477,8 @@ class TransformerNetModel(nn.Module):
         # duration head
         if self.if_include_duration:
             self.lm_head_duration = nn.Sequential(
-                nn.Linear(model_args.input_dims, model_args.input_dims),
-                nn.GELU(approximate="tanh"),
+                # nn.Linear(model_args.input_dims, model_args.input_dims),
+                # nn.GELU(approximate="tanh"),
                 nn.Linear(model_args.input_dims, 1, bias=False),
             )
 
@@ -604,8 +604,10 @@ class TransformerNetModel(nn.Module):
     def forward_output_layer(self, z_t):
         scores, tokens = self.get_logits(z_t).log_softmax(-1).max(-1)
 
-        durations = self.get_duration_prediction(z_t).squeeze(-1)
-        durations = (torch.clamp(durations, min=-1, max=1) + 1) / 2 * 2880
+        # durations \in R ([-1, 1])
+        dur = self.get_duration_prediction(z_t).squeeze(-1)
+        # durations \in [0, 2880]
+        durations = (torch.clamp(dur, min=-1, max=1) + 1) / 2 * 2880
 
         _, modes = self.get_mode_prediction(z_t).log_softmax(-1).max(-1)
 
