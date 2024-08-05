@@ -28,12 +28,18 @@ def load_data(sp, loc):
     sp["finished_at"] = pd.to_datetime(sp["finished_at"], format="mixed", yearfirst=True, utc=True).dt.tz_localize(None)
 
     def _get_time_info(df):
-        # TODO: check with activity duration calculation and correct
         min_day = pd.to_datetime(df["started_at"].min().date())
 
-        df["start_day"] = (df["started_at"] - min_day).dt.days
-        df["start_min"] = df["started_at"].dt.hour * 60 + df["started_at"].dt.minute
-        df["weekday"] = df["started_at"].dt.weekday
+        # get the alighned time with act_duration
+        df["temp_time"] = pd.NA
+        df["temp_time"] = df["finished_at"].shift(1)
+        df.loc[df.index[0], "temp_time"] = df["started_at"].iloc[0]
+
+        df["start_day"] = (df["temp_time"] - min_day).dt.days
+        df["start_min"] = df["temp_time"].dt.hour * 60 + df["temp_time"].dt.minute
+        df["weekday"] = df["temp_time"].dt.weekday
+
+        df = df.drop(columns="temp_time")
         return df
 
     sp = sp.groupby("user_id", group_keys=False).apply(_get_time_info)

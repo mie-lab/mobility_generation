@@ -532,6 +532,7 @@ def _construct_day_graph(df):
         return G
 
 
+# TODO: check how to reuse the function in utils.utils
 def load_data(sp, loc):
     sp = sp.merge(loc.reset_index().drop(columns={"user_id"}), how="left", left_on="location_id", right_on="id")
     sp = sp.drop(columns={"location_id", "id", "center", "extent"})
@@ -546,10 +547,17 @@ def load_data(sp, loc):
     def _get_time_info(df):
         min_day = pd.to_datetime(df["started_at"].min().date())
 
-        df["start_day"] = (df["started_at"] - min_day).dt.days
-        df["start_min"] = df["started_at"].dt.hour * 60 + df["started_at"].dt.minute
-        df["weekday"] = df["started_at"].dt.weekday
-        df["duration"] = (df["duration"] * 60).round()
+        # get the alighned time with act_duration
+        df["temp_time"] = pd.NA
+        df["temp_time"] = df["finished_at"].shift(1)
+        df.loc[df.index[0], "temp_time"] = df["started_at"].iloc[0]
+
+        df["start_day"] = (df["temp_time"] - min_day).dt.days
+        df["start_min"] = df["temp_time"].dt.hour * 60 + df["temp_time"].dt.minute
+        df["weekday"] = df["temp_time"].dt.weekday
+
+        df = df.drop(columns="temp_time")
+        # df["duration"] = (df["duration"] * 60).round()
         return df
 
     sp = sp.groupby("user_id", group_keys=False).apply(_get_time_info)
