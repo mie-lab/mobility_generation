@@ -12,7 +12,7 @@ from torch.nn.utils.rnn import pad_sequence
 disable_progress_bar()
 
 
-def load_data_mechanistic(
+def load_data_mech(
     batch_size,
     shuffle=True,
     data_args=None,

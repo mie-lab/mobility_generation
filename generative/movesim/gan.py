@@ -15,7 +15,7 @@ class AllEmbedding(nn.Module):
         # location embedding
         self.emb_loc = nn.Embedding(config.max_location, config.base_emb_size, padding_idx=0)
         # duration is in minutes, possible duration for two days is 60 * 24 * 2 // 30
-        self.if_include_duration = config.if_embed_duration
+        self.if_include_duration = config.if_include_duration
         if self.if_include_duration:
             # add 1 for padding
             self.emb_duration = nn.Embedding((60 * 24 * 2) // 30 + 1, config.base_emb_size, padding_idx=0)

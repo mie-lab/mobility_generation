@@ -3,25 +3,28 @@ misc:
 
   wandb_name: test
   split: train
-  dataset_variation: tiny 
-  level: 14
+  dataset_variation: small 
+  level: 13
   src_min_days: 14
   tgt_min_days: 7
 
   # seq_len: 512
   # 14882 -> 14976 (28743 -> 28800)
-  max_location: 28800 # 28800, 14976
+  max_location: 14976  # 28800, 14976
+  max_mode: 8  # 7+1 padding
 
   seed: 101
   # 
+  if_embed_time: True
   if_embed_xy: True
   if_embed_poi: True
-  if_diffuse_duration: False
+  if_include_duration: True
+  if_include_mode: True
   
   batch_size: 512
   microbatch: 64
-  log_interval: 100
-  num_workers: 24
+  log_interval: 10
+  num_workers: 0
   
 fp16:
   use_fp16: True
@@ -43,7 +46,7 @@ diffusion:
   rescaling_factor: 1
 
   rounding_loss: True
-  self_cond: True
+  self_cond: False
 
   decoding_steps: 20
   decoding_noise_schedule: sqrt
@@ -52,7 +55,7 @@ diffusion:
 
 model:
   # 
-  num_layers: 4
+  num_layers: 2
   hidden_size: 512
   num_attention_heads: 8
   dropout: 0.1
@@ -60,14 +63,14 @@ model:
 
 
 optimiser:
-  lr: 0.001
+  lr: 0.0005
   weight_decay: 0.01
   ema_rate: 0.9999
   gradient_clipping: 1
 
   # for warmup
-  warmup_epochs: 3
-  decay_epochs: 150
+  warmup_epochs: 2
+  decay_epochs: 10
 
   # training
   max_epochs: 150

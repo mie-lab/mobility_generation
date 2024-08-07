@@ -100,6 +100,7 @@ def main():
         src = src.to(device).long()
         tgt = tgt.to(device).long()
         src_ctx = {k: v.to(device) for k, v in src_ctx.items()}
+        tgt_cxt = {k: v.to(device) for k, v in tgt_cxt.items()}
 
         encoder_out = model.encoder(src, context=src_ctx)
 
@@ -107,7 +108,7 @@ def main():
         mask = torch.ones_like(tgt) == 1
 
         # initialize
-        z_0 = model.decoder.forward_embedding(tgt)
+        z_0 = model.decoder.forward_embedding(tgt, tgt_cxt=tgt_cxt)
         z_t = torch.randn_like(z_0) * config.decoding_rescaling_factor
         z_t = z_t.to(encoder_out["encoder_out"])
 
@@ -116,26 +117,42 @@ def main():
         for step in list(range(config.decoding_steps))[::-1]:
             z_t, prev_z_0_hat = model.forward_decoder(z_t, step, mask, encoder_out, prev_z_0_hat)
 
-        samples, scores = model.forward_output_layer(prev_z_0_hat)
+        tokens, durations, modes, scores = model.forward_output_layer(prev_z_0_hat)
 
-        pred_ls = []
-        tgt_ls = []
-        src_ls = []
+        res_dict_ls = []
 
-        for seq_pred, seq_src, seq_tgt in zip(samples, src, tgt):
-            pred_ls.append(seq_pred.detach().cpu().numpy())
+        for seq_pred, pred_duration, pred_mode, seq_src, seq_tgt, seq_time, src_dur, src_mode, tgt_dur, tgt_mode in zip(
+            tokens,
+            durations,
+            modes,
+            src,
+            tgt,
+            src_ctx["time"],
+            src_ctx["duration"],
+            src_ctx["mode"],
+            tgt_cxt["duration"],
+            tgt_cxt["mode"],
+        ):
+            res_dict = {
+                "recover": seq_pred.detach().cpu().numpy(),
+                "target": seq_tgt.detach().cpu().numpy(),
+                "source": seq_src.detach().cpu().numpy(),
+                "seq_time": seq_time.detach().cpu().numpy(),
+                "duration": pred_duration.detach().cpu().numpy(),
+                "mode": pred_mode.detach().cpu().numpy(),
+                "tgt_dur": tgt_dur.detach().cpu().numpy(),
+                "tgt_mode": tgt_mode.detach().cpu().numpy(),
+                "src_dur": src_dur.detach().cpu().numpy(),
+                "src_mode": src_mode.detach().cpu().numpy(),
+            }
 
-            tgt_ls.append(seq_tgt.detach().cpu().numpy())
-            src_ls.append(seq_src.detach().cpu().numpy())
+            res_dict_ls.append(res_dict)
 
         for i in range(world_size):
             if i == rank:  # Write files sequentially
                 fout = open(out_path, "a")
-                for recov, tgt, src in zip(pred_ls, tgt_ls, src_ls):
-                    print(
-                        json.dumps({"recover": recov, "target": tgt, "source": src}, cls=NumpyArrayEncoder),
-                        file=fout,
-                    )
+                for res_dict in res_dict_ls:
+                    print(json.dumps(res_dict, cls=NumpyArrayEncoder), file=fout)
                 fout.close()
             dist.barrier()
 

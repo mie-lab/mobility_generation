@@ -30,9 +30,16 @@ def load_data(sp, loc):
     def _get_time_info(df):
         min_day = pd.to_datetime(df["started_at"].min().date())
 
-        df["start_day"] = (df["started_at"] - min_day).dt.days
-        df["start_min"] = df["started_at"].dt.hour * 60 + df["started_at"].dt.minute
-        df["weekday"] = df["started_at"].dt.weekday
+        # get the alighned time with act_duration
+        df["temp_time"] = pd.NA
+        df["temp_time"] = df["finished_at"].shift(1)
+        df.loc[df.index[0], "temp_time"] = df["started_at"].iloc[0]
+
+        df["start_day"] = (df["temp_time"] - min_day).dt.days
+        df["start_min"] = df["temp_time"].dt.hour * 60 + df["temp_time"].dt.minute
+        df["weekday"] = df["temp_time"].dt.weekday
+
+        df = df.drop(columns="temp_time")
         return df
 
     sp = sp.groupby("user_id", group_keys=False).apply(_get_time_info)
@@ -97,7 +104,7 @@ def get_train_test(sp, all_locs=None):
     sp["user_id"] = enc.fit_transform(sp["user_id"].values.reshape(-1, 1)) + 1
 
     # truncate too long duration, >2 days to 2 days
-    sp.loc[sp["act_duration"] > 60 * 24 * 2 - 1, "act_duration"] = 60 * 24 * 2 - 1
+    sp.loc[sp["act_duration"] > 60 * 24 * 2, "act_duration"] = 60 * 24 * 2
 
     # split the datasets, user dependent 0.7, 0.2, 0.1
     train_data, vali_data, test_data = _split_dataset(sp)

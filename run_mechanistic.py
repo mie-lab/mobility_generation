@@ -21,14 +21,14 @@ from loc_predict.models.markov import markov_transition_prob
 from utils.utils import load_data, setup_seed, load_config, _split_dataset
 from utils.dist_util import load_state_dict
 from sklearn.linear_model import LinearRegression
-from mechanistic.dataloader import load_data_mechanistic
+from mechanistic.dataloader import load_data_mech
 from mechanistic.models import EPR
 
 from trackintel.geogr import point_haversine_dist
 import powerlaw
 
 
-def get_train_test(sp, all_locs=None):
+def get_train_test_mech(sp, all_locs=None):
     sp.sort_values(by=["user_id", "start_day", "start_min"], inplace=True)
     sp.drop(columns={"started_at", "finished_at"}, inplace=True)
     sp["idx"] = sp.groupby("user_id").cumcount().add(1)
@@ -36,9 +36,6 @@ def get_train_test(sp, all_locs=None):
     # encoder user, 0 reserved for padding
     enc = OrdinalEncoder(dtype=np.int64)
     sp["user_id"] = enc.fit_transform(sp["user_id"].values.reshape(-1, 1)) + 1
-
-    # truncate too long duration, >2 days to 2 days
-    # sp.loc[sp["act_duration"] > 60 * 24 * 2 - 1, "act_duration"] = 60 * 24 * 2 - 1
 
     # split the datasets, user dependent 0.7, 0.2, 0.1
     train_data, vali_data, test_data = _split_dataset(sp)
@@ -57,7 +54,7 @@ def get_train_test(sp, all_locs=None):
     return train_data, vali_data, test_data, all_locs
 
 
-def get_data_for_mechanistic(type):
+def get_data_mech(type):
     sp = pd.read_csv(os.path.join(f"./data/sp_{type}.csv"), index_col="id")
     loc = pd.read_csv(os.path.join("./data/loc_s2_level10_13.csv"), index_col="id")
 
@@ -70,7 +67,7 @@ def get_data_for_mechanistic(type):
     # transform to projected coordinate systems
     all_locs = all_locs.to_crs("EPSG:2056")
 
-    train_data, vali_data, test_data, all_locs = get_train_test(sp, all_locs=all_locs)
+    train_data, vali_data, test_data, all_locs = get_train_test_mech(sp, all_locs=all_locs)
     print(
         f"Max loc id {all_locs.loc_id.max()}, min loc id {all_locs.loc_id.min()}, unique loc id:{all_locs.loc_id.unique().shape[0]}"
     )
@@ -191,7 +188,7 @@ if __name__ == "__main__":
     setup_seed(config.seed)
     timestamp_now = int(datetime.datetime.now().timestamp())
 
-    train_df, vali_df, test_df, all_locs_df = get_data_for_mechanistic(type=config.dataset_variation)
+    train_df, vali_df, test_df, all_locs_df = get_data_mech(type=config.dataset_variation)
 
     # estimate user parameters based on train and validation dataset, checked!
     train_vali_data = pd.concat([train_df, vali_df])
@@ -204,7 +201,7 @@ if __name__ == "__main__":
 
     # test data sequences
     all_data = pd.concat([train_df, vali_df, test_df])
-    data_test = load_data_mechanistic(batch_size=config.batch_size, data_args=config, split="test", shuffle=False)
+    data_test = load_data_mech(batch_size=config.batch_size, data_args=config, split="test", shuffle=False)
 
     generated_dict = {"pred": []}
     for inputs in tqdm(data_test):

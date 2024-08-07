@@ -9,17 +9,49 @@ import numpy as np
 import torch
 import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.optim import AdamW
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import LambdaLR
+from functools import partial
+import math
 
 torch.autograd.set_detect_anomaly(True)
 
 import pickle as pickle
 
-from transformers import get_constant_schedule_with_warmup, get_cosine_with_hard_restarts_schedule_with_warmup
 from utils import logger
 from utils.dist_util import get_device, load_state_dict
 
 from generative.diff.step_sample import LossAwareSampler
+
+
+def _get_sqrt_schedule_with_warmup_lr_lambda(
+    current_step: int, *, num_warmup_steps: int, min_decay: float, num_training_steps: int, num_cycles: int
+):
+    if current_step < num_warmup_steps:
+        return float(current_step) / float(max(1, num_warmup_steps))
+    progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
+    if progress >= 1.0:
+        return min_decay
+    return max(min_decay, 0.5 * (1.0 + math.cos(math.pi * ((float(num_cycles) * progress) % 1.0))))
+
+
+def get_sqrt_schedule_with_warmup(
+    optimizer: Optimizer,
+    num_warmup_steps: int,
+    num_training_steps: int,
+    min_decay: float,
+    num_cycles: float = 0.5,
+    last_epoch: int = -1,
+):
+
+    lr_lambda = partial(
+        _get_sqrt_schedule_with_warmup_lr_lambda,
+        num_warmup_steps=num_warmup_steps,
+        num_training_steps=num_training_steps,
+        num_cycles=num_cycles,
+        min_decay=min_decay,
+    )
+    return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
 class TrainLoop:
@@ -46,6 +78,7 @@ class TrainLoop:
         load_opt=True,
         gradient_clipping=-1.0,
         eval_data=None,
+        self_cond=False,
     ):
         self.model = model
         self.diff_steps = diff_steps
@@ -81,21 +114,18 @@ class TrainLoop:
         # define learning rate schedule
         if load_checkpoint:
             warmup_epochs = 0
-        if self.decay_epochs == 0:
-            self.scheduler = get_constant_schedule_with_warmup(
-                self.opt, num_warmup_steps=len(self.data) * warmup_epochs
-            )
-        else:
-            self.scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(
-                self.opt,
-                num_warmup_steps=len(self.data) * warmup_epochs,
-                num_training_steps=len(self.data) * self.decay_epochs,
-                num_cycles=3,
-            )
+
+        self.scheduler = get_sqrt_schedule_with_warmup(
+            self.opt,
+            num_warmup_steps=len(self.data) * warmup_epochs,
+            num_training_steps=len(self.data) * self.decay_epochs,
+            num_cycles=1,
+            min_decay=5e-2,
+        )
 
         self.ema_params = copy.deepcopy(self.master_params)
 
-        if torch.cuda.is_available():  # DEBUG **
+        if torch.cuda.is_available():
             self.use_ddp = True
             print(get_device())
             self.ddp_model = DDP(
@@ -104,11 +134,11 @@ class TrainLoop:
                 output_device=get_device(),
                 broadcast_buffers=False,
                 bucket_cap_mb=128,
-                find_unused_parameters=True,
+                find_unused_parameters=True if self_cond else False,
             )
         else:
             if dist.get_world_size() > 1:
-                logger.warn("Distributed training requires CUDA. " "Gradients will not be synchronized properly!")
+                logger.warn("Distributed training requires CUDA. Gradients will not be synchronized properly!")
             self.use_ddp = False
             self.ddp_model = self.model
 
@@ -272,19 +302,15 @@ class TrainLoop:
 
             loss.backward()
 
-    def grad_clip(self):
-        max_grad_norm = self.gradient_clipping  # 3.0
-        total_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
-        return total_norm
-
     def optimize_normal(self):
-        total_norm = self.grad_clip()
-        self._log_grad_norm(total_norm)
+        total_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clipping)
+
+        self.log_grad_norm(total_norm)
         self.opt.step()
         self.opt.zero_grad()
         update_ema(self.ema_params, self.master_params, rate=self.ema_rate)
 
-    def _log_grad_norm(self, total_norm):
+    def log_grad_norm(self, total_norm):
         logger.logkv_mean("grad_norm", total_norm)
 
     def log_step(self):

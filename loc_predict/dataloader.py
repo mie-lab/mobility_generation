@@ -52,6 +52,7 @@ class traj_dataset(torch.utils.data.Dataset):
             return_dict["poi"] = torch.tensor(np.stack(selected["poiValues"].values[:-1]), dtype=torch.float32)
 
         # predict without padding, need to add padding in autoregressive prediction
+        # TODO: check with embedding, regression or classification?
         y_dict["duration"] = selected["act_duration"].values[-1] // 30
         return x, y, return_dict, y_dict
 
@@ -123,7 +124,7 @@ def load_data_predict(
 
     data_sequence = get_sequence(data_args, split=split)
 
-    dataset = PredictionDataset(data_sequence)
+    dataset = PredictionDataset(data_sequence, data_args)
 
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, shuffle=shuffle, num_workers=0, collate_fn=collate_fn
@@ -142,25 +143,51 @@ def get_sequence(args, split="train"):
 
     sequence_ls = pickle.load(open(path, "rb"))
 
-    processed_dict = {"src": [], "user": [], "tgt": [], "time": [], "weekday": [], "duration": [], "tgt_duration": []}
+    processed_dict = {
+        "src": [],
+        "user": [],
+        "src_time": [],
+        "src_duration": [],
+        "src_weekday": [],
+        # "src_mode": [],
+        "tgt": [],
+        "tgt_duration": [],
+        # "tgt_mode": [],
+    }
+
     for record in sequence_ls:
         processed_dict["src"].append(record["src"])
-        processed_dict["user"].append(record["src_user"])
-        # binned into 15 min, add 1 for padding
-        processed_dict["time"].append(record["src_startmin"] // 15 + 1)
-        processed_dict["weekday"].append(record["src_weekday"] + 1)
-        # binned in 30 minutes
-        processed_dict["duration"].append(record["src_duration"] // 30 + 1)
-
         processed_dict["tgt"].append(record["tgt"][0])
-        processed_dict["tgt_duration"].append(record["tgt_duration"][0] // 30)
 
-    print(
-        "### Data samples...\n",
-        processed_dict["src"][:1],
-        processed_dict["tgt"][:1],
-        processed_dict["tgt_duration"][:1],
-    )
+        # Markov and mhsa
+        processed_dict["user"].append(record["src_user"])
+
+        # from original mhsa paper
+        # binned into 15 min, add 1 for padding
+        processed_dict["src_time"].append(record["src_startmin"] // 15 + 1)
+        # add 1 for padding
+        processed_dict["src_weekday"].append(record["src_weekday"] + 1)
+
+        # attributes as input
+        # processed_dict["src_mode"].append(record["src_mode"])
+        # for padding, add normalization to [-1, 1] (max 2880 = 60 * 24 * 2 - 1 + 1 (padding))
+        # dur = (2 * (record["src_duration"] + 1) / 2880) - 1
+        # processed_dict["src_duration"].append(dur)
+
+        # for GAN
+        processed_dict["src_duration"].append(record["src_duration"] // 30 + 1)
+
+        # attributes as output
+        # dur = (2 * (record["tgt_duration"][0] + 1) / 2880) - 1
+        # processed_dict["tgt_duration"].append(dur)
+
+        # for GAN
+        processed_dict["tgt_duration"].append(record["tgt_duration"][0] // 30 + 1)
+
+        # processed_dict["tgt_mode"].append(record["tgt_mode"][0])
+
+    print("### Data samples...\n", processed_dict["src"][0][:5], processed_dict["tgt"][0])
+
     raw_datasets = datasets.DatasetDict()
     raw_datasets["data"] = Dataset2.from_dict(processed_dict)
 
@@ -168,35 +195,60 @@ def get_sequence(args, split="train"):
 
 
 class PredictionDataset(torch.utils.data.Dataset):
-    def __init__(self, datasets):
+    def __init__(self, datasets, data_args):
         super().__init__()
-        self.datasets = datasets["data"]
-        self.length = len(self.datasets)
+        self.datasets = datasets
+        self.length = len(self.datasets["data"])
+
+        self.if_embed_time = data_args.if_embed_time
+        self.if_embed_poi = data_args.if_embed_poi
+
+        self.if_include_duration = data_args.if_include_duration
+        self.if_include_mode = data_args.if_include_mode
+
+        if self.if_embed_poi:
+            poi_file_path = f"{data_args.data_dir}/poi_level{data_args.level}.npy"
+            poi_file = np.load(poi_file_path, allow_pickle=True)
+            self.poiValues = poi_file[()]["poiValues"]
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
-        selected = self.datasets[idx]
-        x = torch.tensor(selected["src"])
-        y = torch.tensor(selected["tgt"])
+        selected = self.datasets["data"][idx]
+        src = torch.tensor(selected["src"])
+        tgt = torch.tensor(selected["tgt"])
 
-        x_dict = {}
-        y_dict = {}
+        src_ctx = {}
+        tgt_cxt = {}
 
-        x_dict["user"] = torch.tensor(selected["user"])
-        x_dict["time"] = torch.tensor(selected["time"])
-        x_dict["weekday"] = torch.tensor(selected["weekday"], dtype=torch.int64)
-        x_dict["duration"] = torch.tensor(selected["duration"], dtype=torch.int64)
+        src_ctx["user"] = torch.tensor(selected["user"], dtype=torch.int64)
 
-        y_dict["duration"] = selected["tgt_duration"]
+        if self.if_embed_time:
+            src_ctx["time"] = torch.tensor(selected["src_time"], dtype=torch.int64)
+            src_ctx["weekday"] = torch.tensor(selected["src_weekday"], dtype=torch.int64)
 
-        return x, y, x_dict, y_dict
+        # construct the pois
+        if self.if_embed_poi:
+            ids = np.array(selected["src"])
+            pois = np.take(self.poiValues, ids - 1, axis=0)  # -1 for padding
+            src_ctx["poi"] = torch.tensor(pois, dtype=torch.float32)
+
+        if self.if_include_duration:
+            src_ctx["duration"] = torch.tensor(selected["src_duration"])
+            tgt_cxt["duration"] = torch.tensor(selected["tgt_duration"])
+
+        if self.if_include_mode:
+            src_ctx["mode"] = torch.tensor(selected["src_mode"])
+            tgt_cxt["mode"] = torch.tensor(selected["tgt_mode"])
+
+        return src, tgt, src_ctx, tgt_cxt
 
 
 def collate_fn(batch):
     """function to collate data samples into batch tensors."""
-    src_batch, tgt_batch = [], []
+    src_batch = []
+    tgt_batch = []
 
     # get one sample batch
     src_dict_batch = {"len": []}
@@ -207,11 +259,11 @@ def collate_fn(batch):
     for key in batch[0][-1]:
         tgt_dict_batch[key] = []
 
-    for src_sample, tgt_sample, src_dict, tgt_dict in batch:
-        src_batch.append(src_sample)
-        tgt_batch.append(tgt_sample)
+    for src, tgt, src_dict, tgt_dict in batch:
+        src_batch.append(src)
+        tgt_batch.append(tgt)
 
-        src_dict_batch["len"].append(len(src_sample))
+        src_dict_batch["len"].append(len(src))
         for key in src_dict:
             src_dict_batch[key].append(src_dict[key])
 

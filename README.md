@@ -43,8 +43,9 @@ User split 7:2:1 according to time.
 - MHSA: 
     - Use GPT2 implementation
     - Use previous 7 days, predict the next location. 
-    - hyperparameter:
     - Test runs (small) for level 14 with features (checked that all features are useful).
+    - hyperparameter:
+        - 4508672 (training time ~124 min)
 
 - Markov: 
     - Train user model with train and validation (7+2) sequences. 
@@ -60,7 +61,7 @@ TODO: hyper-parameter search
 
 - EPR
 - TimeGeo (TODO:)
-- Container (TODO:)
+- Container
 
 ### With neural generative models.
 
@@ -68,6 +69,7 @@ User split 7:2:1 according to time.
 Use 4 weeks as input
 
 - moveSim
+    - included duration simulation
     - Generator: 
         - Samples from emperical visit frequency
         - Inputs Physical distance, function similarity, and historical transition matrices
@@ -87,15 +89,16 @@ Use 4 weeks as input
     - loss 0.001
     - adding xy coordinate information
         - use geo encoding method
+    - TODO: include time as feature 
 
 
 ## Metrics (TODO: check more metrics from other studies)
 
 - Travel distance 
-- Radius of Gyration
 - Number of repetitive locations
 - Overall visitation frequency
 - Individual visitation frequency
+
 - TODO: Activity duration
 - TODO: Daily visited locations
 - TODO: Motifs distribution

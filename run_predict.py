@@ -39,14 +39,14 @@ def single_run(train_loader, val_loader, test_loader, config, device, log_dir):
     return result_ls
 
 
-def get_data_for_markov(type):
+def get_data_for_markov(type, level=13):
     sp = pd.read_csv(os.path.join(f"./data/sp_{type}.csv"), index_col="id")
-    loc = pd.read_csv(os.path.join("./data/loc_s2_level10_13.csv"), index_col="id")
+    loc = pd.read_csv(os.path.join(f"./data/loc_s2_level10_{level}.csv"), index_col="id")
 
     sp = load_data(sp, loc)
 
     # get all possible locations
-    all_locs = pd.read_csv("./data/s2_loc_visited_level10_13.csv", index_col="id")
+    all_locs = pd.read_csv(f"./data/s2_loc_visited_level10_{level}.csv", index_col="id")
     all_locs["geometry"] = all_locs["geometry"].apply(wkt.loads)
     all_locs = gpd.GeoDataFrame(all_locs, geometry="geometry", crs="EPSG:4326")
     # transform to projected coordinate systems
@@ -129,7 +129,7 @@ if __name__ == "__main__":
                 )
             fout.close()
     elif "markov" in args.config:  # markov model
-        train_df, vali_df, test_df, all_locs_df = get_data_for_markov(type=config.dataset_variation)
+        train_df, vali_df, test_df, all_locs_df = get_data_for_markov(type=config.dataset_variation, level=config.level)
 
         # construct markov matrix based on train and validation dataset
         train_vali_data = pd.concat([train_df, vali_df])
