@@ -427,8 +427,8 @@ def get_sequence(args, split="train"):
         processed_dict["src_xy"].append(record["src_xy"])
         processed_dict["src_mode"].append(record["src_mode"])
 
-        # time in minutes. TODO: check embedding method
-        processed_dict["src_time"].append(record["src_startmin"][-1])
+        # time in minutes of day, add 1 for padding
+        processed_dict["src_time"].append(record["src_startmin"] + 1)
 
         # add normalization (max 2880 = 60 * 24 * 2), dur \in [-1, 1]
         src_dur = (2 * record["src_duration"] / 2880) - 1
@@ -457,6 +457,7 @@ class DiffSeqDataset(torch.utils.data.Dataset):
 
         self.if_embed_poi = data_args.if_embed_poi
         self.if_embed_xy = data_args.if_embed_xy
+        self.if_embed_time = data_args.if_embed_time
 
         self.if_include_duration = data_args.if_include_duration
         self.if_include_mode = data_args.if_include_mode
@@ -480,6 +481,9 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         if self.if_embed_xy:
             src_ctx["xy"] = torch.tensor(current_data["src_xy"], dtype=torch.float32)
 
+        if self.if_embed_time:
+            src_ctx["time"] = torch.tensor(current_data["src_time"], dtype=torch.float32)
+
         # construct the pois
         if self.if_embed_poi:
             ids = np.array(current_data["src"])
@@ -489,7 +493,6 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         if self.if_include_duration:
             src_ctx["duration"] = torch.tensor(current_data["src_duration"])
             tgt_cxt["duration"] = torch.tensor(current_data["tgt_duration"])
-            src_ctx["time"] = torch.tensor(current_data["src_time"])
 
         if self.if_include_mode:
             src_ctx["mode"] = torch.tensor(current_data["src_mode"])
@@ -522,10 +525,9 @@ def collate_fn(batch):
 
     src_batch = pad_sequence(src_batch, padding_value=0, batch_first=True)
     tgt_batch = pad_sequence(tgt_batch, padding_value=0, batch_first=True)
-    src_ctx_batch["time"] = torch.tensor(src_ctx_batch["time"], dtype=torch.int64)
 
     for key in src_ctx_batch:
-        if key in ["len", "time"]:
+        if key in ["len"]:
             continue
         src_ctx_batch[key] = pad_sequence(src_ctx_batch[key], padding_value=0, batch_first=True)
     for key in tgt_ctx_batch:

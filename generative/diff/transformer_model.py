@@ -45,6 +45,29 @@ def timestep_embedding(timesteps, dim, max_period=10000):
     return embedding
 
 
+class Time2Vec(nn.Module):
+    def __init__(self, input_dim=6, embed_dim=512, act_function=torch.sin):
+        assert embed_dim % input_dim == 0
+        super(Time2Vec, self).__init__()
+
+        self.wnbn = nn.Linear(input_dim, embed_dim - 1, bias=True)
+        self.w0b0 = nn.Linear(input_dim, 1, bias=True)
+        self.act_function = act_function
+
+    def forward(self, x):
+        x = torch.unsqueeze(x, -1)
+
+        # (bs, sequence_length, 1)
+        x_affine_0 = self.w0b0(x)
+
+        # (bs, sequence_length, embed_dim - 1)
+        x_affine_remain = self.act_function(self.wnbn(x))
+
+        # (bs, sequence_length, embed_dim)
+        x_output = torch.cat([x_affine_0, x_affine_remain], dim=-1)
+        return x_output
+
+
 class TheoryGridCellSpatialRelationEncoder(nn.Module):
     """
     Given a list of (deltaX,deltaY), encode them using the position encoding function
@@ -130,13 +153,14 @@ class TheoryGridCellSpatialRelationEncoder(nn.Module):
 
 
 class ContextModel(nn.Module):
-    def __init__(self, input_dims, hidden_dims, embed_xy, embed_poi, poi_dim=None, device=""):
+    def __init__(self, input_dims, hidden_dims, embed_xy, embed_poi, embed_time, poi_dim=None, device=""):
         super().__init__()
 
         self.input_dims = input_dims
         self.hidden_dims = hidden_dims
         self.embed_xy = embed_xy
         self.embed_poi = embed_poi
+        self.embed_time = embed_time
 
         # xy embedding
         if embed_xy:
@@ -163,6 +187,18 @@ class ContextModel(nn.Module):
                 nn.Dropout(0.1),
             )
 
+        # start time embedding
+        if embed_time:
+            self.t2v = Time2Vec(input_dim=1, embed_dim=input_dims, act_function=torch.sin)
+            self.comb_t = nn.Sequential(
+                nn.Linear(hidden_dims + input_dims, hidden_dims),
+                nn.LayerNorm(hidden_dims),
+                nn.ReLU(),
+                nn.Linear(hidden_dims, hidden_dims),
+                nn.LayerNorm(hidden_dims),
+                nn.Dropout(0.1),
+            )
+
     def forward(self, x, context):
         if self.embed_xy:
             res = torch.cat([x, self.encoder(context["xy"])], dim=-1)
@@ -170,6 +206,9 @@ class ContextModel(nn.Module):
         if self.embed_poi:
             res = torch.cat([x, self.poi_up_proj(context["poi"])], dim=-1)
             x = x + self.comb_poi(res)
+        if self.embed_time:
+            res = torch.cat([x, self.t2v(context["time"])], dim=-1)
+            x = x + self.comb_t(res)
         return x
 
 
@@ -185,6 +224,7 @@ class TransEncoder(nn.Module):
         duration_embedding=None,
         position_embedding=None,
         input_up_proj=None,
+        embed_time=False,
         embed_xy=False,
         embed_poi=False,
         poi_dim=32,
@@ -215,6 +255,7 @@ class TransEncoder(nn.Module):
             hidden_size,
             embed_xy,
             embed_poi,
+            embed_time,
             poi_dim=poi_dim,
             device=device,
         )
@@ -440,6 +481,7 @@ class TransformerNetModel(nn.Module):
             duration_embedding=self.duration_embedding,
             position_embedding=self.position_embedding,
             input_up_proj=self.input_up_proj,
+            embed_time=model_args.if_embed_time,
             embed_xy=model_args.if_embed_xy,
             embed_poi=model_args.if_embed_poi,
             poi_dim=model_args.poi_dim,
