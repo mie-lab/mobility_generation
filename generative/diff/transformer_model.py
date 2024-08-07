@@ -369,7 +369,7 @@ class TransDecoder(nn.Module):
 
         #
         decoder_layer = nn.TransformerDecoderLayer(
-            d_model=hidden_size, nhead=num_attention_heads, activation="gelu", batch_first=True
+            d_model=hidden_size, activation="gelu", nhead=num_attention_heads, batch_first=True
         )
         decoder_norm = nn.LayerNorm(hidden_size)
         self.model = nn.TransformerDecoder(decoder_layer, num_layers=num_decoder_layers, norm=decoder_norm)
