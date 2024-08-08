@@ -562,7 +562,7 @@ class TransformerNetModel(nn.Module):
     def get_mode_prediction(self, hidden_repr):
         return self.lm_head_mode(hidden_repr)
 
-    def get_loss_diffusion(self, rep, src, tgt, src_ctx, t):
+    def get_representation(self, src, tgt, src_ctx, tgt_cxt, t):
         # encoding
         encoder_out = self.encoder(src, context=src_ctx)
 
@@ -570,46 +570,41 @@ class TransformerNetModel(nn.Module):
         mask = tgt.ne(0)
 
         # diffusion
+        z_0 = self.decoder.forward_embedding(tgt, tgt_cxt)
         model_t = t * self.timesteps_scale
 
-        noise = torch.randn_like(rep) * self.diff_args.rescaling_factor
+        noise = torch.randn_like(z_0) * self.diff_args.rescaling_factor
         # reparametrization trick
-        z_t = self.training_diffusion.q_sample(rep, t, noise).type_as(rep)
+        z_t = self.training_diffusion.q_sample(z_0, t, noise).type_as(z_0)
 
         # self-conditioning
-        prev_z_0_hat = torch.zeros_like(rep)
+        prev_z_0_hat = torch.zeros_like(z_0)
         if self.diff_args.self_cond and random() < 0.5:
             with torch.no_grad():
                 prev_z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat).detach()
 
-        # model use z_t to predict z_0
+        # model use z_t to predict z_0, z_0_hat-> representation
         z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat)
 
+        return z_0, z_0_hat, mask
+
+    def get_loss_diffusion(self, rep, z_0, mask):
         # diffusion loss
-        return mean_flat((z_0_hat - rep).square(), mask)
+        return mean_flat((rep - z_0).square(), mask)
 
-    def get_loss_location(self, rep, tgt):
-        # padding_mask B x T
-        mask = tgt.ne(0)
-
+    def get_loss_location(self, rep, tgt, mask):
         logits = self.get_logits(rep)
         return token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
 
-    def get_loss_mode(self, rep, tgt, tgt_cxt):
-        # padding_mask B x T
-        mask = tgt.ne(0)
-
+    def get_loss_mode(self, rep, tgt_cxt, mask):
         mode_pred = self.get_mode_prediction(rep)
         return token_discrete_loss(mode_pred, tgt_cxt["mode"], mask=mask, label_smoothing=0.1)
 
-    def get_loss_duration(self, rep, tgt, tgt_cxt):
-        # padding_mask B x T
-        mask = tgt.ne(0)
-
+    def get_loss_duration(self, rep, tgt_cxt, mask):
         duration_pred = self.get_duration_prediction(rep)
         return prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
 
-    def forward(self, src, tgt, src_ctx, tgt_cxt, t, loss_weight=[1 / 3, 1 / 3, 1 / 3]):
+    def forward(self, src, tgt, src_ctx, tgt_cxt, t, loss_weight=[1 / 4, 1 / 4, 1 / 4, 1 / 4]):
         """Compute training losses"""
 
         # encoding
@@ -632,7 +627,7 @@ class TransformerNetModel(nn.Module):
             with torch.no_grad():
                 prev_z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat).detach()
 
-        # model use z_t to predict z_0
+        # model use z_t to predict z_0, z_0_hat-> representation
         z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat)
         terms = {}
 
@@ -640,21 +635,21 @@ class TransformerNetModel(nn.Module):
         terms["mse"] = mean_flat((z_0_hat - z_0).square(), mask)
 
         # token nll loss
-        logits = self.get_logits(z_0 if self.diff_args.rounding_loss else z_0_hat)
+        logits = self.get_logits(z_0_hat)
         terms["head_nll"] = token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
-        terms["loss"] = terms["mse"] + terms["head_nll"] * loss_weight[0]
+        terms["loss"] = terms["mse"] * loss_weight[0] + terms["head_nll"] * loss_weight[1]
 
         # mode token nll loss
         if self.if_include_mode:
-            mode_pred = self.get_mode_prediction(z_0)
+            mode_pred = self.get_mode_prediction(z_0_hat)
             terms["head_mode"] = token_discrete_loss(mode_pred, tgt_cxt["mode"], mask=mask, label_smoothing=0.1)
-            terms["loss"] += terms["head_mode"] * loss_weight[1]
+            terms["loss"] += terms["head_mode"] * loss_weight[2]
 
         # duration mse loss
         if self.if_include_duration:
-            duration_pred = self.get_duration_prediction(z_0)
+            duration_pred = self.get_duration_prediction(z_0_hat)
             terms["head_mse"] = prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
-            terms["loss"] += terms["head_mse"] * loss_weight[2]
+            terms["loss"] += terms["head_mse"] * loss_weight[3]
 
         return terms
 

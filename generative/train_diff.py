@@ -207,7 +207,7 @@ class TrainLoop:
             self.step += 1
             current_step += 1
 
-            self.run_step(inputs)
+            self.run_step(inputs, epoch)
             self.scheduler.step()
 
             # log
@@ -239,8 +239,8 @@ class TrainLoop:
 
         return torch.stack([torch.stack(loss) for loss in gathered_loss]).mean().numpy()
 
-    def run_step(self, inputs):
-        self.forward_backward(inputs)
+    def run_step(self, inputs, epoch):
+        self.forward_backward(inputs, epoch)
         self.optimize_normal()
         self.log_step()
 
@@ -257,45 +257,10 @@ class TrainLoop:
             last_batch = (i + self.microbatch) >= src.shape[0]
             t, weights = self.schedule_sampler.sample(src_micro.shape[0], get_device())
 
-            with self.ddp_model.no_sync():
-                grads = []
-                # get the representation
-                with torch.no_grad():
-                    rep = self.ddp_model.module.decoder.forward_embedding(tgt_micro, tgt_ctx_micro).detach()
-                rep.requires_grad_()
-
-                # location
-                self.opt.zero_grad()
-                loss = self.ddp_model.module.get_loss_location(rep, tgt_micro)
-                self.ddp_model.reducer.prepare_for_backward(loss)
-                loss.mean().backward()
-                grads.append(rep.grad.clone().detach())
-                rep.grad.data.zero_()
-
-                # mode
-                self.opt.zero_grad()
-                loss = self.ddp_model.module.get_loss_mode(rep, tgt_micro, tgt_ctx_micro)
-                self.ddp_model.reducer.prepare_for_backward(loss)
-                loss.mean().backward()
-                grads.append(rep.grad.clone().detach())
-                rep.grad.data.zero_()
-
-                # duration
-                self.opt.zero_grad()
-                loss = self.ddp_model.module.get_loss_duration(rep, tgt_micro, tgt_ctx_micro)
-                self.ddp_model.reducer.prepare_for_backward(loss)
-                loss.mean().backward()
-                grads.append(rep.grad.clone().detach())
-                rep.grad.data.zero_()
-
-                sol, _ = MinNormSolver.find_min_norm_element(grads)
-
-                self.opt.zero_grad()
-
             with torch.no_grad():
                 # print(micro_cond.keys())
                 compute_losses = functools.partial(
-                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t, sol
+                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t
                 )
 
                 if last_batch or not self.use_ddp:
@@ -309,7 +274,7 @@ class TrainLoop:
 
         return return_loss
 
-    def forward_backward(self, inputs):
+    def forward_backward(self, inputs, epoch):
         current_device = get_device()
         src, tgt, src_ctx, tgt_cxt = inputs
         for i in range(0, src.shape[0], self.microbatch):
@@ -324,40 +289,55 @@ class TrainLoop:
 
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.use_fp16):
 
-                with self.ddp_model.no_sync():
-                    grads = []
-                    # get the representation
-                    with torch.no_grad():
-                        rep = self.ddp_model.module.decoder.forward_embedding(tgt_micro, tgt_ctx_micro).detach()
-                    rep.requires_grad_()
+                if epoch > 2:
 
-                    # location
-                    self.opt.zero_grad()
-                    loss = self.ddp_model.module.get_loss_location(rep, tgt_micro)
-                    self.ddp_model.reducer.prepare_for_backward(loss)
-                    loss.mean().backward()
-                    grads.append(rep.grad.clone().detach())
-                    rep.grad.data.zero_()
+                    with self.ddp_model.no_sync():
+                        grads = []
+                        # get the representation
+                        with torch.no_grad():
+                            z_0, rep, mask = self.ddp_model.module.get_representation(
+                                src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t
+                            )
+                        rep = rep.detach()
+                        rep.requires_grad_()
 
-                    # mode
-                    self.opt.zero_grad()
-                    loss = self.ddp_model.module.get_loss_mode(rep, tgt_micro, tgt_ctx_micro)
-                    self.ddp_model.reducer.prepare_for_backward(loss)
-                    loss.mean().backward()
-                    grads.append(rep.grad.clone().detach())
-                    rep.grad.data.zero_()
+                        # diffusion
+                        self.opt.zero_grad()
+                        loss = self.ddp_model.module.get_loss_diffusion(rep, z_0, mask)
+                        self.ddp_model.reducer.prepare_for_backward(loss)
+                        loss.mean().backward()
+                        grads.append(rep.grad.clone().detach())
+                        rep.grad.data.zero_()
 
-                    # duration
-                    self.opt.zero_grad()
-                    loss = self.ddp_model.module.get_loss_duration(rep, tgt_micro, tgt_ctx_micro)
-                    self.ddp_model.reducer.prepare_for_backward(loss)
-                    loss.mean().backward()
-                    grads.append(rep.grad.clone().detach())
-                    rep.grad.data.zero_()
+                        # location
+                        self.opt.zero_grad()
+                        loss = self.ddp_model.module.get_loss_location(rep, tgt_micro, mask)
+                        self.ddp_model.reducer.prepare_for_backward(loss)
+                        loss.mean().backward()
+                        grads.append(rep.grad.clone().detach())
+                        rep.grad.data.zero_()
 
-                    sol, _ = MinNormSolver.find_min_norm_element(grads)
+                        # mode
+                        self.opt.zero_grad()
+                        loss = self.ddp_model.module.get_loss_mode(rep, tgt_ctx_micro, mask)
+                        self.ddp_model.reducer.prepare_for_backward(loss)
+                        loss.mean().backward()
+                        grads.append(rep.grad.clone().detach())
+                        rep.grad.data.zero_()
 
-                    self.opt.zero_grad()
+                        # duration
+                        self.opt.zero_grad()
+                        loss = self.ddp_model.module.get_loss_duration(rep, tgt_ctx_micro, mask)
+                        self.ddp_model.reducer.prepare_for_backward(loss)
+                        loss.mean().backward()
+                        grads.append(rep.grad.clone().detach())
+                        rep.grad.data.zero_()
+
+                        sol, _ = MinNormSolver.find_min_norm_element(grads)
+
+                        self.opt.zero_grad()
+                else:
+                    sol = np.ones(4) / 4
 
                 compute_losses = functools.partial(
                     self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t, sol
@@ -439,10 +419,10 @@ def update_ema(target_params, source_params, rate=0.99):
 def log_loss_dict(diff_steps, ts, losses):
     for key, values in losses.items():
         logger.logkv_mean(key, values.mean().item())
-        # Log the quantiles (four quartiles).
-        for sub_t, sub_loss in zip(ts.cpu().numpy(), values.detach().cpu().numpy()):
-            quartile = int(4 * sub_t / diff_steps)
-            logger.logkv_mean(f"{key}_q{quartile}", sub_loss)
+        # # Log the quantiles (four quartiles).
+        # for sub_t, sub_loss in zip(ts.cpu().numpy(), values.detach().cpu().numpy()):
+        #     quartile = int(4 * sub_t / diff_steps)
+        #     logger.logkv_mean(f"{key}_q{quartile}", sub_loss)
 
 
 def is_main_process():
