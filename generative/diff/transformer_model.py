@@ -562,7 +562,54 @@ class TransformerNetModel(nn.Module):
     def get_mode_prediction(self, hidden_repr):
         return self.lm_head_mode(hidden_repr)
 
-    def forward(self, src, tgt, src_ctx, tgt_cxt, t):
+    def get_loss_diffusion(self, rep, src, tgt, src_ctx, t):
+        # encoding
+        encoder_out = self.encoder(src, context=src_ctx)
+
+        # padding_mask B x T
+        mask = tgt.ne(0)
+
+        # diffusion
+        model_t = t * self.timesteps_scale
+
+        noise = torch.randn_like(rep) * self.diff_args.rescaling_factor
+        # reparametrization trick
+        z_t = self.training_diffusion.q_sample(rep, t, noise).type_as(rep)
+
+        # self-conditioning
+        prev_z_0_hat = torch.zeros_like(rep)
+        if self.diff_args.self_cond and random() < 0.5:
+            with torch.no_grad():
+                prev_z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat).detach()
+
+        # model use z_t to predict z_0
+        z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat)
+
+        # diffusion loss
+        return mean_flat((z_0_hat - rep).square(), mask)
+
+    def get_loss_location(self, rep, tgt):
+        # padding_mask B x T
+        mask = tgt.ne(0)
+
+        logits = self.get_logits(rep)
+        return token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
+
+    def get_loss_mode(self, rep, tgt, tgt_cxt):
+        # padding_mask B x T
+        mask = tgt.ne(0)
+
+        mode_pred = self.get_mode_prediction(rep)
+        return token_discrete_loss(mode_pred, tgt_cxt["mode"], mask=mask, label_smoothing=0.1)
+
+    def get_loss_duration(self, rep, tgt, tgt_cxt):
+        # padding_mask B x T
+        mask = tgt.ne(0)
+
+        duration_pred = self.get_duration_prediction(rep)
+        return prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
+
+    def forward(self, src, tgt, src_ctx, tgt_cxt, t, loss_weight=[1 / 3, 1 / 3, 1 / 3]):
         """Compute training losses"""
 
         # encoding
@@ -587,29 +634,27 @@ class TransformerNetModel(nn.Module):
 
         # model use z_t to predict z_0
         z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat)
-        logits = self.get_logits(z_0 if self.diff_args.rounding_loss else z_0_hat)
-
         terms = {}
 
-        #
+        # diffusion loss
         terms["mse"] = mean_flat((z_0_hat - z_0).square(), mask)
 
-        # Rounding error: embedding regularization
+        # token nll loss
+        logits = self.get_logits(z_0 if self.diff_args.rounding_loss else z_0_hat)
         terms["head_nll"] = token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
+        terms["loss"] = terms["mse"] + terms["head_nll"] * loss_weight[0]
 
-        terms["loss"] = terms["mse"] + terms["head_nll"]
-
+        # mode token nll loss
         if self.if_include_mode:
             mode_pred = self.get_mode_prediction(z_0)
             terms["head_mode"] = token_discrete_loss(mode_pred, tgt_cxt["mode"], mask=mask, label_smoothing=0.1)
-            # terms["loss"] += 0.1 * terms["head_mode"] / (terms["head_mode"] / terms["head_nll"]).detach()
-            terms["loss"] += terms["head_mode"]
+            terms["loss"] += terms["head_mode"] * loss_weight[1]
 
+        # duration mse loss
         if self.if_include_duration:
             duration_pred = self.get_duration_prediction(z_0)
             terms["head_mse"] = prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
-            # terms["loss"] += 0.1 * terms["head_mse"] / (terms["head_mse"] / terms["head_nll"]).detach()
-            terms["loss"] += terms["head_mse"]
+            terms["loss"] += terms["head_mse"] * loss_weight[2]
 
         return terms
 

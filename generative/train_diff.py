@@ -20,6 +20,7 @@ import pickle as pickle
 
 from utils import logger
 from utils.dist_util import get_device, load_state_dict
+from utils.min_norm_solvers import MinNormSolver, gradient_normalizers
 
 from generative.diff.step_sample import LossAwareSampler
 
@@ -134,7 +135,8 @@ class TrainLoop:
                 output_device=get_device(),
                 broadcast_buffers=False,
                 bucket_cap_mb=128,
-                find_unused_parameters=True if self_cond else False,
+                find_unused_parameters=True,
+                # static_graph=True,
             )
         else:
             if dist.get_world_size() > 1:
@@ -245,18 +247,55 @@ class TrainLoop:
     def forward_only(self, inputs):
         return_loss = []
         src, tgt, src_ctx, tgt_cxt = inputs
-        with torch.no_grad():
-            for i in range(0, src.shape[0], self.microbatch):
-                src_micro = src[i : i + self.microbatch].to(get_device()).long()
-                tgt_micro = tgt[i : i + self.microbatch].to(get_device()).long()
-                src_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in src_ctx.items()}
-                tgt_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in tgt_cxt.items()}
 
-                last_batch = (i + self.microbatch) >= src.shape[0]
-                t, weights = self.schedule_sampler.sample(src_micro.shape[0], get_device())
+        for i in range(0, src.shape[0], self.microbatch):
+            src_micro = src[i : i + self.microbatch].to(get_device()).long()
+            tgt_micro = tgt[i : i + self.microbatch].to(get_device()).long()
+            src_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in src_ctx.items()}
+            tgt_ctx_micro = {k: v[i : i + self.microbatch].to(get_device()) for k, v in tgt_cxt.items()}
+
+            last_batch = (i + self.microbatch) >= src.shape[0]
+            t, weights = self.schedule_sampler.sample(src_micro.shape[0], get_device())
+
+            with self.ddp_model.no_sync():
+                grads = []
+                # get the representation
+                with torch.no_grad():
+                    rep = self.ddp_model.module.decoder.forward_embedding(tgt_micro, tgt_ctx_micro).detach()
+                rep.requires_grad_()
+
+                # location
+                self.opt.zero_grad()
+                loss = self.ddp_model.module.get_loss_location(rep, tgt_micro)
+                self.ddp_model.reducer.prepare_for_backward(loss)
+                loss.mean().backward()
+                grads.append(rep.grad.clone().detach())
+                rep.grad.data.zero_()
+
+                # mode
+                self.opt.zero_grad()
+                loss = self.ddp_model.module.get_loss_mode(rep, tgt_micro, tgt_ctx_micro)
+                self.ddp_model.reducer.prepare_for_backward(loss)
+                loss.mean().backward()
+                grads.append(rep.grad.clone().detach())
+                rep.grad.data.zero_()
+
+                # duration
+                self.opt.zero_grad()
+                loss = self.ddp_model.module.get_loss_duration(rep, tgt_micro, tgt_ctx_micro)
+                self.ddp_model.reducer.prepare_for_backward(loss)
+                loss.mean().backward()
+                grads.append(rep.grad.clone().detach())
+                rep.grad.data.zero_()
+
+                sol, _ = MinNormSolver.find_min_norm_element(grads)
+
+                self.opt.zero_grad()
+
+            with torch.no_grad():
                 # print(micro_cond.keys())
                 compute_losses = functools.partial(
-                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t
+                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t, sol
                 )
 
                 if last_batch or not self.use_ddp:
@@ -284,8 +323,44 @@ class TrainLoop:
             # print(micro_cond.keys())
 
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.use_fp16):
+
+                with self.ddp_model.no_sync():
+                    grads = []
+                    # get the representation
+                    with torch.no_grad():
+                        rep = self.ddp_model.module.decoder.forward_embedding(tgt_micro, tgt_ctx_micro).detach()
+                    rep.requires_grad_()
+
+                    # location
+                    self.opt.zero_grad()
+                    loss = self.ddp_model.module.get_loss_location(rep, tgt_micro)
+                    self.ddp_model.reducer.prepare_for_backward(loss)
+                    loss.mean().backward()
+                    grads.append(rep.grad.clone().detach())
+                    rep.grad.data.zero_()
+
+                    # mode
+                    self.opt.zero_grad()
+                    loss = self.ddp_model.module.get_loss_mode(rep, tgt_micro, tgt_ctx_micro)
+                    self.ddp_model.reducer.prepare_for_backward(loss)
+                    loss.mean().backward()
+                    grads.append(rep.grad.clone().detach())
+                    rep.grad.data.zero_()
+
+                    # duration
+                    self.opt.zero_grad()
+                    loss = self.ddp_model.module.get_loss_duration(rep, tgt_micro, tgt_ctx_micro)
+                    self.ddp_model.reducer.prepare_for_backward(loss)
+                    loss.mean().backward()
+                    grads.append(rep.grad.clone().detach())
+                    rep.grad.data.zero_()
+
+                    sol, _ = MinNormSolver.find_min_norm_element(grads)
+
+                    self.opt.zero_grad()
+
                 compute_losses = functools.partial(
-                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t
+                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t, sol
                 )
 
                 if last_batch or not self.use_ddp:
