@@ -185,7 +185,7 @@ class MinNormSolver:
 
 
 def gradient_normalizers(grads, losses, normalization_type):
-    gn = {}
+    gn = []
     if normalization_type == "l2":
         for t in grads:
             gn[t] = np.sqrt(np.sum([gr.pow(2).sum().data.cpu() for gr in grads[t]]))
@@ -193,8 +193,8 @@ def gradient_normalizers(grads, losses, normalization_type):
         for t in grads:
             gn[t] = losses[t]
     elif normalization_type == "loss+":
-        for t in grads:
-            gn[t] = losses[t] * np.sqrt(np.sum([gr.pow(2).sum().data.cpu() for gr in grads[t]]))
+        for t in range(len(grads)):
+            gn.append(losses[t] * np.sqrt(np.sum([gr.pow(2).sum().data.cpu() for gr in grads[t]])))
     elif normalization_type == "none":
         for t in grads:
             gn[t] = 1.0

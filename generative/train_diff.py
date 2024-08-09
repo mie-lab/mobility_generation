@@ -293,6 +293,7 @@ class TrainLoop:
 
                     with self.ddp_model.no_sync():
                         grads = []
+                        loss_data = []
                         # get the representation
                         with torch.no_grad():
                             rep, mask = self.ddp_model.module.get_representation(tgt_micro, tgt_ctx_micro)
@@ -303,6 +304,7 @@ class TrainLoop:
                         self.opt.zero_grad()
                         loss = self.ddp_model.module.get_loss_location(rep, tgt_micro, mask)
                         self.ddp_model.reducer.prepare_for_backward(loss)
+                        loss_data.append(loss.mean().data.item())
                         loss.mean().backward()
                         grads.append(rep.grad.clone().detach())
                         rep.grad.data.zero_()
@@ -311,6 +313,7 @@ class TrainLoop:
                         self.opt.zero_grad()
                         loss = self.ddp_model.module.get_loss_mode(rep, tgt_ctx_micro, mask)
                         self.ddp_model.reducer.prepare_for_backward(loss)
+                        loss_data.append(loss.mean().data.item())
                         loss.mean().backward()
                         grads.append(rep.grad.clone().detach())
                         rep.grad.data.zero_()
@@ -319,9 +322,13 @@ class TrainLoop:
                         self.opt.zero_grad()
                         loss = self.ddp_model.module.get_loss_duration(rep, tgt_ctx_micro, mask)
                         self.ddp_model.reducer.prepare_for_backward(loss)
+                        loss_data.append(loss.mean().data.item())
                         loss.mean().backward()
                         grads.append(rep.grad.clone().detach())
                         rep.grad.data.zero_()
+
+                        gn = gradient_normalizers(grads, loss_data, "loss+")
+                        grads = [gradsi / gni for gni, gradsi in zip(gn, grads)]
 
                         sol, _ = MinNormSolver.find_min_norm_element(grads)
 
