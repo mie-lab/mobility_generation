@@ -4,11 +4,13 @@ import torch
 import torch.nn.functional as F
 
 import torch.nn as nn
+from torch.nn import init
 
 import math
 import numpy as np
 from random import random
 import inspect
+
 
 from improved_diffusion.gaussian_diffusion import GaussianDiffusion, betas_for_alpha_bar
 from improved_diffusion.respace import SpacedDiffusion, space_timesteps
@@ -422,6 +424,33 @@ class TransDecoder(nn.Module):
         return hidden
 
 
+# Real off-the-shelf tied linear module
+class TiedLinear(nn.Module):
+    def __init__(self, tied_to: nn.Linear, bias: bool = True):
+        super().__init__()
+        self.tied_to = tied_to
+        if bias:
+            self.bias = nn.Parameter(torch.Tensor(tied_to.in_features))
+        else:
+            self.register_parameter("bias", None)
+        self.reset_parameters()
+
+    # copied from nn.Linear
+    def reset_parameters(self):
+        if self.bias is not None:
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.tied_to.weight.t())
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return F.linear(input, self.tied_to.weight.t(), self.bias)
+
+    # To keep module properties intuitive
+    @property
+    def weight(self) -> torch.Tensor:
+        return self.tied_to.weight.t()
+
+
 class TransformerNetModel(nn.Module):
     """
     The full Transformer model with attention and timestep embedding.
@@ -523,6 +552,7 @@ class TransformerNetModel(nn.Module):
                 # nn.GELU(approximate="tanh"),
                 nn.Linear(model_args.input_dims, 1, bias=False),
             )
+            # self.lm_head_duration = TiedLinear(self.duration_embedding, bias=False)
 
         self.training_diffusion = GaussianDiffusion(
             betas=get_named_beta_schedule(
@@ -562,35 +592,14 @@ class TransformerNetModel(nn.Module):
     def get_mode_prediction(self, hidden_repr):
         return self.lm_head_mode(hidden_repr)
 
-    def get_representation(self, src, tgt, src_ctx, tgt_cxt, t):
-        # encoding
-        encoder_out = self.encoder(src, context=src_ctx)
-
+    def get_representation(self, tgt, tgt_cxt):
         # padding_mask B x T
         mask = tgt.ne(0)
 
         # diffusion
         z_0 = self.decoder.forward_embedding(tgt, tgt_cxt)
-        model_t = t * self.timesteps_scale
 
-        noise = torch.randn_like(z_0) * self.diff_args.rescaling_factor
-        # reparametrization trick
-        z_t = self.training_diffusion.q_sample(z_0, t, noise).type_as(z_0)
-
-        # self-conditioning
-        prev_z_0_hat = torch.zeros_like(z_0)
-        if self.diff_args.self_cond and random() < 0.5:
-            with torch.no_grad():
-                prev_z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat).detach()
-
-        # model use z_t to predict z_0, z_0_hat-> representation
-        z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat)
-
-        return z_0, z_0_hat, mask
-
-    def get_loss_diffusion(self, rep, z_0, mask):
-        # diffusion loss
-        return mean_flat((rep - z_0).square(), mask)
+        return z_0, mask
 
     def get_loss_location(self, rep, tgt, mask):
         logits = self.get_logits(rep)
@@ -604,7 +613,7 @@ class TransformerNetModel(nn.Module):
         duration_pred = self.get_duration_prediction(rep)
         return prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
 
-    def forward(self, src, tgt, src_ctx, tgt_cxt, t, loss_weight=[1 / 4, 1 / 4, 1 / 4, 1 / 4]):
+    def forward(self, src, tgt, src_ctx, tgt_cxt, t, loss_weight=[1 / 3, 1 / 3, 1 / 3]):
         """Compute training losses"""
 
         # encoding
@@ -635,21 +644,21 @@ class TransformerNetModel(nn.Module):
         terms["mse"] = mean_flat((z_0_hat - z_0).square(), mask)
 
         # token nll loss
-        logits = self.get_logits(z_0_hat)
+        logits = self.get_logits(z_0)
         terms["head_nll"] = token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
-        terms["loss"] = terms["mse"] * loss_weight[0] + terms["head_nll"] * loss_weight[1]
+        terms["loss"] = terms["mse"] + terms["head_nll"] * loss_weight[0]
 
         # mode token nll loss
         if self.if_include_mode:
-            mode_pred = self.get_mode_prediction(z_0_hat)
+            mode_pred = self.get_mode_prediction(z_0)
             terms["head_mode"] = token_discrete_loss(mode_pred, tgt_cxt["mode"], mask=mask, label_smoothing=0.1)
-            terms["loss"] += terms["head_mode"] * loss_weight[2]
+            terms["loss"] += terms["head_mode"] * loss_weight[1]
 
         # duration mse loss
         if self.if_include_duration:
-            duration_pred = self.get_duration_prediction(z_0_hat)
+            duration_pred = self.get_duration_prediction(z_0)
             terms["head_mse"] = prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
-            terms["loss"] += terms["head_mse"] * loss_weight[3]
+            terms["loss"] += terms["head_mse"] * loss_weight[2]
 
         return terms
 

@@ -295,19 +295,9 @@ class TrainLoop:
                         grads = []
                         # get the representation
                         with torch.no_grad():
-                            z_0, rep, mask = self.ddp_model.module.get_representation(
-                                src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t
-                            )
+                            rep, mask = self.ddp_model.module.get_representation(tgt_micro, tgt_ctx_micro)
                         rep = rep.detach()
                         rep.requires_grad_()
-
-                        # diffusion
-                        self.opt.zero_grad()
-                        loss = self.ddp_model.module.get_loss_diffusion(rep, z_0, mask)
-                        self.ddp_model.reducer.prepare_for_backward(loss)
-                        loss.mean().backward()
-                        grads.append(rep.grad.clone().detach())
-                        rep.grad.data.zero_()
 
                         # location
                         self.opt.zero_grad()
@@ -337,7 +327,7 @@ class TrainLoop:
 
                         self.opt.zero_grad()
                 else:
-                    sol = np.ones(4) / 4
+                    sol = np.ones(3) / 3
 
                 compute_losses = functools.partial(
                     self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t, sol
