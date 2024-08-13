@@ -482,7 +482,11 @@ class TransformerNetModel(nn.Module):
         self.if_include_duration = model_args.if_include_duration
         self.duration_embedding = None
         if self.if_include_duration:
-            self.duration_embedding = nn.Linear(1, model_args.input_dims, bias=False)
+            self.duration_embedding = nn.Sequential(
+                nn.Linear(1, model_args.input_dims, bias=False),
+                nn.GELU(approximate="tanh"),
+                nn.Linear(model_args.input_dims, model_args.input_dims),
+            )
 
         # mode embedding
         self.if_include_mode = model_args.if_include_mode
@@ -548,8 +552,8 @@ class TransformerNetModel(nn.Module):
         # duration head
         if self.if_include_duration:
             self.lm_head_duration = nn.Sequential(
-                # nn.Linear(model_args.input_dims, model_args.input_dims),
-                # nn.GELU(approximate="tanh"),
+                nn.Linear(model_args.input_dims, model_args.input_dims),
+                nn.GELU(approximate="tanh"),
                 nn.Linear(model_args.input_dims, 1, bias=False),
             )
             # self.lm_head_duration = TiedLinear(self.duration_embedding, bias=False)
