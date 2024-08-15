@@ -289,7 +289,7 @@ class TrainLoop:
 
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.use_fp16):
 
-                if epoch > 2:
+                if epoch >0:
 
                     with self.ddp_model.no_sync():
                         grads = []

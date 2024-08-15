@@ -681,7 +681,7 @@ class TransformerNetModel(nn.Module):
             tokens = self.get_logits(z_0_hat).argmax(-1)
             #
             ctx = {}
-            ctx["duration"] = self.get_duration_prediction(z_0_hat).squeeze(-1).exp()
+            ctx["duration"] = torch.clamp(self.get_duration_prediction(z_0_hat).squeeze(-1), min=-1, max=1)
             ctx["mode"] = self.get_mode_prediction(z_0_hat).argmax(-1)
             #
             z_0_hat = self.decoder.forward_embedding(tokens, tgt_cxt=ctx)
@@ -702,7 +702,7 @@ class TransformerNetModel(nn.Module):
         # durations \in R ([-1, 1])
         dur = self.get_duration_prediction(z_t).squeeze(-1)
         # durations \in [0, 2880]
-        durations = dur.exp() - 1
+        durations = (torch.clamp(dur, min=-1, max=1) + 1) / 2 * 2880
 
         _, modes = self.get_mode_prediction(z_t).log_softmax(-1).max(-1)
 

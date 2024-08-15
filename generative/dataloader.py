@@ -431,14 +431,14 @@ def get_sequence(args, split="train"):
         processed_dict["src_time"].append(record["src_startmin"] + 1)
 
         # add normalization (max 2880 = 60 * 24 * 2), dur \in [-1, 1]
-        src_dur = np.log(record["src_duration"] + 1)
+        src_dur = (2 * record["src_duration"] / 2880) - 1
         processed_dict["src_duration"].append(src_dur)
 
         processed_dict["tgt"].append(record["tgt"])
         processed_dict["tgt_mode"].append(record["tgt_mode"])
 
         # add normalization (max 2880 = 60 * 24 * 2), dur \in [-1, 1]
-        tgt_dur = np.log(record["tgt_duration"] + 1)
+        tgt_dur = (2 * record["tgt_duration"] / 2880) - 1
         processed_dict["tgt_duration"].append(tgt_dur)
 
     print("### Data samples...\n", processed_dict["src"][0][:5], processed_dict["tgt"][0][:5])
