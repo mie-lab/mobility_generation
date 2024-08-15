@@ -79,7 +79,6 @@ class TrainLoop:
         load_opt=True,
         gradient_clipping=-1.0,
         eval_data=None,
-        self_cond=False,
     ):
         self.model = model
         self.diff_steps = diff_steps
@@ -289,7 +288,7 @@ class TrainLoop:
 
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.use_fp16):
 
-                if epoch >0:
+                if epoch > 0:
 
                     with self.ddp_model.no_sync():
                         grads = []

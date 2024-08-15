@@ -48,12 +48,11 @@ def timestep_embedding(timesteps, dim, max_period=10000):
 
 
 class Time2Vec(nn.Module):
-    def __init__(self, input_dim=6, embed_dim=512, act_function=torch.sin):
-        assert embed_dim % input_dim == 0
+    def __init__(self, embed_dim=512, act_function=torch.sin):
         super(Time2Vec, self).__init__()
 
-        self.wnbn = nn.Linear(input_dim, embed_dim - 1, bias=True)
-        self.w0b0 = nn.Linear(input_dim, 1, bias=True)
+        self.wnbn = nn.Linear(1, embed_dim - 1, bias=True)
+        self.w0b0 = nn.Linear(1, 1, bias=True)
         self.act_function = act_function
 
     def forward(self, x):
@@ -191,7 +190,7 @@ class ContextModel(nn.Module):
 
         # start time embedding
         if embed_time:
-            self.t2v = Time2Vec(input_dim=1, embed_dim=input_dims, act_function=torch.sin)
+            self.t2v = Time2Vec(embed_dim=input_dims, act_function=torch.sin)
             self.comb_t = nn.Sequential(
                 nn.Linear(hidden_dims + input_dims, hidden_dims),
                 nn.LayerNorm(hidden_dims),
@@ -290,7 +289,7 @@ class TransEncoder(nn.Module):
         x = self.location_embedding(src_tokens)
 
         if self.duration_embedding is not None:
-            x += self.duration_embedding(context["duration"].unsqueeze(-1))
+            x += self.duration_embedding(context["duration"])
 
         if self.mode_embedding is not None:
             x += self.mode_embedding(context["mode"])
@@ -380,7 +379,7 @@ class TransDecoder(nn.Module):
         embed = self.location_embedding(tgt_tokens)
 
         if self.duration_embedding is not None:
-            embed += self.duration_embedding(tgt_cxt["duration"].unsqueeze(-1))
+            embed += self.duration_embedding(tgt_cxt["duration"])
 
         if self.mode_embedding is not None:
             embed += self.mode_embedding(tgt_cxt["mode"])
@@ -424,33 +423,6 @@ class TransDecoder(nn.Module):
         return hidden
 
 
-# Real off-the-shelf tied linear module
-class TiedLinear(nn.Module):
-    def __init__(self, tied_to: nn.Linear, bias: bool = True):
-        super().__init__()
-        self.tied_to = tied_to
-        if bias:
-            self.bias = nn.Parameter(torch.Tensor(tied_to.in_features))
-        else:
-            self.register_parameter("bias", None)
-        self.reset_parameters()
-
-    # copied from nn.Linear
-    def reset_parameters(self):
-        if self.bias is not None:
-            fan_in, _ = init._calculate_fan_in_and_fan_out(self.tied_to.weight.t())
-            bound = 1 / math.sqrt(fan_in)
-            init.uniform_(self.bias, -bound, bound)
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        return F.linear(input, self.tied_to.weight.t(), self.bias)
-
-    # To keep module properties intuitive
-    @property
-    def weight(self) -> torch.Tensor:
-        return self.tied_to.weight.t()
-
-
 class TransformerNetModel(nn.Module):
     """
     The full Transformer model with attention and timestep embedding.
@@ -482,11 +454,7 @@ class TransformerNetModel(nn.Module):
         self.if_include_duration = model_args.if_include_duration
         self.duration_embedding = None
         if self.if_include_duration:
-            self.duration_embedding = nn.Sequential(
-                nn.Linear(1, model_args.input_dims, bias=False),
-                nn.GELU(approximate="tanh"),
-                nn.Linear(model_args.input_dims, model_args.input_dims),
-            )
+            self.duration_embedding = Time2Vec(embed_dim=model_args.input_dims, act_function=torch.sin)
 
         # mode embedding
         self.if_include_mode = model_args.if_include_mode
@@ -556,7 +524,6 @@ class TransformerNetModel(nn.Module):
                 nn.GELU(approximate="tanh"),
                 nn.Linear(model_args.input_dims, 1, bias=False),
             )
-            # self.lm_head_duration = TiedLinear(self.duration_embedding, bias=False)
 
         self.training_diffusion = GaussianDiffusion(
             betas=get_named_beta_schedule(
@@ -681,7 +648,8 @@ class TransformerNetModel(nn.Module):
             tokens = self.get_logits(z_0_hat).argmax(-1)
             #
             ctx = {}
-            ctx["duration"] = torch.clamp(self.get_duration_prediction(z_0_hat).squeeze(-1), min=-1, max=1)
+            pred_dur = self.get_duration_prediction(z_0_hat).squeeze(-1)
+            ctx["duration"] = (torch.clamp(pred_dur, min=-1, max=1) + 1) / 2 * 2880
             ctx["mode"] = self.get_mode_prediction(z_0_hat).argmax(-1)
             #
             z_0_hat = self.decoder.forward_embedding(tokens, tgt_cxt=ctx)

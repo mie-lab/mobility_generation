@@ -140,7 +140,7 @@ def main():
                 "seq_time": seq_time.detach().cpu().numpy(),
                 "duration": pred_duration.detach().cpu().numpy(),
                 "mode": pred_mode.detach().cpu().numpy(),
-                "tgt_dur": tgt_dur.detach().cpu().numpy(),
+                "tgt_dur": ((tgt_dur + 1) / 2 * 2880).detach().cpu().numpy(),
                 "tgt_mode": tgt_mode.detach().cpu().numpy(),
                 "src_dur": src_dur.detach().cpu().numpy(),
                 "src_mode": src_mode.detach().cpu().numpy(),
