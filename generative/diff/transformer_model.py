@@ -48,11 +48,15 @@ def timestep_embedding(timesteps, dim, max_period=10000):
 
 
 class Time2Vec(nn.Module):
-    def __init__(self, embed_dim=512, act_function=torch.sin):
+    def __init__(self, embed_dim=512, act_function=torch.sin, duration=False):
         super(Time2Vec, self).__init__()
 
-        self.wnbn = nn.Linear(1, embed_dim - 1, bias=True)
-        self.w0b0 = nn.Linear(1, 1, bias=True)
+        if not duration:
+            self.wnbn = nn.Linear(1, embed_dim - 1, bias=True)
+            self.w0b0 = nn.Linear(1, 1, bias=True)
+        else:
+            self.wnbn = nn.Linear(1, embed_dim // 2, bias=True)
+            self.w0b0 = nn.Linear(1, embed_dim // 2, bias=True)
         self.act_function = act_function
 
     def forward(self, x):
@@ -454,7 +458,11 @@ class TransformerNetModel(nn.Module):
         self.if_include_duration = model_args.if_include_duration
         self.duration_embedding = None
         if self.if_include_duration:
-            self.duration_embedding = Time2Vec(embed_dim=model_args.input_dims, act_function=torch.sin)
+            self.duration_embedding = nn.Sequential(
+                Time2Vec(embed_dim=model_args.input_dims, act_function=torch.sin, duration=True),
+                nn.GELU(approximate="tanh"),
+                nn.Linear(model_args.input_dims, model_args.input_dims),
+            )
 
         # mode embedding
         self.if_include_mode = model_args.if_include_mode
