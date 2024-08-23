@@ -138,11 +138,11 @@ def main():
                 "target": seq_tgt.detach().cpu().numpy(),
                 "source": seq_src.detach().cpu().numpy(),
                 "seq_time": seq_time.detach().cpu().numpy(),
-                "duration": pred_duration.detach().cpu().numpy(),
+                "duration": np.round(pred_duration.detach().cpu().numpy(), 3),
                 "mode": pred_mode.detach().cpu().numpy(),
-                "tgt_dur": ((tgt_dur + 1) / 2 * 2880).detach().cpu().numpy(),
+                "tgt_dur": np.round(((tgt_dur + 1) / 2 * 2880).detach().cpu().numpy(), 3),
                 "tgt_mode": tgt_mode.detach().cpu().numpy(),
-                "src_dur": src_dur.detach().cpu().numpy(),
+                "src_dur": np.round(((src_dur + 1) / 2 * 2880).detach().cpu().numpy(), 3),
                 "src_mode": src_mode.detach().cpu().numpy(),
             }
 

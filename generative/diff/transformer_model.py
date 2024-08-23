@@ -48,15 +48,11 @@ def timestep_embedding(timesteps, dim, max_period=10000):
 
 
 class Time2Vec(nn.Module):
-    def __init__(self, embed_dim=512, act_function=torch.sin, duration=False):
+    def __init__(self, embed_dim=512, act_function=torch.sin):
         super(Time2Vec, self).__init__()
 
-        if not duration:
-            self.wnbn = nn.Linear(1, embed_dim - 1, bias=True)
-            self.w0b0 = nn.Linear(1, 1, bias=True)
-        else:
-            self.wnbn = nn.Linear(1, embed_dim // 2, bias=True)
-            self.w0b0 = nn.Linear(1, embed_dim // 2, bias=True)
+        self.wnbn = nn.Linear(1, embed_dim - 1, bias=True)
+        self.w0b0 = nn.Linear(1, 1, bias=True)
         self.act_function = act_function
 
     def forward(self, x):
@@ -293,7 +289,7 @@ class TransEncoder(nn.Module):
         x = self.location_embedding(src_tokens)
 
         if self.duration_embedding is not None:
-            x += self.duration_embedding(context["duration"])
+            x += self.duration_embedding(context["duration"].unsqueeze(-1))
 
         if self.mode_embedding is not None:
             x += self.mode_embedding(context["mode"])
@@ -383,7 +379,7 @@ class TransDecoder(nn.Module):
         embed = self.location_embedding(tgt_tokens)
 
         if self.duration_embedding is not None:
-            embed += self.duration_embedding(tgt_cxt["duration"])
+            embed += self.duration_embedding(tgt_cxt["duration"].unsqueeze(-1))
 
         if self.mode_embedding is not None:
             embed += self.mode_embedding(tgt_cxt["mode"])
@@ -459,7 +455,7 @@ class TransformerNetModel(nn.Module):
         self.duration_embedding = None
         if self.if_include_duration:
             self.duration_embedding = nn.Sequential(
-                Time2Vec(embed_dim=model_args.input_dims, act_function=torch.sin, duration=True),
+                nn.Linear(1, model_args.input_dims, bias=False),
                 nn.GELU(approximate="tanh"),
                 nn.Linear(model_args.input_dims, model_args.input_dims),
             )
@@ -657,7 +653,7 @@ class TransformerNetModel(nn.Module):
             #
             ctx = {}
             pred_dur = self.get_duration_prediction(z_0_hat).squeeze(-1)
-            ctx["duration"] = (torch.clamp(pred_dur, min=-1, max=1) + 1) / 2 * 2880
+            ctx["duration"] = torch.clamp(pred_dur, min=-1, max=1)
             ctx["mode"] = self.get_mode_prediction(z_0_hat).argmax(-1)
             #
             z_0_hat = self.decoder.forward_embedding(tokens, tgt_cxt=ctx)

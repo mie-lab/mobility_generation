@@ -431,7 +431,7 @@ def get_sequence(args, split="train"):
         processed_dict["src_time"].append(record["src_startmin"] + 1)
 
         # add normalization (max 2880 = 60 * 24 * 2), dur \in [0, 2880]
-        src_dur = record["src_duration"]
+        src_dur = (2 * record["src_duration"] / 2880) - 1
         processed_dict["src_duration"].append(src_dur)
 
         processed_dict["tgt"].append(record["tgt"])
