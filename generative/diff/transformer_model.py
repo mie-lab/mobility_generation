@@ -4,11 +4,13 @@ import torch
 import torch.nn.functional as F
 
 import torch.nn as nn
+from torch.nn import init
 
 import math
 import numpy as np
 from random import random
 import inspect
+
 
 from improved_diffusion.gaussian_diffusion import GaussianDiffusion, betas_for_alpha_bar
 from improved_diffusion.respace import SpacedDiffusion, space_timesteps
@@ -46,12 +48,11 @@ def timestep_embedding(timesteps, dim, max_period=10000):
 
 
 class Time2Vec(nn.Module):
-    def __init__(self, input_dim=6, embed_dim=512, act_function=torch.sin):
-        assert embed_dim % input_dim == 0
+    def __init__(self, embed_dim=512, act_function=torch.sin):
         super(Time2Vec, self).__init__()
 
-        self.wnbn = nn.Linear(input_dim, embed_dim - 1, bias=True)
-        self.w0b0 = nn.Linear(input_dim, 1, bias=True)
+        self.wnbn = nn.Linear(1, embed_dim - 1, bias=True)
+        self.w0b0 = nn.Linear(1, 1, bias=True)
         self.act_function = act_function
 
     def forward(self, x):
@@ -189,7 +190,7 @@ class ContextModel(nn.Module):
 
         # start time embedding
         if embed_time:
-            self.t2v = Time2Vec(input_dim=1, embed_dim=input_dims, act_function=torch.sin)
+            self.t2v = Time2Vec(embed_dim=input_dims, act_function=torch.sin)
             self.comb_t = nn.Sequential(
                 nn.Linear(hidden_dims + input_dims, hidden_dims),
                 nn.LayerNorm(hidden_dims),
@@ -453,7 +454,11 @@ class TransformerNetModel(nn.Module):
         self.if_include_duration = model_args.if_include_duration
         self.duration_embedding = None
         if self.if_include_duration:
-            self.duration_embedding = nn.Linear(1, model_args.input_dims, bias=False)
+            self.duration_embedding = nn.Sequential(
+                nn.Linear(1, model_args.input_dims, bias=False),
+                nn.GELU(approximate="tanh"),
+                nn.Linear(model_args.input_dims, model_args.input_dims),
+            )
 
         # mode embedding
         self.if_include_mode = model_args.if_include_mode
@@ -519,8 +524,8 @@ class TransformerNetModel(nn.Module):
         # duration head
         if self.if_include_duration:
             self.lm_head_duration = nn.Sequential(
-                # nn.Linear(model_args.input_dims, model_args.input_dims),
-                # nn.GELU(approximate="tanh"),
+                nn.Linear(model_args.input_dims, model_args.input_dims),
+                nn.GELU(approximate="tanh"),
                 nn.Linear(model_args.input_dims, 1, bias=False),
             )
 
@@ -562,7 +567,28 @@ class TransformerNetModel(nn.Module):
     def get_mode_prediction(self, hidden_repr):
         return self.lm_head_mode(hidden_repr)
 
-    def forward(self, src, tgt, src_ctx, tgt_cxt, t):
+    def get_representation(self, tgt, tgt_cxt):
+        # padding_mask B x T
+        mask = tgt.ne(0)
+
+        # diffusion
+        z_0 = self.decoder.forward_embedding(tgt, tgt_cxt)
+
+        return z_0, mask
+
+    def get_loss_location(self, rep, tgt, mask):
+        logits = self.get_logits(rep)
+        return token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
+
+    def get_loss_mode(self, rep, tgt_cxt, mask):
+        mode_pred = self.get_mode_prediction(rep)
+        return token_discrete_loss(mode_pred, tgt_cxt["mode"], mask=mask, label_smoothing=0.1)
+
+    def get_loss_duration(self, rep, tgt_cxt, mask):
+        duration_pred = self.get_duration_prediction(rep)
+        return prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
+
+    def forward(self, src, tgt, src_ctx, tgt_cxt, t, loss_weight=[1 / 3, 1 / 3, 1 / 3]):
         """Compute training losses"""
 
         # encoding
@@ -585,31 +611,29 @@ class TransformerNetModel(nn.Module):
             with torch.no_grad():
                 prev_z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat).detach()
 
-        # model use z_t to predict z_0
+        # model use z_t to predict z_0, z_0_hat-> representation
         z_0_hat = self.decoder(z_t, model_t, mask, encoder_out, prev_z_0_hat)
-        logits = self.get_logits(z_0 if self.diff_args.rounding_loss else z_0_hat)
-
         terms = {}
 
-        #
+        # diffusion loss
         terms["mse"] = mean_flat((z_0_hat - z_0).square(), mask)
 
-        # Rounding error: embedding regularization
+        # token nll loss
+        logits = self.get_logits(z_0)
         terms["head_nll"] = token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
+        terms["loss"] = terms["mse"] + terms["head_nll"] * loss_weight[0]
 
-        terms["loss"] = terms["mse"] + terms["head_nll"]
-
+        # mode token nll loss
         if self.if_include_mode:
             mode_pred = self.get_mode_prediction(z_0)
             terms["head_mode"] = token_discrete_loss(mode_pred, tgt_cxt["mode"], mask=mask, label_smoothing=0.1)
-            # terms["loss"] += 0.1 * terms["head_mode"] / (terms["head_mode"] / terms["head_nll"]).detach()
-            terms["loss"] += terms["head_mode"]
+            terms["loss"] += terms["head_mode"] * loss_weight[1]
 
+        # duration mse loss
         if self.if_include_duration:
             duration_pred = self.get_duration_prediction(z_0)
             terms["head_mse"] = prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
-            # terms["loss"] += 0.1 * terms["head_mse"] / (terms["head_mse"] / terms["head_nll"]).detach()
-            terms["loss"] += terms["head_mse"]
+            terms["loss"] += terms["head_mse"] * loss_weight[2]
 
         return terms
 
@@ -628,7 +652,8 @@ class TransformerNetModel(nn.Module):
             tokens = self.get_logits(z_0_hat).argmax(-1)
             #
             ctx = {}
-            ctx["duration"] = torch.clamp(self.get_duration_prediction(z_0_hat).squeeze(-1), min=-1, max=1)
+            pred_dur = self.get_duration_prediction(z_0_hat).squeeze(-1)
+            ctx["duration"] = torch.clamp(pred_dur, min=-1, max=1)
             ctx["mode"] = self.get_mode_prediction(z_0_hat).argmax(-1)
             #
             z_0_hat = self.decoder.forward_embedding(tokens, tgt_cxt=ctx)

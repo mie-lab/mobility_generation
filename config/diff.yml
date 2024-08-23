@@ -3,14 +3,14 @@ misc:
 
   wandb_name: test
   split: train
-  dataset_variation: small 
-  level: 13
+  dataset_variation: tiny 
+  level: 14
   src_min_days: 14
   tgt_min_days: 7
 
   # seq_len: 512
   # 14882 -> 14976 (28743 -> 28800)
-  max_location: 14976  # 28800, 14976
+  max_location: 28800  # 28800, 14976
   max_mode: 8  # 7+1 padding
 
   seed: 101
@@ -69,11 +69,11 @@ optimiser:
   gradient_clipping: 1
 
   # for warmup
-  warmup_epochs: 2
-  decay_epochs: 10
+  warmup_epochs: 3
+  decay_epochs: 200
 
   # training
-  max_epochs: 150
+  max_epochs: 200
   save_epochs: 5
 
   # 

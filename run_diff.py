@@ -109,7 +109,6 @@ def main():
         load_opt=config.load_opt,
         gradient_clipping=config.gradient_clipping,
         eval_data=data_valid,
-        self_cond=config.self_cond,
     ).run_loop()
 
 
