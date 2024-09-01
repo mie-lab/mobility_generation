@@ -404,7 +404,7 @@ def generate(config, model, data_loader, device):
                 # logits, dur_pred = model(x, x_dict)
                 logits = model(x, x_dict)
 
-                pred_loc = top_k_top_p_filtering(logits, top_k=500, top_p=0.99, filter_value=-float("Inf"))
+                pred_loc = top_k_top_p_filtering(logits, top_k=200, top_p=0.99, filter_value=-float("Inf"))
 
                 # append to the end of sequence for next prediction
                 x = torch.stack(

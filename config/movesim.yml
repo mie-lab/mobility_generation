@@ -2,22 +2,22 @@ misc:
   dataset: mobis
 
   dataset_variation: all
-  level: 13
+  level: 14
   src_min_days: 14
   tgt_min_days: 7
 
   split: train
   use_pretrain: True
-  pretrain_filepath: mobis_movesim_pretrain
+  pretrain_filepath: mobis_movesim_1724962869
 
   generate_len: 50
   previous_day: 7
 
   num_gen_samples: 10240
   g_step: 1
-  d_step: 4
+  d_step: 2
   k_d: 2
-  rollout_num: 4
+  rollout_num: 8
   # 
   if_embed_time: False
   if_embed_poi: False
@@ -26,11 +26,11 @@ misc:
   if_include_mode: False
 
   # 14882 -> 14976 (28743 -> 28800)
-  max_location: 14976  # 28800, 14976
+  max_location: 28800  # 28800, 14976
 
   verbose: True
   debug: False
-  batch_size: 128
+  batch_size: 32
   print_step: 50
   num_workers: 0
   world_size: 1

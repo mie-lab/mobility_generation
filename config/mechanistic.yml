@@ -2,7 +2,7 @@ misc:
   dataset: mobis
 
   dataset_variation: all
-  level: 13
+  level: 14
   src_min_days: 14
   tgt_min_days: 7
 
@@ -13,7 +13,7 @@ misc:
   seed: 101
 
 model:
-  networkName: container
+  networkName: epr
 
 dataset:
   data_dir: ./data/diff

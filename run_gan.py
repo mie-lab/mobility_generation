@@ -150,12 +150,12 @@ def main(
 def get_data_for_emp(type):
     # read and preprocess
     sp = pd.read_csv(os.path.join(f"./data/sp_{type}.csv"), index_col="id")
-    loc = pd.read_csv(os.path.join("./data/loc_s2_level10_13.csv"), index_col="id")
+    loc = pd.read_csv(os.path.join("./data/loc_s2_level10_14.csv"), index_col="id")
 
     sp = load_data(sp, loc)
 
     # get all possible locations
-    all_locs = pd.read_csv("./data/s2_loc_visited_level10_13.csv", index_col="id")
+    all_locs = pd.read_csv("./data/s2_loc_visited_level10_14.csv", index_col="id")
     all_locs["geometry"] = all_locs["geometry"].apply(wkt.loads)
     all_locs = gpd.GeoDataFrame(all_locs, geometry="geometry", crs="EPSG:4326")
     # transform to projected coordinate systems

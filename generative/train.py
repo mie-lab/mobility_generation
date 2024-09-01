@@ -383,7 +383,7 @@ def adv_training(discriminator, generator, config, world_size, device, all_locs,
         # only once and update rollout parameter
         for _ in range(config.g_step):
             # evaluate current generator performance
-            samples = generate_samples(generator, config.generate_len + 1, single_len=64, num=128)
+            samples = generate_samples(generator, config.generate_len + 1, single_len=128, num=256)
             # jsds = metrics.get_individual_jsds(gene_data=samples)
 
             # if is_main_process():

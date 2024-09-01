@@ -89,7 +89,8 @@ Use 4 weeks as input
     - loss 0.001
     - adding xy coordinate information
         - use geo encoding method
-    - TODO: include time as feature 
+    - Include time as feature, using time2vec
+    - batchsize: 64-128 (max 32k - 64k tokens, if one sequence = 512 lengths). 1153 batch per epoch, 172,950 steps for 150 epochs
 
 
 ## Metrics (TODO: check more metrics from other studies)
@@ -99,7 +100,8 @@ Use 4 weeks as input
 - Overall visitation frequency
 - Individual visitation frequency
 
-- TODO: Activity duration
-- TODO: Daily visited locations
-- TODO: Motifs distribution
+Duration and mode measures:
+- Activity duration
+- Daily visited locations
+- Motifs distribution
 - TODO: Measure of variability - how does the generation differ in each run?

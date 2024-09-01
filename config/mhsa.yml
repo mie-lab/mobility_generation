@@ -2,14 +2,14 @@ misc:
   dataset: mobis
 
   dataset_variation: all
-  level: 13
+  level: 14
   src_min_days: 14
   tgt_min_days: 7
 
   split: test
   use_pretrain: True
   pretrain_filepath: mobis_mhsa
-  model_name: model_15.pt
+  model_name: model_13.pt
   generate_len: 50
   # 
   if_embed_time: False
@@ -19,7 +19,7 @@ misc:
   if_include_mode: False
 
   # 14882 -> 14976 (28743 -> 28800)
-  max_location: 14976  # 28800, 14976
+  max_location: 28800  # 28800, 14976
   max_mode: 8  # 7+1 padding
 
   verbose: True

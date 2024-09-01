@@ -175,14 +175,18 @@ def get_sequence(args, split="train"):
         # processed_dict["src_duration"].append(dur)
 
         # for GAN
-        processed_dict["src_duration"].append(record["src_duration"] // 30 + 1)
+        src_duration = record["src_duration"]
+        src_duration[src_duration == 2880] = 2879
+        processed_dict["src_duration"].append(src_duration // 30 + 1)
 
         # attributes as output
         # dur = (2 * (record["tgt_duration"][0] + 1) / 2880) - 1
         # processed_dict["tgt_duration"].append(dur)
 
         # for GAN
-        processed_dict["tgt_duration"].append(record["tgt_duration"][0] // 30 + 1)
+        tgt_duration = record["tgt_duration"]
+        tgt_duration[tgt_duration == 2880] = 2879
+        processed_dict["tgt_duration"].append(tgt_duration[0] // 30 + 1)
 
         # processed_dict["tgt_mode"].append(record["tgt_mode"][0])
 

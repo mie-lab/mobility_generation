@@ -133,6 +133,11 @@ def main():
             tgt_cxt["duration"],
             tgt_cxt["mode"],
         ):
+            tgt_dur = tgt_dur.detach().cpu().numpy()
+            src_dur = src_dur.detach().cpu().numpy()
+            tgt_dur[tgt_dur != 0] = np.round(((tgt_dur[tgt_dur != 0] + 1) / 2 * 2880), 0)
+            src_dur[src_dur != 0] = np.round(((src_dur[src_dur != 0] + 1) / 2 * 2880), 0)
+
             res_dict = {
                 "recover": seq_pred.detach().cpu().numpy(),
                 "target": seq_tgt.detach().cpu().numpy(),
@@ -140,9 +145,9 @@ def main():
                 "seq_time": seq_time.detach().cpu().numpy(),
                 "duration": np.round(pred_duration.detach().cpu().numpy(), 3),
                 "mode": pred_mode.detach().cpu().numpy(),
-                "tgt_dur": np.round(((tgt_dur + 1) / 2 * 2880).detach().cpu().numpy(), 3),
+                "tgt_dur": tgt_dur,
                 "tgt_mode": tgt_mode.detach().cpu().numpy(),
-                "src_dur": np.round(((src_dur + 1) / 2 * 2880).detach().cpu().numpy(), 3),
+                "src_dur": src_dur,
                 "src_mode": src_mode.detach().cpu().numpy(),
             }
 

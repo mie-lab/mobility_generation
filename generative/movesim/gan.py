@@ -231,7 +231,7 @@ class Generator(nn.Module):
         :param x: (batch_size, k), current generated sequence
         :return: (batch_size, seq_len), complete generated sequence
         """
-        duration_upper_limit = 60 * 24 * 2 // 30 + 1
+        duration_upper_limit = 60 * 24 * 2 // 30
         flag = False
 
         if x is None:
@@ -251,7 +251,7 @@ class Generator(nn.Module):
                 assert False  # for padding
             s = 1
             # random sample duration
-            duration = torch.randint(low=1, high=duration_upper_limit, size=(batch_size, 1)).long().to(self.device)
+            duration = torch.randint(low=1, high=duration_upper_limit + 1, size=(batch_size, 1)).long().to(self.device)
 
         samples = {"locs": [], "durs": []}
         if flag:
@@ -264,7 +264,7 @@ class Generator(nn.Module):
                 x = x.multinomial(1)
                 x[x == 0] += 1  # for padding
 
-                duration += 1
+                # duration += 1
                 duration = torch.clamp(torch.round(duration), min=1, max=duration_upper_limit).long()
 
                 samples["locs"].append(x)
@@ -282,7 +282,7 @@ class Generator(nn.Module):
             x = x.multinomial(1)
             x[x == 0] += 1  # for padding
 
-            dur_pred += 1
+            # dur_pred += 1
             dur_pred = torch.clamp(torch.round(dur_pred), min=1, max=duration_upper_limit).long()
 
             for i in range(given_len, seq_len):
@@ -293,7 +293,7 @@ class Generator(nn.Module):
                 x = x.multinomial(1)
                 x[x == 0] += 1  # for padding
 
-                dur_pred += 1
+                # dur_pred += 1
                 dur_pred = torch.clamp(torch.round(dur_pred), min=1, max=duration_upper_limit).long()
         samples["locs"] = torch.cat(samples["locs"], dim=1)
         samples["durs"] = torch.cat(samples["durs"], dim=1)

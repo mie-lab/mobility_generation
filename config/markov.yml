@@ -2,7 +2,7 @@ misc:
   dataset: mobis
 
   dataset_variation: all
-  level: 13
+  level: 14
   src_min_days: 14
   tgt_min_days: 7
 
@@ -17,6 +17,7 @@ misc:
   # 
   if_embed_xy: False
   if_embed_poi: False
+  if_embed_time: False
   if_include_duration: False
   if_include_mode: False
 

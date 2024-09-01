@@ -89,9 +89,9 @@ class EPR:
         # the distance to be jumped
         jump_distance = get_jump_length(self.param_jump_length)
 
-        # select from the 5 closest location after the jump, - 2 and + 2 for padding and seperation idx
-        loc_dist_to_jump = np.abs(self.pair_distance[curr_loc - 2, :] - jump_distance)
-        candidate_locs = np.argsort(loc_dist_to_jump)[:5] + 2
+        # select from the 5 closest location after the jump, - 1 and + 1 for padding
+        loc_dist_to_jump = np.abs(self.pair_distance[curr_loc - 1, :] - jump_distance)
+        candidate_locs = np.argsort(loc_dist_to_jump)[:5] + 1
 
         return np.random.choice(candidate_locs)
 
