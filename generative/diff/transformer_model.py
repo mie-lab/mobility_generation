@@ -523,11 +523,12 @@ class TransformerNetModel(nn.Module):
 
         # duration head
         if self.if_include_duration:
-            self.lm_head_duration = nn.Sequential(
+            self.duration_block = nn.Sequential(
                 nn.Linear(model_args.input_dims, model_args.input_dims),
                 nn.GELU(approximate="tanh"),
-                nn.Linear(model_args.input_dims, 1, bias=False),
             )
+            self.lm_head_duration = nn.Linear(model_args.input_dims, 1, bias=False)
+            self.lm_head_time = nn.Linear(model_args.input_dims, 1, bias=False)
 
         self.training_diffusion = GaussianDiffusion(
             betas=get_named_beta_schedule(
@@ -562,7 +563,10 @@ class TransformerNetModel(nn.Module):
         return self.lm_head(hidden_repr)
 
     def get_duration_prediction(self, hidden_repr):
-        return self.lm_head_duration(hidden_repr)
+        return self.lm_head_duration(self.duration_block(hidden_repr))
+
+    def get_time_prediction(self, hidden_repr):
+        return self.lm_head_time(self.duration_block(hidden_repr))
 
     def get_mode_prediction(self, hidden_repr):
         return self.lm_head_mode(hidden_repr)
@@ -588,7 +592,11 @@ class TransformerNetModel(nn.Module):
         duration_pred = self.get_duration_prediction(rep)
         return prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
 
-    def forward(self, src, tgt, src_ctx, tgt_cxt, t, loss_weight=[1 / 3, 1 / 3, 1 / 3]):
+    def get_loss_time(self, rep, tgt_cxt, mask):
+        time_pred = self.get_time_prediction(rep)
+        return prediction_mse_loss(time_pred, tgt_cxt["time"], mask=mask)
+
+    def forward(self, src, tgt, src_ctx, tgt_cxt, t, loss_weight=[1 / 4, 1 / 4, 1 / 4, 1 / 4]):
         """Compute training losses"""
 
         # encoding
@@ -634,6 +642,10 @@ class TransformerNetModel(nn.Module):
             duration_pred = self.get_duration_prediction(z_0)
             terms["head_mse"] = prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
             terms["loss"] += terms["head_mse"] * loss_weight[2]
+
+            time_pred = self.get_time_prediction(z_0)
+            terms["time_mse"] = prediction_mse_loss(time_pred, tgt_cxt["time"], mask=mask)
+            terms["loss"] += terms["time_mse"] * loss_weight[3]
 
         return terms
 

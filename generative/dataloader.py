@@ -419,6 +419,7 @@ def get_sequence(args, split="train"):
         "src_time": [],
         "src_mode": [],
         "tgt": [],
+        "tgt_time": [],
         "tgt_duration": [],
         "tgt_mode": [],
     }
@@ -433,6 +434,10 @@ def get_sequence(args, split="train"):
         # add normalization (max 2880 = 60 * 24 * 2), dur \in [0, 2880]
         src_dur = (2 * record["src_duration"] / 2880) - 1
         processed_dict["src_duration"].append(src_dur)
+
+        # time in minutes of day, add 1 for padding
+        tgt_time = (2 * (record["tgt_startmin"] + 1) / (60 * 24 + 1)) - 1
+        processed_dict["tgt_time"].append(tgt_time)
 
         processed_dict["tgt"].append(record["tgt"])
         processed_dict["tgt_mode"].append(record["tgt_mode"])
@@ -483,6 +488,7 @@ class DiffSeqDataset(torch.utils.data.Dataset):
 
         if self.if_embed_time:
             src_ctx["time"] = torch.tensor(current_data["src_time"], dtype=torch.float32)
+            tgt_cxt["time"] = torch.tensor(current_data["tgt_time"], dtype=torch.float32)
 
         # construct the pois
         if self.if_embed_poi:

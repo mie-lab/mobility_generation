@@ -326,6 +326,14 @@ class TrainLoop:
                         grads.append(rep.grad.clone().detach())
                         rep.grad.data.zero_()
 
+                        self.opt.zero_grad()
+                        loss = self.ddp_model.module.get_loss_time(rep, tgt_ctx_micro, mask)
+                        self.ddp_model.reducer.prepare_for_backward(loss)
+                        loss_data.append(loss.mean().data.item())
+                        loss.mean().backward()
+                        grads.append(rep.grad.clone().detach())
+                        rep.grad.data.zero_()
+
                         gn = gradient_normalizers(grads, loss_data, "loss+")
                         grads = [gradsi / gni for gni, gradsi in zip(gn, grads)]
 
@@ -333,7 +341,7 @@ class TrainLoop:
 
                         self.opt.zero_grad()
                 else:
-                    sol = np.ones(3) / 3
+                    sol = np.ones(4) / 4
 
                 compute_losses = functools.partial(
                     self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t, sol
