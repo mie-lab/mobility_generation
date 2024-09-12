@@ -3,31 +3,31 @@
 ## Design choices
 
 Preprocessing sp (4,811,539) and tpls (6,391,628):
-- Filter duplicates: remove sps or tpls that have overlapping timeline (sp: 4,804,194, tpls: 6,381,957). 
-- Activity definition (activity: 3,589,215, non-activity: 1,214,979):
+- Filter duplicates: remove sps or tpls that have overlapping timeline (sp: 4,804,193, tpls: 6,381,958). 
+- Activity definition (activity: 3,589,220, non-activity: 1,214,973):
     - waiting
     - "unknown" and duration < 25min
 - Generate trips: gap_threshold=25 (trips: 3,466,359)
-- User filtering (users: 2,113. sp: 1,578,245, tpls: 2,133,677, trips: 1,124,205):
+- User filtering (users: 2,113. sp: 1,578,244, tpls: 2,133,678, trips: 1,124,206):
     - tracked for more than 50 days
     - quality during tracking: quality for every 5 week shall have min quality > 0.5 and mean quality > 0.6 
-- Spatial filter: Only sp within Switzerland (sp: 1,460,189).
-- Filter for activity sp (sp: 1,094,017). 
-- Filter non-location sp (sp: 1,094,017). 
-- Merge sp with time gap shorter than 1 minutes (sp: 1,079,922).
-- Final user: 2112. Final sp: 1,079,922.
+- Spatial filter: Only sp within Switzerland (sp: 1,460,188).
+- Filter for activity sp (sp: 1,094,013). 
+- Filter non-location sp (sp: 1,094,013). 
+- Merge sp with time gap shorter than 1 minutes (sp: 1,079,918).
+- Final user: 2112. Final sp: 1,079,918.
 
 Generating locations:
-- DBSCAN algorithm (unique locs: 162,303)
+- DBSCAN algorithm (unique locs: 162,301)
     - epsilon=20
     - num_samples=1
     - agg_level="dataset"
-- Location spatial binning using s2geometry: 
+- Location spatial binning using s2geometry (TODO: update): 
     - Single level:
         - Level 14 (mean 0.32 km2 globally): 174,434 locations covering Switzerland (41,285 km2). Original locations are projected into 28,742 binned locations.
         - Level 13 (mean 1.27 km2 globally): 44,106 locations covering Switzerland. Original locations are projected into 14,881 binned locations.
     - Hierarchical: 
-        - [10, 14]: 142,575 locations covering Switzerland. Original locations are projected into 28,742 binned locations.
+        - [10, 14]: 142,575 locations covering Switzerland. Original locations are projected into 28,741 binned locations.
         - [10, 13]: 39,177 locations covering Switzerland. Original locations are projected into 14,881 binned locations.
         
 - Definition of activity behavior:
