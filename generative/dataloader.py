@@ -330,20 +330,24 @@ def process_helper_fnc(seq_ls, split):
         src_ls = []
         src_xy_ls = []
         src_duration_ls = []
+        src_time_ls = []
         src_mode_ls = []
 
         tgt_ls = []
         tgt_duration_ls = []
+        tgt_time_ls = []
         tgt_mode_ls = []
 
         for i in range(len(ls["src"])):
             src = ls["src"][i]
             src_xy = ls["src_xy"][i]
+            src_time = ls["src_time"][i]
             src_duration = ls["src_duration"][i]
             src_mode = ls["src_mode"][i]
             tgt = ls["tgt"][i]
             tgt_duration = ls["tgt_duration"][i]
             tgt_mode = ls["tgt_mode"][i]
+            tgt_time = ls["tgt_time"][i]
 
             # for src
             len_src = len(src)
@@ -351,6 +355,7 @@ def process_helper_fnc(seq_ls, split):
                 src = src[(len_src - MAX_LEN) :]
                 src_xy = src_xy[(len_src - MAX_LEN) :]
                 src_duration = src_duration[(len_src - MAX_LEN) :]
+                src_time = src_time[(len_src - MAX_LEN) :]
                 src_mode = src_mode[(len_src - MAX_LEN) :]
 
             # for tgt
@@ -360,31 +365,38 @@ def process_helper_fnc(seq_ls, split):
                     tgt = tgt + [0] * (GENERATE_LEN - ori_len)
                     tgt_duration = tgt_duration + [0] * (GENERATE_LEN - ori_len)
                     tgt_mode = tgt_mode + [0] * (GENERATE_LEN - ori_len)
+                    tgt_time = tgt_time + [0] * (GENERATE_LEN - ori_len)
                 else:
                     tgt = tgt[:GENERATE_LEN]
                     tgt_duration = tgt_duration[:GENERATE_LEN]
                     tgt_mode = tgt_mode[:GENERATE_LEN]
+                    tgt_time = tgt_time[:GENERATE_LEN]
             else:
                 if len(tgt) > MAX_LEN:
                     tgt = tgt[:MAX_LEN]
                     tgt_duration = tgt_duration[:MAX_LEN]
                     tgt_mode = tgt_mode[:MAX_LEN]
+                    tgt_time = tgt_time[:MAX_LEN]
 
             src_ls.append(src)
             src_xy_ls.append(src_xy)
+            src_time_ls.append(src_time)
             src_duration_ls.append(src_duration)
             src_mode_ls.append(src_mode)
 
             tgt_ls.append(tgt)
             tgt_duration_ls.append(tgt_duration)
+            tgt_time_ls.append(tgt_time)
             tgt_mode_ls.append(tgt_mode)
 
         ls["tgt"] = tgt_ls
         ls["tgt_duration"] = tgt_duration_ls
         ls["tgt_mode"] = tgt_mode_ls
+        ls["tgt_time"] = tgt_time_ls
 
         ls["src"] = src_ls
         ls["src_xy"] = src_xy_ls
+        ls["src_time"] = src_time_ls
         ls["src_duration"] = src_duration_ls
         ls["src_mode"] = src_mode_ls
         return ls
@@ -432,18 +444,18 @@ def get_sequence(args, split="train"):
         processed_dict["src_time"].append(record["src_startmin"] + 1)
 
         # add normalization (max 2880 = 60 * 24 * 2), dur \in [0, 2880]
-        src_dur = (2 * record["src_duration"] / 2880) - 1
+        src_dur = record["src_duration"] / 2880
         processed_dict["src_duration"].append(src_dur)
 
         # time in minutes of day, add 1 for padding
-        tgt_time = (2 * (record["tgt_startmin"] + 1) / (60 * 24 + 1)) - 1
+        tgt_time = (record["tgt_startmin"]) / 1440
         processed_dict["tgt_time"].append(tgt_time)
 
         processed_dict["tgt"].append(record["tgt"])
         processed_dict["tgt_mode"].append(record["tgt_mode"])
 
         # add normalization (max 2880 = 60 * 24 * 2), dur \in [-1, 1]
-        tgt_dur = (2 * record["tgt_duration"] / 2880) - 1
+        tgt_dur = record["tgt_duration"] / 2880
         processed_dict["tgt_duration"].append(tgt_dur)
 
     print("### Data samples...\n", processed_dict["src"][0][:5], processed_dict["tgt"][0][:5])

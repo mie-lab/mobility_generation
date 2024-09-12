@@ -117,26 +117,43 @@ def main():
         for step in list(range(config.decoding_steps))[::-1]:
             z_t, prev_z_0_hat = model.forward_decoder(z_t, step, mask, encoder_out, prev_z_0_hat)
 
-        tokens, durations, modes, scores = model.forward_output_layer(prev_z_0_hat)
+        tokens, durations, modes, times, scores = model.forward_output_layer(prev_z_0_hat)
 
         res_dict_ls = []
 
-        for seq_pred, pred_duration, pred_mode, seq_src, seq_tgt, seq_time, src_dur, src_mode, tgt_dur, tgt_mode in zip(
+        for (
+            seq_pred,
+            pred_duration,
+            pred_mode,
+            pred_times,
+            seq_src,
+            seq_tgt,
+            seq_time,
+            src_dur,
+            src_mode,
+            tgt_dur,
+            tgt_time,
+            tgt_mode,
+        ) in zip(
             tokens,
             durations,
             modes,
+            times,
             src,
             tgt,
             src_ctx["time"],
             src_ctx["duration"],
             src_ctx["mode"],
             tgt_cxt["duration"],
+            tgt_cxt["time"],
             tgt_cxt["mode"],
         ):
             tgt_dur = tgt_dur.detach().cpu().numpy()
             src_dur = src_dur.detach().cpu().numpy()
-            tgt_dur[tgt_dur != 0] = np.round(((tgt_dur[tgt_dur != 0] + 1) / 2 * 2880), 0)
-            src_dur[src_dur != 0] = np.round(((src_dur[src_dur != 0] + 1) / 2 * 2880), 0)
+            tgt_time = tgt_time.detach().cpu().numpy()
+            tgt_dur[tgt_dur != 0] = np.round((tgt_dur[tgt_dur != 0] * 2880), 0)
+            src_dur[src_dur != 0] = np.round((src_dur[src_dur != 0] * 2880), 0)
+            tgt_time[tgt_time != 0] = tgt_time[tgt_time != 0] * 1440
 
             res_dict = {
                 "recover": seq_pred.detach().cpu().numpy(),
@@ -144,9 +161,11 @@ def main():
                 "source": seq_src.detach().cpu().numpy(),
                 "seq_time": seq_time.detach().cpu().numpy(),
                 "duration": np.round(pred_duration.detach().cpu().numpy(), 3),
+                "time": np.round(pred_times.detach().cpu().numpy(), 3),
                 "mode": pred_mode.detach().cpu().numpy(),
                 "tgt_dur": tgt_dur,
                 "tgt_mode": tgt_mode.detach().cpu().numpy(),
+                "tgt_time": np.round(tgt_time, 0),
                 "src_dur": src_dur,
                 "src_mode": src_mode.detach().cpu().numpy(),
             }
