@@ -9,7 +9,7 @@ misc:
   tgt_min_days: 7
 
   # seq_len: 512
-  # 14882 -> 14976 (28743 -> 28800)
+  # 14882 -> 14976 (28742 -> 28800)
   max_location: 28800  # 28800, 14976
   max_mode: 8  # 7+1 padding
 
@@ -55,7 +55,7 @@ diffusion:
 
 model:
   # 
-  num_layers: 6
+  num_layers: 2
   hidden_size: 512
   num_attention_heads: 8
   dropout: 0.1
