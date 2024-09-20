@@ -7,7 +7,7 @@ misc:
   tgt_min_days: 7
 
   split: train
-  use_pretrain: True
+  use_pretrain: False
   pretrain_filepath: mobis_movesim_1724962869
 
   generate_len: 50
@@ -25,7 +25,7 @@ misc:
   if_include_duration: True
   if_include_mode: False
 
-  # 14882 -> 14976 (28743 -> 28800)
+  # 14882 -> 14976 (28742 -> 28800)
   max_location: 28800  # 28800, 14976
 
   verbose: True

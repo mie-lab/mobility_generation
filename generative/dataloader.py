@@ -441,7 +441,8 @@ def get_sequence(args, split="train"):
         processed_dict["src_mode"].append(record["src_mode"])
 
         # time in minutes of day, add 1 for padding
-        processed_dict["src_time"].append(record["src_startmin"] + 1)
+        src_time = (2 * record["src_startmin"]) / 1440 - 1
+        processed_dict["src_time"].append(src_time)
 
         # add normalization (max 2880 = 60 * 24 * 2), dur \in [0, 2880]
         src_dur = (2 * record["src_duration"]) / 2880 - 1

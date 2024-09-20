@@ -292,7 +292,7 @@ class TransEncoder(nn.Module):
 
         if self.duration_embedding is not None:
             x += self.duration_embedding(context["duration"].unsqueeze(-1))
-            x += self.time_embedding(context["time"])
+            x += self.time_embedding(context["time"].unsqueeze(-1))
 
         if self.mode_embedding is not None:
             x += self.mode_embedding(context["mode"])
@@ -385,7 +385,7 @@ class TransDecoder(nn.Module):
 
         if self.duration_embedding is not None:
             embed += self.duration_embedding(tgt_cxt["duration"].unsqueeze(-1))
-            embed += self.time_embedding(tgt_cxt["time"])
+            embed += self.time_embedding(tgt_cxt["time"].unsqueeze(-1))
 
         if self.mode_embedding is not None:
             embed += self.mode_embedding(tgt_cxt["mode"])
@@ -461,12 +461,12 @@ class TransformerNetModel(nn.Module):
         self.duration_embedding = None
         if self.if_include_duration:
             self.duration_embedding = nn.Sequential(
-                nn.Linear(1, model_args.input_dims),
+                nn.Linear(1, model_args.input_dims, bias=False),
                 nn.GELU(approximate="tanh"),
                 nn.Linear(model_args.input_dims, model_args.input_dims),
             )
         self.time_embedding = nn.Sequential(
-            Time2Vec(embed_dim=model_args.input_dims, act_function=torch.sin),
+            nn.Linear(1, model_args.input_dims, bias=False),
             nn.GELU(approximate="tanh"),
             nn.Linear(model_args.input_dims, model_args.input_dims),
         )
@@ -539,12 +539,12 @@ class TransformerNetModel(nn.Module):
             self.lm_head_duration = nn.Sequential(
                 nn.Linear(model_args.input_dims, model_args.input_dims),
                 nn.GELU(approximate="tanh"),
-                nn.Linear(model_args.input_dims, 1),
+                nn.Linear(model_args.input_dims, 1, bias=False),
             )
             self.lm_head_time = nn.Sequential(
                 nn.Linear(model_args.input_dims, model_args.input_dims),
                 nn.GELU(approximate="tanh"),
-                nn.Linear(model_args.input_dims, 1),
+                nn.Linear(model_args.input_dims, 1, bias=False),
             )
 
         self.training_diffusion = GaussianDiffusion(

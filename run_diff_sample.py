@@ -20,6 +20,8 @@ from generative.dataloader import load_data_diffusion
 from utils import dist_util, logger
 from utils.utils import setup_seed, load_config, init_save_path
 
+from time import perf_counter as timer
+
 
 @torch.no_grad()
 def main():
@@ -94,6 +96,7 @@ def main():
     except StopIteration:
         print("### End of reading iteration...")
 
+    time_ls = []
     device = dist_util.get_device()
     for inputs in tqdm(all_test_data):
         src, tgt, src_ctx, tgt_cxt = inputs
@@ -102,6 +105,7 @@ def main():
         src_ctx = {k: v.to(device) for k, v in src_ctx.items()}
         tgt_cxt = {k: v.to(device) for k, v in tgt_cxt.items()}
 
+        start = timer()
         encoder_out = model.encoder(src, context=src_ctx)
 
         # padding_mask B x T
@@ -118,6 +122,8 @@ def main():
             z_t, prev_z_0_hat = model.forward_decoder(z_t, step, mask, encoder_out, prev_z_0_hat)
 
         tokens, durations, modes, times, scores = model.forward_output_layer(prev_z_0_hat)
+
+        time_ls.append((timer() - start) / len(tokens))
 
         res_dict_ls = []
 
@@ -151,15 +157,17 @@ def main():
             tgt_dur = tgt_dur.detach().cpu().numpy()
             src_dur = src_dur.detach().cpu().numpy()
             tgt_time = tgt_time.detach().cpu().numpy()
-            tgt_dur[tgt_dur != 0] = np.round((tgt_dur[tgt_dur != 0] * 2880), 0)
-            src_dur[src_dur != 0] = np.round((src_dur[src_dur != 0] * 2880), 0)
-            tgt_time[tgt_time != 0] = tgt_time[tgt_time != 0] * 1440
+            seq_time = seq_time.detach().cpu().numpy()
+            tgt_dur[tgt_dur != 0] = np.round(((tgt_dur[tgt_dur != 0] + 1) / 2 * 2880), 0)
+            src_dur[src_dur != 0] = np.round(((src_dur[src_dur != 0] + 1) / 2 * 2880), 0)
+            tgt_time[tgt_time != 0] = (tgt_time[tgt_time != 0] + 1) / 2 * 1440
+            seq_time[seq_time != 0] = (seq_time[seq_time != 0] + 1) / 2 * 1440
 
             res_dict = {
                 "recover": seq_pred.detach().cpu().numpy(),
                 "target": seq_tgt.detach().cpu().numpy(),
                 "source": seq_src.detach().cpu().numpy(),
-                "seq_time": seq_time.detach().cpu().numpy(),
+                "seq_time": np.round(seq_time, 0),
                 "duration": np.round(pred_duration.detach().cpu().numpy(), 3),
                 "time": np.round(pred_times.detach().cpu().numpy(), 3),
                 "mode": pred_mode.detach().cpu().numpy(),
@@ -180,6 +188,7 @@ def main():
                 fout.close()
             dist.barrier()
 
+    print(np.mean(np.array(time_ls)), np.std(np.array(time_ls)))
     print("### Total takes {:.2f}s .....".format(time.time() - start_t))
     print(f"### Written the decoded output to {out_path}")
 
