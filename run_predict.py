@@ -75,7 +75,7 @@ if __name__ == "__main__":
         type=str,
         nargs="?",
         help="Path to the config file.",
-        default="./config/mhsa.yml",
+        default="./config/markov.yml",
     )
     args = parser.parse_args()
 

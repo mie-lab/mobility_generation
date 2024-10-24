@@ -462,12 +462,12 @@ class TransformerNetModel(nn.Module):
         if self.if_include_duration:
             self.duration_embedding = nn.Sequential(
                 nn.Linear(1, model_args.input_dims, bias=False),
-                nn.GELU(approximate="tanh"),
+                nn.ReLU(),
                 nn.Linear(model_args.input_dims, model_args.input_dims),
             )
         self.time_embedding = nn.Sequential(
             nn.Linear(1, model_args.input_dims, bias=False),
-            nn.GELU(approximate="tanh"),
+            nn.ReLU(),
             nn.Linear(model_args.input_dims, model_args.input_dims),
         )
 
@@ -538,12 +538,12 @@ class TransformerNetModel(nn.Module):
         if self.if_include_duration:
             self.lm_head_duration = nn.Sequential(
                 nn.Linear(model_args.input_dims, model_args.input_dims),
-                nn.GELU(approximate="tanh"),
+                nn.ReLU(),
                 nn.Linear(model_args.input_dims, 1, bias=False),
             )
             self.lm_head_time = nn.Sequential(
                 nn.Linear(model_args.input_dims, model_args.input_dims),
-                nn.GELU(approximate="tanh"),
+                nn.ReLU(),
                 nn.Linear(model_args.input_dims, 1, bias=False),
             )
 
@@ -684,7 +684,7 @@ class TransformerNetModel(nn.Module):
             pred_dur = self.get_duration_prediction(z_0_hat).squeeze(-1)
             ctx["duration"] = torch.clamp(pred_dur, min=-1, max=1)
             pred_time = self.get_time_prediction(z_0_hat).squeeze(-1)
-            ctx["time"] = (torch.clamp(pred_time, min=-1, max=1) + 1) / 2 * 1440
+            ctx["time"] = torch.clamp(pred_time, min=-1, max=1)
 
             ctx["mode"] = self.get_mode_prediction(z_0_hat).argmax(-1)
             #

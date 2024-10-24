@@ -9,7 +9,7 @@ misc:
   split: test
   use_pretrain: True
   pretrain_filepath: mobis_mhsa
-  model_name: model_13.pt
+  model_name: model_15.pt
   generate_len: 50
   # 
   if_embed_time: False
