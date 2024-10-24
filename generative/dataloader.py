@@ -473,14 +473,12 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         self.data_args = data_args
         self.model_emb = model_emb
 
-        self.if_embed_poi = data_args.if_embed_poi
-        self.if_embed_xy = data_args.if_embed_xy
-        self.if_embed_time = data_args.if_embed_time
+        self.if_embed_context = data_args.if_embed_context
 
         self.if_include_duration = data_args.if_include_duration
         self.if_include_mode = data_args.if_include_mode
 
-        if self.if_embed_poi:
+        if self.if_embed_context:
             poi_file_path = f"{data_args.data_dir}/poi_level{data_args.level}.npy"
             poi_file = np.load(poi_file_path, allow_pickle=True)
             self.poiValues = poi_file[()]["poiValues"]
@@ -496,15 +494,9 @@ class DiffSeqDataset(torch.utils.data.Dataset):
 
         src_ctx = {}
         tgt_cxt = {}
-        if self.if_embed_xy:
+        if self.if_embed_context:
             src_ctx["xy"] = torch.tensor(current_data["src_xy"], dtype=torch.float32)
 
-        if self.if_embed_time:
-            src_ctx["time"] = torch.tensor(current_data["src_time"], dtype=torch.float32)
-            tgt_cxt["time"] = torch.tensor(current_data["tgt_time"], dtype=torch.float32)
-
-        # construct the pois
-        if self.if_embed_poi:
             ids = np.array(current_data["src"])
             pois = np.take(self.poiValues, ids - 1, axis=0)  # -1 for padding
             src_ctx["poi"] = torch.tensor(pois, dtype=torch.float32)
@@ -512,6 +504,9 @@ class DiffSeqDataset(torch.utils.data.Dataset):
         if self.if_include_duration:
             src_ctx["duration"] = torch.tensor(current_data["src_duration"], dtype=torch.float32)
             tgt_cxt["duration"] = torch.tensor(current_data["tgt_duration"], dtype=torch.float32)
+
+            src_ctx["time"] = torch.tensor(current_data["src_time"], dtype=torch.float32)
+            tgt_cxt["time"] = torch.tensor(current_data["tgt_time"], dtype=torch.float32)
 
         if self.if_include_mode:
             src_ctx["mode"] = torch.tensor(current_data["src_mode"])

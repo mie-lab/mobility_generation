@@ -15,15 +15,13 @@ misc:
 
   seed: 101
   # 
-  if_embed_time: True
-  if_embed_xy: True
-  if_embed_poi: True
+  if_embed_context: True
   if_include_duration: True
-  if_include_mode: True
+  if_include_mode: False
   
   batch_size: 512
   microbatch: 64
-  log_interval: 10
+  log_interval: 5
   num_workers: 0
   
 fp16:

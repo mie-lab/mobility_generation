@@ -154,62 +154,40 @@ class TheoryGridCellSpatialRelationEncoder(nn.Module):
 
 
 class ContextModel(nn.Module):
-    def __init__(self, input_dims, hidden_dims, embed_xy, embed_poi, embed_time=None, poi_dim=None, device=""):
+    def __init__(self, input_dims, hidden_dims, poi_dim=None, device=""):
         super().__init__()
 
         self.input_dims = input_dims
         self.hidden_dims = hidden_dims
-        self.embed_xy = embed_xy
-        self.embed_poi = embed_poi
-        # self.embed_time = embed_time
 
         # xy embedding
-        if embed_xy:
-            frequency_num = 16
-            self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
-            self.comb_xy = nn.Sequential(
-                nn.Linear(hidden_dims + frequency_num * 6, hidden_dims),
-                nn.LayerNorm(hidden_dims),
-                nn.ReLU(),
-                nn.Linear(hidden_dims, hidden_dims),
-                nn.LayerNorm(hidden_dims),
-                nn.Dropout(0.1),
-            )
+        frequency_num = 16
+        self.encoder = TheoryGridCellSpatialRelationEncoder(frequency_num=frequency_num, device=device)
+        self.comb_xy = nn.Sequential(
+            nn.Linear(hidden_dims + frequency_num * 6, hidden_dims),
+            nn.LayerNorm(hidden_dims),
+            nn.ReLU(),
+            nn.Linear(hidden_dims, hidden_dims),
+            nn.LayerNorm(hidden_dims),
+            nn.Dropout(0.1),
+        )
 
         # poi embedding
-        if embed_poi:
-            self.poi_up_proj = nn.Linear(poi_dim, input_dims)
-            self.comb_poi = nn.Sequential(
-                nn.Linear(hidden_dims + input_dims, hidden_dims),
-                nn.LayerNorm(hidden_dims),
-                nn.ReLU(),
-                nn.Linear(hidden_dims, hidden_dims),
-                nn.LayerNorm(hidden_dims),
-                nn.Dropout(0.1),
-            )
-
-        # # start time embedding
-        # if embed_time:
-        #     self.t2v = Time2Vec(embed_dim=input_dims, act_function=torch.sin)
-        #     self.comb_t = nn.Sequential(
-        #         nn.Linear(hidden_dims + input_dims, hidden_dims),
-        #         nn.LayerNorm(hidden_dims),
-        #         nn.ReLU(),
-        #         nn.Linear(hidden_dims, hidden_dims),
-        #         nn.LayerNorm(hidden_dims),
-        #         nn.Dropout(0.1),
-        #     )
+        self.poi_up_proj = nn.Linear(poi_dim, input_dims)
+        self.comb_poi = nn.Sequential(
+            nn.Linear(hidden_dims + input_dims, hidden_dims),
+            nn.LayerNorm(hidden_dims),
+            nn.ReLU(),
+            nn.Linear(hidden_dims, hidden_dims),
+            nn.LayerNorm(hidden_dims),
+            nn.Dropout(0.1),
+        )
 
     def forward(self, x, context):
-        if self.embed_xy:
-            res = torch.cat([x, self.encoder(context["xy"])], dim=-1)
-            x = x + self.comb_xy(res)
-        if self.embed_poi:
-            res = torch.cat([x, self.poi_up_proj(context["poi"])], dim=-1)
-            x = x + self.comb_poi(res)
-        # if self.embed_time:
-        #     res = torch.cat([x, self.t2v(context["time"])], dim=-1)
-        #     x = x + self.comb_t(res)
+        res = torch.cat([x, self.encoder(context["xy"])], dim=-1)
+        x = x + self.comb_xy(res)
+        res = torch.cat([x, self.poi_up_proj(context["poi"])], dim=-1)
+        x = x + self.comb_poi(res)
         return x
 
 
@@ -226,9 +204,7 @@ class TransEncoder(nn.Module):
         time_embedding=None,
         position_embedding=None,
         input_up_proj=None,
-        # embed_time=False,
-        embed_xy=False,
-        embed_poi=False,
+        embed_context=False,
         poi_dim=32,
         device="",
     ):
@@ -253,15 +229,11 @@ class TransEncoder(nn.Module):
         self.position_embedding = position_embedding
 
         # context model for embedding
-        self.context_model = ContextModel(
-            location_embedding.embedding_dim,
-            hidden_size,
-            embed_xy,
-            embed_poi,
-            # embed_time,
-            poi_dim=poi_dim,
-            device=device,
-        )
+        self.embed_context = embed_context
+        if embed_context:
+            self.context_model = ContextModel(
+                location_embedding.embedding_dim, hidden_size, poi_dim=poi_dim, device=device
+            )
 
         #
         self.LayerNorm = nn.LayerNorm(hidden_size)
@@ -303,7 +275,8 @@ class TransEncoder(nn.Module):
         x = self.input_up_proj(x)
 
         # context
-        x = self.context_model(x, context)
+        if self.embed_context:
+            x = self.context_model(x, context)
 
         # position_embeddings
         seq_length = x.size(1)
@@ -456,20 +429,21 @@ class TransformerNetModel(nn.Module):
         # location embedding
         self.location_embedding = nn.Embedding(model_args.max_location, model_args.input_dims, padding_idx=0)
 
-        # duration embedding
+        # time embedding
         self.if_include_duration = model_args.if_include_duration
         self.duration_embedding = None
+        self.time_embedding = None
         if self.if_include_duration:
             self.duration_embedding = nn.Sequential(
                 nn.Linear(1, model_args.input_dims, bias=False),
                 nn.ReLU(),
                 nn.Linear(model_args.input_dims, model_args.input_dims),
             )
-        self.time_embedding = nn.Sequential(
-            nn.Linear(1, model_args.input_dims, bias=False),
-            nn.ReLU(),
-            nn.Linear(model_args.input_dims, model_args.input_dims),
-        )
+            self.time_embedding = nn.Sequential(
+                nn.Linear(1, model_args.input_dims, bias=False),
+                nn.ReLU(),
+                nn.Linear(model_args.input_dims, model_args.input_dims),
+            )
 
         # mode embedding
         self.if_include_mode = model_args.if_include_mode
@@ -498,9 +472,7 @@ class TransformerNetModel(nn.Module):
             time_embedding=self.time_embedding,
             position_embedding=self.position_embedding,
             input_up_proj=self.input_up_proj,
-            # embed_time=model_args.if_embed_time,
-            embed_xy=model_args.if_embed_xy,
-            embed_poi=model_args.if_embed_poi,
+            embed_context=model_args.if_embed_context,
             poi_dim=model_args.poi_dim,
             device=model_args.device,
         )
@@ -613,7 +585,7 @@ class TransformerNetModel(nn.Module):
         time_pred = self.get_time_prediction(rep)
         return prediction_mse_loss(time_pred, tgt_cxt["time"], mask=mask)
 
-    def forward(self, src, tgt, src_ctx, tgt_cxt, t, loss_weight=[1 / 4, 1 / 4, 1 / 4, 1 / 4]):
+    def forward(self, src, tgt, src_ctx, tgt_cxt, t, loss_weight={}):
         """Compute training losses"""
 
         # encoding
@@ -646,23 +618,23 @@ class TransformerNetModel(nn.Module):
         # token nll loss
         logits = self.get_logits(z_0)
         terms["head_nll"] = token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
-        terms["loss"] = terms["mse"] + terms["head_nll"] * loss_weight[0]
+        terms["loss"] = terms["mse"] + terms["head_nll"] * loss_weight["loc"]
 
         # mode token nll loss
         if self.if_include_mode:
             mode_pred = self.get_mode_prediction(z_0)
             terms["head_mode"] = token_discrete_loss(mode_pred, tgt_cxt["mode"], mask=mask, label_smoothing=0.1)
-            terms["loss"] += terms["head_mode"] * loss_weight[1]
+            terms["loss"] += terms["head_mode"] * loss_weight["mode"]
 
         # duration mse loss
         if self.if_include_duration:
             duration_pred = self.get_duration_prediction(z_0)
             terms["head_mse"] = prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
-            terms["loss"] += terms["head_mse"] * loss_weight[2]
+            terms["loss"] += terms["head_mse"] * loss_weight["dur"]
 
             time_pred = self.get_time_prediction(z_0)
             terms["time_mse"] = prediction_mse_loss(time_pred, tgt_cxt["time"], mask=mask)
-            terms["loss"] += terms["time_mse"] * loss_weight[3]
+            terms["loss"] += terms["time_mse"] * loss_weight["time"]
 
         return terms
 
@@ -681,12 +653,15 @@ class TransformerNetModel(nn.Module):
             tokens = self.get_logits(z_0_hat).argmax(-1)
             #
             ctx = {}
-            pred_dur = self.get_duration_prediction(z_0_hat).squeeze(-1)
-            ctx["duration"] = torch.clamp(pred_dur, min=-1, max=1)
-            pred_time = self.get_time_prediction(z_0_hat).squeeze(-1)
-            ctx["time"] = torch.clamp(pred_time, min=-1, max=1)
 
-            ctx["mode"] = self.get_mode_prediction(z_0_hat).argmax(-1)
+            if self.if_include_duration:
+                pred_dur = self.get_duration_prediction(z_0_hat).squeeze(-1)
+                ctx["duration"] = torch.clamp(pred_dur, min=-1, max=1)
+                pred_time = self.get_time_prediction(z_0_hat).squeeze(-1)
+                ctx["time"] = torch.clamp(pred_time, min=-1, max=1)
+
+            if self.if_include_mode:
+                ctx["mode"] = self.get_mode_prediction(z_0_hat).argmax(-1)
             #
             z_0_hat = self.decoder.forward_embedding(tokens, tgt_cxt=ctx)
 
@@ -701,20 +676,31 @@ class TransformerNetModel(nn.Module):
         return z_t, z_0_hat
 
     def forward_output_layer(self, z_t):
+        return_dict = {}
+
         scores, tokens = self.get_logits(z_t).log_softmax(-1).max(-1)
+        return_dict["tokens"] = tokens
 
-        # durations \in R ([-1, 1])
-        dur = self.get_duration_prediction(z_t).squeeze(-1)
-        # durations \in [0, 2880]
-        durations = (torch.clamp(dur, min=-1, max=1) + 1) / 2 * 2880
+        if self.if_include_duration:
+            # durations \in R ([-1, 1])
+            dur = self.get_duration_prediction(z_t).squeeze(-1)
+            # durations \in [0, 2880]
+            durations = (torch.clamp(dur, min=-1, max=1) + 1) / 2 * 2880
 
-        time = self.get_time_prediction(z_t).squeeze(-1)
-        # time \in [0, 1440]
-        time = (torch.clamp(time, min=-1, max=1) + 1) / 2 * 1440
+            return_dict["durations"] = durations
 
-        _, modes = self.get_mode_prediction(z_t).log_softmax(-1).max(-1)
+            time = self.get_time_prediction(z_t).squeeze(-1)
+            # time \in [0, 1440]
+            time = (torch.clamp(time, min=-1, max=1) + 1) / 2 * 1440
 
-        return tokens, durations, modes, time, scores
+            return_dict["time"] = time
+
+        if self.if_include_mode:
+            _, modes = self.get_mode_prediction(z_t).log_softmax(-1).max(-1)
+
+            return_dict["modes"] = modes
+
+        return return_dict
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters
