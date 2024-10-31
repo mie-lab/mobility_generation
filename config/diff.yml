@@ -15,9 +15,9 @@ misc:
 
   seed: 101
   # 
-  if_embed_context: True
-  if_include_duration: True
-  if_include_mode: False
+  if_embed_context: False
+  if_include_duration: False
+  if_include_mode: True
   
   batch_size: 512
   microbatch: 64

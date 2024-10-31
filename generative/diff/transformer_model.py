@@ -585,7 +585,9 @@ class TransformerNetModel(nn.Module):
         time_pred = self.get_time_prediction(rep)
         return prediction_mse_loss(time_pred, tgt_cxt["time"], mask=mask)
 
-    def forward(self, src, tgt, src_ctx, tgt_cxt, t, loss_weight={}):
+    def forward(
+        self, src, tgt, src_ctx, tgt_cxt, t, loss_weight={"loc": 1 / 4, "mode": 1 / 4, "dur": 1 / 4, "time": 1 / 4}
+    ):
         """Compute training losses"""
 
         # encoding
@@ -698,7 +700,7 @@ class TransformerNetModel(nn.Module):
         if self.if_include_mode:
             _, modes = self.get_mode_prediction(z_t).log_softmax(-1).max(-1)
 
-            return_dict["modes"] = modes
+            return_dict["mode"] = modes
 
         return return_dict
 

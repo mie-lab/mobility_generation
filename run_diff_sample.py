@@ -121,62 +121,43 @@ def main():
         for step in list(range(config.decoding_steps))[::-1]:
             z_t, prev_z_0_hat = model.forward_decoder(z_t, step, mask, encoder_out, prev_z_0_hat)
 
-        tokens, durations, modes, times, scores = model.forward_output_layer(prev_z_0_hat)
+        return_dict = model.forward_output_layer(prev_z_0_hat)
 
-        time_ls.append((timer() - start) / len(tokens))
+        time_ls.append((timer() - start) / len(return_dict["tokens"]))
 
         res_dict_ls = []
-
-        for (
-            seq_pred,
-            pred_duration,
-            pred_mode,
-            pred_times,
-            seq_src,
-            seq_tgt,
-            seq_time,
-            src_dur,
-            src_mode,
-            tgt_dur,
-            tgt_time,
-            tgt_mode,
-        ) in zip(
-            tokens,
-            durations,
-            modes,
-            times,
-            src,
-            tgt,
-            src_ctx["time"],
-            src_ctx["duration"],
-            src_ctx["mode"],
-            tgt_cxt["duration"],
-            tgt_cxt["time"],
-            tgt_cxt["mode"],
-        ):
-            tgt_dur = tgt_dur.detach().cpu().numpy()
-            src_dur = src_dur.detach().cpu().numpy()
-            tgt_time = tgt_time.detach().cpu().numpy()
-            seq_time = seq_time.detach().cpu().numpy()
-            tgt_dur[tgt_dur != 0] = np.round(((tgt_dur[tgt_dur != 0] + 1) / 2 * 2880), 0)
-            src_dur[src_dur != 0] = np.round(((src_dur[src_dur != 0] + 1) / 2 * 2880), 0)
-            tgt_time[tgt_time != 0] = (tgt_time[tgt_time != 0] + 1) / 2 * 1440
-            seq_time[seq_time != 0] = (seq_time[seq_time != 0] + 1) / 2 * 1440
+        for i, (seq_pred, seq_src, seq_tgt) in enumerate(zip(return_dict["tokens"], src, tgt)):
 
             res_dict = {
                 "recover": seq_pred.detach().cpu().numpy(),
                 "target": seq_tgt.detach().cpu().numpy(),
                 "source": seq_src.detach().cpu().numpy(),
-                "seq_time": np.round(seq_time, 0),
-                "duration": np.round(pred_duration.detach().cpu().numpy(), 3),
-                "time": np.round(pred_times.detach().cpu().numpy(), 3),
-                "mode": pred_mode.detach().cpu().numpy(),
-                "tgt_dur": tgt_dur,
-                "tgt_mode": tgt_mode.detach().cpu().numpy(),
-                "tgt_time": np.round(tgt_time, 0),
-                "src_dur": src_dur,
-                "src_mode": src_mode.detach().cpu().numpy(),
             }
+
+            if config.if_include_duration:
+                res_dict["duration"] = np.round(return_dict["durations"][i].detach().cpu().numpy(), 3)
+                res_dict["time"] = np.round(return_dict["time"][i].detach().cpu().numpy(), 3)
+
+                tgt_dur = tgt_cxt["duration"][i].detach().cpu().numpy()
+                tgt_dur[tgt_dur != 0] = np.round(((tgt_dur[tgt_dur != 0] + 1) / 2 * 2880), 0)
+                res_dict["tgt_dur"] = tgt_dur
+
+                src_dur = src_ctx["duration"][i].detach().cpu().numpy()
+                src_dur[src_dur != 0] = np.round(((src_dur[src_dur != 0] + 1) / 2 * 2880), 0)
+                res_dict["src_dur"] = src_dur
+
+                tgt_time = tgt_cxt["time"][i].detach().cpu().numpy()
+                tgt_time[tgt_time != 0] = (tgt_time[tgt_time != 0] + 1) / 2 * 1440
+                res_dict["tgt_time"] = np.round(tgt_time, 0)
+
+                seq_time = src_ctx["time"][i].detach().cpu().numpy()
+                seq_time[seq_time != 0] = (seq_time[seq_time != 0] + 1) / 2 * 1440
+                res_dict["seq_time"] = np.round(seq_time, 0)
+
+            if config.if_include_mode:
+                res_dict["mode"] = return_dict["mode"][i].detach().cpu().numpy()
+                res_dict["tgt_mode"] = tgt_cxt["mode"][i].detach().cpu().numpy()
+                res_dict["src_mode"] = src_ctx["mode"][i].detach().cpu().numpy()
 
             res_dict_ls.append(res_dict)
 
