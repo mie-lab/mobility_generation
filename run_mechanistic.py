@@ -22,7 +22,7 @@ from utils.utils import load_data, setup_seed, load_config, _split_dataset
 from utils.dist_util import load_state_dict
 from sklearn.linear_model import LinearRegression
 from mechanistic.dataloader import load_data_mech
-from mechanistic.models import EPR
+from mechanistic.models import EPR, MarkovDiaryGenerator, DITRAS
 
 from trackintel.geogr import point_haversine_dist
 import powerlaw
@@ -30,7 +30,7 @@ import powerlaw
 
 def get_train_test_mech(sp, all_locs=None):
     sp.sort_values(by=["user_id", "start_day", "start_min"], inplace=True)
-    sp.drop(columns={"started_at", "finished_at"}, inplace=True)
+    # sp.drop(columns={"started_at", "finished_at"}, inplace=True)
     sp["idx"] = sp.groupby("user_id").cumcount().add(1)
 
     # encoder user, 0 reserved for padding
@@ -192,40 +192,110 @@ if __name__ == "__main__":
 
     # estimate user parameters based on train and validation dataset, checked!
     train_vali_data = pd.concat([train_df, vali_df])
+
     param_estimate = train_vali_data.groupby("user_id").apply(get_parameter_estimate).to_dict("index")
     param_jump_length = estimate_jump_length(train_vali_data)
     param_wait_time = estimate_wait_time(train_vali_data)
 
-    # initialize mechanistic model
-    model = EPR(all_locs_df, param_jump_length, param_wait_time)
+    if config.networkName == "epr":
 
-    # test data sequences
-    all_data = pd.concat([train_df, vali_df, test_df])
-    data_test = load_data_mech(batch_size=config.batch_size, data_args=config, split="test", shuffle=False)
+        # initialize mechanistic model
+        model = EPR(all_locs_df, param_jump_length, param_wait_time)
 
-    generated_dict = {"pred": []}
-    for inputs in tqdm(data_test):
-        x, _, x_dict, _ = inputs
+        # test data sequences
+        all_data = pd.concat([train_df, vali_df, test_df])
+        data_test = load_data_mech(batch_size=config.batch_size, data_args=config, split="test", shuffle=False)
 
-        curr_user = x_dict["user"].numpy()[0]
-        curr_idx = x_dict["idx"].numpy()[0]
-        curr_param = param_estimate[curr_user]
+        generated_dict = {"pred": []}
+        for inputs in tqdm(data_test):
+            x, _, x_dict, _ = inputs
 
-        curr_train_seq = all_data.loc[all_data["user_id"] == curr_user, "location_id"].values[:curr_idx]
+            curr_user = x_dict["user"].numpy()[0]
+            curr_idx = x_dict["idx"].numpy()[0]
+            curr_param = param_estimate[curr_user]
 
-        gen_seq, gen_dur = model.simulate(
-            train_seq=curr_train_seq, simulation_param=curr_param, length=config.generate_len
+            curr_train_seq = all_data.loc[all_data["user_id"] == curr_user, "location_id"].values[:curr_idx]
+
+            gen_seq, gen_dur = model.simulate(
+                train_seq=curr_train_seq, simulation_param=curr_param, length=config.generate_len
+            )
+
+            generated_dict["pred"].append(np.array(gen_seq).astype(int))
+
+        filename = os.path.join(
+            config.save_root, f"{config.dataset}_{config.networkName}_generation_{str(timestamp_now)}.json"
+        )
+        fout = open(filename, "a")
+        for recov in generated_dict["pred"]:
+            print(
+                json.dumps({"recover": recov}, cls=NumpyArrayEncoder),
+                file=fout,
+            )
+        fout.close()
+    elif config.networkName == "ditras":
+        train_vali_data.sort_values(by=["user_id", "start_day", "start_min"], inplace=True)
+        # diary
+        mdg = MarkovDiaryGenerator()
+        mdg.fit(train_vali_data)
+
+        # relevance
+        relevance = np.zeros(len(all_locs_df))
+        value_counts = train_vali_data["location_id"].value_counts()
+        for i, location in enumerate(value_counts.index.values):
+            relevance[location - 1] = value_counts.values[i]
+
+        # model
+        model = DITRAS(mdg, all_locs_df, param_jump_length, param_wait_time, relevance=relevance)
+
+        # test data sequences
+        all_data = pd.concat([train_df, vali_df, test_df])
+        data_test = load_data_mech(batch_size=config.batch_size, data_args=config, split="test", shuffle=False)
+
+        res_dict_ls = []
+        for inputs in tqdm(data_test):
+            x, _, x_dict, _ = inputs
+
+            curr_user = x_dict["user"].numpy()[0]
+            curr_idx = x_dict["idx"].numpy()[0]
+            curr_param = param_estimate[curr_user]
+
+            curr_train_seq = all_data.loc[all_data["user_id"] == curr_user, "location_id"].values[:curr_idx]
+
+            # last time
+            current_time = all_data.loc[all_data["user_id"] == curr_user].iloc[curr_idx - 1]["finished_at"]
+            # start from next hour
+            current_time = current_time.replace(microsecond=0, second=0, minute=0) + datetime.timedelta(hours=1)
+
+            gen_seq, gen_dur = model.simulate(
+                train_seq=curr_train_seq,
+                simulation_param=curr_param,
+                length=config.generate_len,
+                start_time=current_time,
+            )
+
+            day = (gen_dur - gen_dur.min().replace(hour=0)).dt.days.values
+
+            dur = ((gen_dur - gen_dur.shift(1)).dt.seconds / 60).values[1:]
+            last_dur = (current_time + datetime.timedelta(hours=config.generate_len) - gen_dur.iloc[-1]).seconds / 60
+            dur = np.append(dur, last_dur)
+
+            time = (gen_dur.dt.hour * 60).values
+
+            res_dict = {"pred": np.array(gen_seq).astype(int), "day": day, "dur": dur, "time": time}
+            res_dict_ls.append(res_dict)
+
+        filename = os.path.join(
+            config.save_root, f"{config.dataset}_{config.networkName}_generation_{str(timestamp_now)}.json"
         )
 
-        generated_dict["pred"].append(np.array(gen_seq).astype(int))
+        fout = open(filename, "a")
+        for res_dict in res_dict_ls:
+            print(json.dumps(res_dict, cls=NumpyArrayEncoder), file=fout)
+        fout.close()
 
-    filename = os.path.join(
-        config.save_root, f"{config.dataset}_{config.networkName}_generation_{str(timestamp_now)}.json"
-    )
-    fout = open(filename, "a")
-    for recov in generated_dict["pred"]:
-        print(
-            json.dumps({"recover": recov}, cls=NumpyArrayEncoder),
-            file=fout,
-        )
-    fout.close()
+
+class NumpyArrayEncoder(JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return JSONEncoder.default(self, obj)

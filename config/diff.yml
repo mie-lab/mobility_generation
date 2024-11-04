@@ -15,9 +15,9 @@ misc:
 
   seed: 101
   # 
-  if_embed_context: False
-  if_include_duration: False
-  if_include_mode: True
+  if_embed_context: True
+  if_include_duration: True
+  if_include_mode: False
   
   batch_size: 512
   microbatch: 64
@@ -53,7 +53,7 @@ diffusion:
 
 model:
   # 
-  num_layers: 6
+  num_layers: 2
   hidden_size: 512
   num_attention_heads: 8
   dropout: 0.1

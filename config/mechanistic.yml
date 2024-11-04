@@ -10,10 +10,13 @@ misc:
   num_workers: 0
   generate_len: 50
 
-  seed: 101
+  seed: 103
+
+  # for ditras
+  generate_len: 336
 
 model:
-  networkName: container
+  networkName: ditras
 
 dataset:
   data_dir: ./data/diff
