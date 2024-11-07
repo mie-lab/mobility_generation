@@ -23,6 +23,7 @@ from utils.dist_util import load_state_dict
 from sklearn.linear_model import LinearRegression
 from mechanistic.dataloader import load_data_mech
 from mechanistic.models import EPR, MarkovDiaryGenerator, DITRAS
+from mechanistic.timegeo import Time_geo
 
 from trackintel.geogr import point_haversine_dist
 import powerlaw
@@ -282,6 +283,61 @@ if __name__ == "__main__":
             time = (gen_dur.dt.hour * 60).values
 
             res_dict = {"pred": np.array(gen_seq).astype(int), "day": day, "dur": dur, "time": time}
+            res_dict_ls.append(res_dict)
+
+        filename = os.path.join(
+            config.save_root, f"{config.dataset}_{config.networkName}_generation_{str(timestamp_now)}.json"
+        )
+
+        fout = open(filename, "a")
+        for res_dict in res_dict_ls:
+            print(json.dumps(res_dict, cls=NumpyArrayEncoder), file=fout)
+        fout.close()
+    elif config.networkName == "timegeo":
+        # get p_t
+        train_vali_data["hour"] = train_vali_data["start_min"] // 60
+        freq = train_vali_data.groupby("hour").size()
+        p_t = (freq / freq.sum()).values
+
+        timegeo = Time_geo(all_locs=all_locs_df, p_t=p_t)
+
+        # test data sequences
+        all_data = pd.concat([train_df, vali_df, test_df])
+        data_test = load_data_mech(batch_size=config.batch_size, data_args=config, split="test", shuffle=False)
+
+        res_dict_ls = []
+        for inputs in tqdm(data_test):
+            x, _, x_dict, _ = inputs
+
+            curr_user = x_dict["user"].numpy()[0]
+            curr_idx = x_dict["idx"].numpy()[0]
+            curr_param = param_estimate[curr_user]
+
+            curr_train_seq = all_data.loc[all_data["user_id"] == curr_user, "location_id"].values[:curr_idx]
+
+            # last time
+            current_time = all_data.loc[all_data["user_id"] == curr_user].iloc[curr_idx - 1]["finished_at"]
+            # start from next hour
+            current_time = current_time.replace(microsecond=0, second=0, minute=0) + datetime.timedelta(hours=1)
+
+            diary = timegeo.simulate(
+                train_seq=curr_train_seq,
+                simulation_param=curr_param,
+                length=config.generate_len,
+                start_time=current_time,
+            )
+
+            day = (diary["time"] - diary["time"].min().replace(hour=0)).dt.days.values
+
+            dur = ((diary["time"] - diary["time"].shift(1)).dt.seconds / 60).values[1:]
+            last_dur = (
+                current_time + datetime.timedelta(hours=config.generate_len) - diary["time"].iloc[-1]
+            ).seconds / 60
+            dur = np.append(dur, last_dur)
+
+            time = (diary["time"].dt.hour * 60).values
+
+            res_dict = {"pred": np.array(diary["loc"]).astype(int), "day": day, "dur": dur, "time": time}
             res_dict_ls.append(res_dict)
 
         filename = os.path.join(
