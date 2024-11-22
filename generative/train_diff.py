@@ -73,7 +73,6 @@ class TrainLoop:
         save_epochs=5,
         use_fp16=False,
         dynamic_alphas=True,
-        train_word_size=4,
         schedule_sampler=None,
         weight_decay=0.0,
         checkpoint_path="",
@@ -117,8 +116,8 @@ class TrainLoop:
         # define learning rate schedule
         self.scheduler = get_sqrt_schedule_with_warmup(
             self.opt,
-            num_warmup_steps=len(self.data) * warmup_epochs / train_word_size,
-            num_training_steps=len(self.data) * self.decay_epochs / train_word_size,
+            num_warmup_steps=len(self.data) * warmup_epochs,
+            num_training_steps=len(self.data) * self.decay_epochs,
             num_cycles=1,
             min_decay=5e-2,
         )
@@ -263,7 +262,7 @@ class TrainLoop:
                 # print(micro_cond.keys())
                 loss_weight = self.get_loss_alphas()
                 compute_losses = functools.partial(
-                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t, loss_weight=loss_weight
+                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t, loss_weight
                 )
 
                 if last_batch or not self.use_ddp:
