@@ -72,6 +72,7 @@ class TrainLoop:
         max_epochs=150,
         save_epochs=5,
         use_fp16=False,
+        dynamic_alphas=True,
         schedule_sampler=None,
         weight_decay=0.0,
         checkpoint_path="",
@@ -92,6 +93,7 @@ class TrainLoop:
         self.lr = lr
         self.ema_rate = ema_rate
         self.log_interval = log_interval
+        self.dynamic_alphas = dynamic_alphas
         self.decay_epochs = decay_epochs
         self.use_fp16 = use_fp16
         self.schedule_sampler = schedule_sampler
@@ -142,6 +144,9 @@ class TrainLoop:
                 logger.warn("Distributed training requires CUDA. Gradients will not be synchronized properly!")
             self.use_ddp = False
             self.ddp_model = self.model
+
+        self.mode_available = self.ddp_model.module.if_include_mode
+        self.time_available = self.ddp_model.module.if_include_duration
 
         self.loaded_epoch = 0
         if load_checkpoint:
@@ -258,8 +263,9 @@ class TrainLoop:
 
             with torch.no_grad():
                 # print(micro_cond.keys())
+                loss_weight = self.get_loss_alphas()
                 compute_losses = functools.partial(
-                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t
+                    self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t, loss_weight=loss_weight
                 )
 
                 if last_batch or not self.use_ddp:
@@ -289,70 +295,73 @@ class TrainLoop:
             loss_weight = {}
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=self.use_fp16):
 
-                if self.ddp_model.module.if_include_mode or self.ddp_model.module.if_include_duration:
-                    with self.ddp_model.no_sync():
-                        grads = []
-                        loss_data = []
-                        # get the representation
-                        with torch.no_grad():
-                            rep, mask = self.ddp_model.module.get_representation(tgt_micro, tgt_ctx_micro)
-                        rep = rep.detach()
-                        rep.requires_grad_()
+                if self.dynamic_alphas:
+                    if self.mode_available or self.time_available:
+                        with self.ddp_model.no_sync():
+                            grads = []
+                            loss_data = []
+                            # get the representation
+                            with torch.no_grad():
+                                rep, mask = self.ddp_model.module.get_representation(tgt_micro, tgt_ctx_micro)
+                            rep = rep.detach()
+                            rep.requires_grad_()
 
-                        # location
-                        self.opt.zero_grad()
-                        loss = self.ddp_model.module.get_loss_location(rep, tgt_micro, mask)
-                        self.ddp_model.reducer.prepare_for_backward(loss)
-                        loss_data.append(loss.mean().data.item())
-                        loss.mean().backward()
-                        grads.append(rep.grad.clone().detach())
-                        rep.grad.data.zero_()
-
-                        # mode
-                        if self.ddp_model.module.if_include_mode:
+                            # location
                             self.opt.zero_grad()
-                            loss = self.ddp_model.module.get_loss_mode(rep, tgt_ctx_micro, mask)
+                            loss = self.ddp_model.module.get_loss_location(rep, tgt_micro, mask)
                             self.ddp_model.reducer.prepare_for_backward(loss)
                             loss_data.append(loss.mean().data.item())
                             loss.mean().backward()
                             grads.append(rep.grad.clone().detach())
                             rep.grad.data.zero_()
 
-                        # duration
-                        if self.ddp_model.module.if_include_duration:
-                            self.opt.zero_grad()
-                            loss = self.ddp_model.module.get_loss_duration(rep, tgt_ctx_micro, mask)
-                            self.ddp_model.reducer.prepare_for_backward(loss)
-                            loss_data.append(loss.mean().data.item())
-                            loss.mean().backward()
-                            grads.append(rep.grad.clone().detach())
-                            rep.grad.data.zero_()
+                            # mode
+                            if self.mode_available:
+                                self.opt.zero_grad()
+                                loss = self.ddp_model.module.get_loss_mode(rep, tgt_ctx_micro, mask)
+                                self.ddp_model.reducer.prepare_for_backward(loss)
+                                loss_data.append(loss.mean().data.item())
+                                loss.mean().backward()
+                                grads.append(rep.grad.clone().detach())
+                                rep.grad.data.zero_()
+
+                            # duration
+                            if self.time_available:
+                                self.opt.zero_grad()
+                                loss = self.ddp_model.module.get_loss_duration(rep, tgt_ctx_micro, mask)
+                                self.ddp_model.reducer.prepare_for_backward(loss)
+                                loss_data.append(loss.mean().data.item())
+                                loss.mean().backward()
+                                grads.append(rep.grad.clone().detach())
+                                rep.grad.data.zero_()
+
+                                self.opt.zero_grad()
+                                loss = self.ddp_model.module.get_loss_time(rep, tgt_ctx_micro, mask)
+                                self.ddp_model.reducer.prepare_for_backward(loss)
+                                loss_data.append(loss.mean().data.item())
+                                loss.mean().backward()
+                                grads.append(rep.grad.clone().detach())
+                                rep.grad.data.zero_()
+
+                            gn = gradient_normalizers(grads, loss_data, "loss+")
+                            grads = [gradsi / gni for gni, gradsi in zip(gn, grads)]
+
+                            sol, _ = MinNormSolver.find_min_norm_element(grads)
+                            loss_weight["loc"] = sol[0]
+                            if self.mode_available:
+                                loss_weight["mode"] = sol[1]
+                                if self.time_available:
+                                    loss_weight["dur"] = sol[2]
+                                    loss_weight["time"] = sol[3]
+                            else:  # only time
+                                loss_weight["dur"] = sol[1]
+                                loss_weight["time"] = sol[2]
 
                             self.opt.zero_grad()
-                            loss = self.ddp_model.module.get_loss_time(rep, tgt_ctx_micro, mask)
-                            self.ddp_model.reducer.prepare_for_backward(loss)
-                            loss_data.append(loss.mean().data.item())
-                            loss.mean().backward()
-                            grads.append(rep.grad.clone().detach())
-                            rep.grad.data.zero_()
-
-                        gn = gradient_normalizers(grads, loss_data, "loss+")
-                        grads = [gradsi / gni for gni, gradsi in zip(gn, grads)]
-
-                        sol, _ = MinNormSolver.find_min_norm_element(grads)
-                        loss_weight["loc"] = sol[0]
-                        if self.ddp_model.module.if_include_mode:
-                            loss_weight["mode"] = sol[1]
-                            if self.ddp_model.module.if_include_duration:
-                                loss_weight["dur"] = sol[2]
-                                loss_weight["time"] = sol[3]
-                        else:
-                            loss_weight["dur"] = sol[1]
-                            loss_weight["time"] = sol[2]
-
-                        self.opt.zero_grad()
+                    else:
+                        loss_weight["loc"] = 1
                 else:
-                    loss_weight["loc"] = 1
+                    loss_weight = self.get_loss_alphas()
 
                 compute_losses = functools.partial(
                     self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t, loss_weight
@@ -379,6 +388,20 @@ class TrainLoop:
         self.opt.step()
         self.opt.zero_grad()
         update_ema(self.ema_params, self.master_params, rate=self.ema_rate)
+
+    def get_loss_alphas(self):
+        if self.mode_available:
+            if self.time_available:
+                loss_weight = {"loc": 1 / 4, "mode": 1 / 4, "dur": 1 / 4, "time": 1 / 4}
+            else:
+                loss_weight = {"loc": 1 / 2, "mode": 1 / 2}
+        else:
+            if self.time_available:
+                loss_weight = {"loc": 1 / 3, "dur": 1 / 3, "time": 1 / 3}
+            else:
+                loss_weight = {"loc": 1}
+
+        return loss_weight
 
     def log_grad_norm(self, total_norm):
         logger.logkv_mean("grad_norm", total_norm)

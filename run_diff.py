@@ -101,6 +101,7 @@ def main():
         schedule_sampler=schedule_sampler,
         weight_decay=config.weight_decay,
         decay_epochs=config.decay_epochs,
+        dynamic_alphas=config.dynamic_alphas,
         max_epochs=config.max_epochs,
         save_epochs=config.save_epochs,
         warmup_epochs=config.warmup_epochs,

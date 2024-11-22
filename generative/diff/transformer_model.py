@@ -585,9 +585,7 @@ class TransformerNetModel(nn.Module):
         time_pred = self.get_time_prediction(rep)
         return prediction_mse_loss(time_pred, tgt_cxt["time"], mask=mask)
 
-    def forward(
-        self, src, tgt, src_ctx, tgt_cxt, t, loss_weight={"loc": 1 / 4, "mode": 1 / 4, "dur": 1 / 4, "time": 1 / 4}
-    ):
+    def forward(self, src, tgt, src_ctx, tgt_cxt, t, loss_weight):
         """Compute training losses"""
 
         # encoding
@@ -620,23 +618,27 @@ class TransformerNetModel(nn.Module):
         # token nll loss
         logits = self.get_logits(z_0)
         terms["head_nll"] = token_discrete_loss(logits, tgt, mask=mask, label_smoothing=0.1)
-        terms["loss"] = terms["mse"] + terms["head_nll"] * loss_weight["loc"]
+        terms["loss"] = terms["mse"]
+
+        consistency_loss = terms["head_nll"] * loss_weight["loc"]
 
         # mode token nll loss
         if self.if_include_mode:
             mode_pred = self.get_mode_prediction(z_0)
             terms["head_mode"] = token_discrete_loss(mode_pred, tgt_cxt["mode"], mask=mask, label_smoothing=0.1)
-            terms["loss"] += terms["head_mode"] * loss_weight["mode"]
+            consistency_loss += terms["head_mode"] * loss_weight["mode"]
 
         # duration mse loss
         if self.if_include_duration:
             duration_pred = self.get_duration_prediction(z_0)
             terms["head_mse"] = prediction_mse_loss(duration_pred, tgt_cxt["duration"], mask=mask)
-            terms["loss"] += terms["head_mse"] * loss_weight["dur"]
+            consistency_loss += terms["head_mse"] * loss_weight["dur"]
 
             time_pred = self.get_time_prediction(z_0)
             terms["time_mse"] = prediction_mse_loss(time_pred, tgt_cxt["time"], mask=mask)
-            terms["loss"] += terms["time_mse"] * loss_weight["time"]
+            consistency_loss += terms["time_mse"] * loss_weight["time"]
+
+        terms["loss"] += consistency_loss
 
         return terms
 
@@ -723,12 +725,12 @@ class TransformerNetModel(nn.Module):
         print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
         print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
 
-        # Create AdamW optimizer and use the fused version if it is available
-        fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
+        # Create Adam optimizer and use the fused version if it is available
+        fused_available = "fused" in inspect.signature(torch.optim.Adam).parameters
         use_fused = fused_available and device_type == "cuda"
         extra_args = dict(fused=True) if use_fused else dict()
-        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
-        print(f"using fused AdamW: {use_fused}")
+        optimizer = torch.optim.Adam(optim_groups, lr=learning_rate, betas=betas, **extra_args)
+        print(f"using fused Adam: {use_fused}")
 
         return optimizer
 
