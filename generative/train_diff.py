@@ -73,6 +73,7 @@ class TrainLoop:
         save_epochs=5,
         use_fp16=False,
         dynamic_alphas=True,
+        train_word_size=4,
         schedule_sampler=None,
         weight_decay=0.0,
         checkpoint_path="",
@@ -114,13 +115,10 @@ class TrainLoop:
             weight_decay=weight_decay, learning_rate=self.lr, betas=(0.9, 0.98), device_type="cuda"
         )
         # define learning rate schedule
-        if load_checkpoint:
-            warmup_epochs = 0
-
         self.scheduler = get_sqrt_schedule_with_warmup(
             self.opt,
-            num_warmup_steps=len(self.data) * warmup_epochs,
-            num_training_steps=len(self.data) * self.decay_epochs,
+            num_warmup_steps=len(self.data) * warmup_epochs / train_word_size,
+            num_training_steps=len(self.data) * self.decay_epochs / train_word_size,
             num_cycles=1,
             min_decay=5e-2,
         )
@@ -160,10 +158,10 @@ class TrainLoop:
                 bf.join(self.checkpoint_path, file_name), map_location={"cuda:0": f"{get_device()}"}
             )
             self.ema_params = self._state_dict_to_master_params(checkpoint["ema"])
-            self.model.load_state_dict(checkpoint["model"])
+            self.model.load_state_dict(checkpoint["model"], strict=False)
+            self.scheduler.load_state_dict(checkpoint["lr_schedule"])
             if load_opt:
                 self.opt.load_state_dict(checkpoint["optimizer"])
-                self.scheduler.load_state_dict(checkpoint["lr_schedule"])
 
     def run_loop(self):
         previous_loss = np.inf
@@ -438,7 +436,15 @@ class TrainLoop:
         return state_dict
 
     def _state_dict_to_master_params(self, state_dict):
-        return [state_dict[name] for name, _ in self.model.named_parameters()]
+        return_ls = []
+        for name, paras in self.model.named_parameters():
+            try:
+                load_state = state_dict[name]
+            except KeyError:
+                load_state = paras
+            return_ls.append(load_state)
+
+        return return_ls
 
 
 def update_ema(target_params, source_params, rate=0.99):

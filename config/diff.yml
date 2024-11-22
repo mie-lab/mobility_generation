@@ -3,7 +3,7 @@ misc:
 
   wandb_name: test
   split: train
-  dataset_variation: tiny 
+  dataset_variation: all 
   level: 14
   src_min_days: 14
   tgt_min_days: 7
@@ -18,7 +18,7 @@ misc:
   if_embed_context: True
   if_include_duration: False
   if_include_mode: False
-  dynamic_alphas: False
+  dynamic_alphas: True
   
   batch_size: 512
   microbatch: 64
@@ -54,7 +54,7 @@ diffusion:
 
 model:
   # 
-  num_layers: 2
+  num_layers: 6
   hidden_size: 512
   num_attention_heads: 8
   dropout: 0.1
@@ -76,8 +76,8 @@ optimiser:
   save_epochs: 5
 
   # 
-  load_checkpoint: False
-  checkpoint_path: ./runs/mobis_na_all_layer2_cond_13
+  load_checkpoint: True
+  checkpoint_path: ./runs/ab/mobis_na_layer6_ab_base_ctx_14
   load_opt: True
 
 dataset:
