@@ -75,7 +75,9 @@ class TrainLoop:
         dynamic_alphas=True,
         schedule_sampler=None,
         weight_decay=0.0,
-        checkpoint_path="",
+        save_path="",
+        check_path="",
+        loaded_epoch=150,
         load_checkpoint=False,
         load_opt=True,
         gradient_clipping=-1.0,
@@ -107,7 +109,7 @@ class TrainLoop:
         self.model_params = list(self.model.parameters())
         self.master_params = self.model_params
 
-        self.checkpoint_path = checkpoint_path
+        self.checkpoint_path = save_path
 
         # control learning rate
         self.opt = self.model.configure_optimizers(
@@ -145,17 +147,15 @@ class TrainLoop:
         self.mode_available = self.ddp_model.module.if_include_mode
         self.time_available = self.ddp_model.module.if_include_duration
 
-        self.loaded_epoch = 0
         if load_checkpoint:
-            files = glob.glob(os.path.join(self.checkpoint_path, "*.pt"))
-            self.loaded_epoch = np.max([int(file[-12:].split(".")[0].split("_")[-1]) for file in files])
+            self.loaded_epoch = loaded_epoch
+            # files = glob.glob(os.path.join(check_path, "*.pt"))
+            # self.loaded_epoch = np.max([int(file[-12:].split(".")[0].split("_")[-1]) for file in files])
 
             file_name = f"model_ema_{self.loaded_epoch}.pt"
             logger.log(f"loading model from checkpoint: {file_name}...")
             # load best model for retraining
-            checkpoint = load_state_dict(
-                bf.join(self.checkpoint_path, file_name), map_location={"cuda:0": f"{get_device()}"}
-            )
+            checkpoint = load_state_dict(bf.join(check_path, file_name), map_location={"cuda:0": f"{get_device()}"})
             self.ema_params = self._state_dict_to_master_params(checkpoint["ema"])
             self.model.load_state_dict(checkpoint["model"], strict=False)
             self.scheduler.load_state_dict(checkpoint["lr_schedule"])

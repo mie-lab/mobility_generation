@@ -3,7 +3,7 @@ misc:
 
   wandb_name: test
   split: train
-  dataset_variation: all 
+  dataset_variation: tiny 
   level: 14
   src_min_days: 14
   tgt_min_days: 7
@@ -17,7 +17,7 @@ misc:
   # 
   if_embed_context: True
   if_include_duration: False
-  if_include_mode: False
+  if_include_mode: True
   dynamic_alphas: True
   
   batch_size: 512
@@ -63,7 +63,7 @@ model:
 
 optimiser:
   lr: 0.0004
-  weight_decay: 0.0
+  weight_decay: 0.01
   ema_rate: 0.9999
   gradient_clipping: 1
 
@@ -73,12 +73,13 @@ optimiser:
 
   # training
   max_epochs: 200
-  save_epochs: 5
+  save_epochs: 2
 
   # 
   load_checkpoint: True
-  checkpoint_path: ./runs/ab/mobis_na_layer6_ab_base_ctx_14
-  load_opt: True
+  checkpoint_path: ./runs/cont/base_ctx_200
+  loaded_epoch: 150
+  load_opt: False
 
 dataset:
   data_dir: ./data/diff

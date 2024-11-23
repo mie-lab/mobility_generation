@@ -47,10 +47,7 @@ def main():
     setup_dist()
 
     time_now = int(int(datetime.datetime.now().timestamp()) / 100)
-    if config.load_checkpoint:
-        log_dir = config.checkpoint_path
-    else:
-        log_dir = init_save_path(config, time_now=time_now)
+    log_dir = init_save_path(config, time_now=time_now)
 
     logger.configure(dir=log_dir)
     logger.log("### Creating data loader...")
@@ -105,7 +102,9 @@ def main():
         max_epochs=config.max_epochs,
         save_epochs=config.save_epochs,
         warmup_epochs=config.warmup_epochs,
-        checkpoint_path=log_dir,
+        save_path=log_dir,
+        check_path=config.checkpoint_path,
+        loaded_epoch=config.loaded_epoch,
         load_checkpoint=config.load_checkpoint,
         load_opt=config.load_opt,
         gradient_clipping=config.gradient_clipping,
