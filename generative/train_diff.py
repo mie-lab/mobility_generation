@@ -147,6 +147,7 @@ class TrainLoop:
         self.mode_available = self.ddp_model.module.if_include_mode
         self.time_available = self.ddp_model.module.if_include_duration
 
+        self.loaded_epoch = 0
         if load_checkpoint:
             self.loaded_epoch = loaded_epoch
             # files = glob.glob(os.path.join(check_path, "*.pt"))
@@ -359,6 +360,11 @@ class TrainLoop:
                         loss_weight["loc"] = 1
                 else:
                     loss_weight = self.get_loss_alphas()
+
+                logger.logkv_mean("alpha_loc_mean", loss_weight["loc"])
+                logger.logkv_mean("alpha_mode_mean", loss_weight["mode"])
+                logger.logkv("alpha_loc", loss_weight["loc"])
+                logger.logkv("alpha_mode", loss_weight["mode"])
 
                 compute_losses = functools.partial(
                     self.ddp_model, src_micro, tgt_micro, src_ctx_micro, tgt_ctx_micro, t, loss_weight
