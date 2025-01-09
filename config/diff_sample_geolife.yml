@@ -1,0 +1,23 @@
+misc:
+  dataset: geolife
+
+  dataset_variation: geolife
+
+  # normal
+  clamping: False
+  decoding_steps: 200
+  decoding_rescaling_factor: 1
+  # 
+  split: test
+
+  model_path: ./runs/geolife_na_17349652
+  trained_model_name: model_ema_4.pt
+
+  seed: 101
+  
+  batch_size: 128
+  num_workers: 0
+
+dataset:
+  data_dir: ./data
+  save_root: ./runs

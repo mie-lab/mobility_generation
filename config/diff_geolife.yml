@@ -1,0 +1,81 @@
+misc:
+  dataset: geolife
+
+  wandb_name: test
+  split: train
+  dataset_variation: geolife 
+  src_min_days: 7
+  tgt_min_days: 3
+
+  # geolife: 13116 -> 13120 
+  max_location: 13120  
+  max_mode: 4  # 3+1 padding
+
+  seed: 101
+  # 
+  if_embed_context: False # no poi information
+  if_include_duration: True
+  if_include_mode: True
+  dynamic_alphas: True
+  
+  batch_size: 256
+  microbatch: 64
+  log_interval: 10
+  num_workers: 0
+  
+fp16:
+  use_fp16: True
+
+
+embedding:
+  input_dims: 128
+  poi_dim: 32
+
+sampler:
+  schedule_sampler: lossaware
+
+diffusion:
+  networkName: na
+  rescale_timesteps: True
+  diffusion_steps: 2000
+  noise_schedule: sqrt
+  rescaling_factor: 1
+
+  rounding_loss: True
+  self_cond: False
+
+  decoding_steps: 20
+  decoding_noise_schedule: sqrt
+  decoding_rescaling_factor: 1
+  clamping: False
+
+model:
+  # 
+  num_layers: 6
+  hidden_size: 512
+  num_attention_heads: 8
+  dropout: 0.1
+
+optimiser:
+  lr: 0.0004
+  weight_decay: 0.01
+  ema_rate: 0.9999
+  gradient_clipping: 1
+
+  # for warmup
+  warmup_epochs: 5
+  decay_epochs: 250
+
+  # training
+  max_epochs: 250
+  save_epochs: 2
+
+  # 
+  load_checkpoint: False
+  checkpoint_path: ./runs/cont/base_ctx_200
+  loaded_epoch: 150
+  load_opt: False
+
+dataset:
+  data_dir: ./data
+  save_root: ./runs
