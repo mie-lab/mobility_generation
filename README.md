@@ -14,7 +14,7 @@ This code has been tested on
 
 To create a virtual environment and install the required dependences please run:
 ```shell
-    git clone https://github.com/mie-lab/mobility_generation
+    git clone --recurse-submodules https://github.com/mie-lab/mobility_generation
     cd mobility_generation
     conda env create -f environment.yml
     conda activate mobility_generation
@@ -54,33 +54,29 @@ The results in the paper are obtained from the MOBIS dataset that are not public
 ### 3. Preprocess the dataset
 - run 
 ```shell
-    python preprocess\10_geolife.py --epsilon 20
+python preprocess\10_geolife.py --epsilon 20
 ```
 for obtaining the staypoints and location sequences for the geolife dataset. Note that the locations are directly generated from user tracking data, without the s2geometry projection. The process takes 15-30min. `loc_geolife.csv` and `sp_geolife_all.csv` will be created under `data/` folder.
 
 - run 
 ```shell
-    python preprocess/11_generate_data_geolife.py --src_min_days 7 --src_max_days 21 --tgt_min_days 3 
+python preprocess/11_generate_data_geolife.py --src_min_days 7 --src_max_days 21 --tgt_min_days 3 
 ```
 for obtaining the train, validation, and test staypoint sequences (source sequence and target sequences). Due to the data quality of OSM at the tracking period, we choose not to attached POIs to the locations. `train_7_3_geolife.pk`, `valid_7_3_geolife.csv`, and `test_7_3_geolife.pk` will be created under `data/` folder.
 
 ### 4. Run the MobilityGen model
 - Configure the network parameters in `config/diff_geolife.yml`, and run 
 ```shell
-    python run_diff.py --config config/diff_geolife.yml
+python run_diff.py --config config/diff_geolife.yml
 ```
 for starting the training process. 
-- Alternatively, specify the number of GPUs with `nproc_per_node` for training with Distributed Data Parallel:
-```shell
-    python -m torch.distributed.launch --nproc_per_node=1 run_diff.py --config config/diff_geolife.yml
-```
 
 The configuration of the current run, the network paramters and the log information will be stored under `run/` folder.
 
 ### 5. Simulate sequences with trained MobilityGen model
 With a trained model, new sequences can be obtained with the parameters defined in `config/diff_sample_geolife.yml`. In the config file, specify the path and name of the trained model, and run 
 ```shell
-    python run_diff_sample.py --config config/diff_sample_geolife.yml
+python run_diff_sample.py --config config/diff_sample_geolife.yml
 ```
 for starting the simulation process. Simulated traces will be stored json format under `run/` folder.
 
