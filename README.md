@@ -21,9 +21,9 @@ To create a virtual environment and install the required dependences please run:
     pip install -e .
     pip install -e improved-diffusion
 ```
-in your working terminal. The **MobilityGen** implementation is built on top of the improved-diffusion package by https://github.com/openai/improved-diffusion.
+in your working terminal. Installation time varies by hardware; it's typically <30 minutes on a standard dev machine. The **MobilityGen** implementation is built on top of the improved-diffusion package by https://github.com/openai/improved-diffusion.
 
-For projecting locations into s2grid, the s2geometry Python package needs to be build from source and available in the virtual environment. Check the installation guide in https://github.com/google/s2geometry.
+To project locations into an S2 grid, you need the s2geometry Python bindings built from source and available in your environment. Please follow the official instructions: https://github.com/google/s2geometry.
 
 ## Folder structure
 
@@ -56,7 +56,7 @@ The results in the paper are obtained from the MOBIS dataset that are not public
 ```shell
 python preprocess\10_geolife.py --epsilon 20
 ```
-for obtaining the staypoints and location sequences for the geolife dataset. Note that the locations are directly generated from user tracking data, without the s2geometry projection. The process takes 15-30min. `loc_geolife.csv` and `sp_geolife_all.csv` will be created under `data/` folder.
+for obtaining the staypoints and location sequences for the geolife dataset. Note that the locations are directly generated from user tracking data, without the s2geometry projection. The process takes 15 - 30 minutes. `loc_geolife.csv` and `sp_geolife_all.csv` will be created under `data/` folder.
 
 - run 
 ```shell
@@ -69,7 +69,7 @@ for obtaining the train, validation, and test staypoint sequences (source sequen
 ```shell
 python run_diff.py --config config/diff_geolife.yml
 ```
-for starting the training process. 
+for starting the training process. On a desktop with a single GeForce RTX 3090, one epoch typically takes ~2.5 minutes. 
 
 The configuration of the current run, the network paramters and the log information will be stored under `run/` folder.
 
