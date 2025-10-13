@@ -54,7 +54,7 @@ The results in the paper are obtained from the MOBIS dataset that are not public
 ### 3. Preprocess the dataset
 - run 
 ```shell
-python preprocess\10_geolife.py --epsilon 20
+python preprocess/10_geolife.py --epsilon 20
 ```
 for obtaining the staypoints and location sequences for the geolife dataset. Note that the locations are directly generated from user tracking data, without the s2geometry projection. The process takes 15 - 30 minutes. `loc_geolife.csv` and `sp_geolife_all.csv` will be created under `data/` folder.
 
