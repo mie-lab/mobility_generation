@@ -2,7 +2,7 @@
 
 This repository represents the implementation of the paper:
 
-## [Deep Generative Model for Human Mobility Behavior]
+## Deep Generative Model for Human Mobility Behavior
 
 ![flowchart](evaluate/figures/overview.png?raw=True)
 
