@@ -2,9 +2,7 @@
 
 This repository represents the implementation of the paper:
 
-## [Deep Generative Model for Human Mobility Behavior](https://doi.org/10.48550/arXiv.2510.06473)
-[Ye Hong](https://scholar.google.com/citations?user=dnaRSnwAAAAJ&hl=en), [Yatao Zhang](https://frs.ethz.ch/people/researchers/yatao-zhang.html), [Konrad Schindler](https://prs.igp.ethz.ch/group/people/person-detail.schindler.html), [Martin Raubal](https://raubal.ethz.ch/)\
-| [MIE, ETH Zurich](https://gis.ethz.ch/en/) | [FRS, Singapore-​ETH Centre](https://frs.ethz.ch/) | [PRS, ETH Zurich](https://prs.igp.ethz.ch/) |
+## [Deep Generative Model for Human Mobility Behavior]
 
 ![flowchart](evaluate/figures/overview.png?raw=True)
 
@@ -81,20 +79,4 @@ python run_diff_sample.py --config config/diff_sample_geolife.yml
 for starting the simulation process. Simulated traces will be stored json format under `run/` folder.
 
 ## Contact
-If you have any questions, please let me know: 
-- Ye Hong {hongy@ethz.ch}
-
-## Citation
-If you find this code useful for your work or use it in your project, please consider citing:
-
-```shell
-
-@article{hong_deep_2025,
-  title   = {Deep Generative Model for Human Mobility Behavior},
-  journal = {arXiv preprint},
-  author  = {Hong, Ye and Zhang, Yatao and Schindler, Konrad and Raubal, Martin},
-  year    = {2025},
-  doi     = {10.48550/arXiv.2510.06473}
-}
-
-```
+[Contact information hidden for peer-review]
